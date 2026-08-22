@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-MZ" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll Tech Mz — Fintech de Salários & Automação ERP</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        h1, h2, h3, h4 {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased overflow-x-hidden">
+
+    <!-- Header / Navbar -->
+    <header class="fixed top-0 left-0 w-full bg-slate-950/80 backdrop-blur-md border-b border-white/5 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-blue-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-500/20">
+                    P
+                </div>
+                <div>
+                    <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">Payroll Tech <span class="text-indigo-400">Mz</span></span>
+                    <p class="text-[9px] uppercase tracking-widest text-slate-500 font-bold">Fintech de Salários</p>
+                </div>
+            </div>
+            
+            <nav class="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-300">
+                <a href="#funcionalidades" class="hover:text-white transition-colors">Funcionalidades</a>
+                <a href="#compliance" class="hover:text-white transition-colors">Lei 13/2023</a>
+                <a href="#precos" class="hover:text-white transition-colors">Planos & Preços</a>
+                <a href="#contacto" class="hover:text-white transition-colors">Contacto</a>
+            </nav>
+
+            <div class="flex items-center gap-4">
+                <a href="/login" class="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-500/20 transition-all hover:-translate-y-0.5">
+                    Entrar no Sistema ⚡
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="relative pt-36 pb-20 md:pt-48 md:pb-32 overflow-hidden">
+        <!-- Ambient Neon Glow Effects -->
+        <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+        <div class="absolute top-1/3 left-1/4 w-[300px] h-[300px] bg-emerald-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center space-y-8">
+            <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-xs font-semibold text-indigo-400 tracking-wide">
+                <span class="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+                Revolução no Processamento Salarial em Moçambique
+            </span>
+            
+            <h1 class="text-4xl sm:text-5xl md:text-6xl font-black tracking-tight max-w-4xl mx-auto leading-tight text-white">
+                Automatize a sua Folha de Salários com <span class="bg-gradient-to-r from-indigo-400 via-blue-400 to-emerald-400 bg-clip-text text-transparent">Piloto Automático</span>
+            </h1>
+            
+            <p class="text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+                Liquide os ordenados da sua empresa instantaneamente via <b>M-Pesa, e-Mola ou Millennium BIM</b>. Totalmente integrado com a nova Lei do Trabalho (Lei 13/2023) e geração automática de guias de impostos (IRPS & INSS).
+            </p>
+
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+                <a href="/login" class="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold rounded-xl shadow-xl shadow-indigo-500/25 transition-all text-sm flex items-center justify-center gap-2 hover:-translate-y-0.5">
+                    Iniciar Demonstração Gratuita
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                </a>
+                <a href="#funcionalidades" class="w-full sm:w-auto px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold rounded-xl transition-all text-sm">
+                    Ver Funcionalidades
+                </a>
+            </div>
+
+            <!-- Dashboard Preview Card Mockup -->
+            <div class="pt-12 max-w-5xl mx-auto">
+                <div class="rounded-2xl border border-white/10 bg-slate-900/40 p-4 shadow-2xl backdrop-blur-md relative">
+                    <div class="absolute -top-3 left-6 flex gap-1.5">
+                        <span class="w-3 h-3 rounded-full bg-red-500"></span>
+                        <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+                        <span class="w-3 h-3 rounded-full bg-green-500"></span>
+                    </div>
+                    <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80" alt="Interface do Sistema" class="rounded-lg w-full object-cover border border-white/5 opacity-90 h-64 sm:h-96">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="funcionalidades" class="py-20 border-t border-white/5 relative">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto space-y-4 mb-16">
+                <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Tudo o que precisa para a sua Contabilidade & RH</h2>
+                <p class="text-slate-400">Uma plataforma integrada que elimina o trabalho manual e garante zero erros de cálculo fiscal.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="p-8 rounded-2xl border border-white/5 bg-slate-900/30 space-y-4 hover:border-indigo-500/20 transition-all">
+                    <div class="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 text-xl font-bold">
+                        ⚡
+                    </div>
+                    <h3 class="text-xl font-bold text-white">Dispersão Automática (Fintech)</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">
+                        Conecte a sua conta corporativa Millennium BIM e liquide todos os ordenados diretamente para as carteiras móveis dos funcionários (M-Pesa e e-Mola) com um só clique.
+                    </p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="p-8 rounded-2xl border border-white/5 bg-slate-900/30 space-y-4 hover:border-indigo-500/20 transition-all">
+                    <div class="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl font-bold">
+                        📋
+                    </div>
+                    <h3 class="text-xl font-bold text-white">Auditoria da Lei nº 13/2023</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">
+                        O sistema avalia os contratos laborais em tempo real, alertando para prazos de avisos prévios de caducidade, limites de períodos de experiência e conformidade tributária.
+                    </p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="p-8 rounded-2xl border border-white/5 bg-slate-900/30 space-y-4 hover:border-indigo-500/20 transition-all">
+                    <div class="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 text-xl font-bold">
+                        📊
+                    </div>
+                    <h3 class="text-xl font-bold text-white">Retenções & Guias Oficiais</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">
+                        Cálculo preciso e instantâneo do IRPS (com base em dependentes) e INSS (3% trabalhador, 4% entidade patronal). Exportações fáceis para folhas de salários e recibos PDF individuais.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Compliance / Law section -->
+    <section id="compliance" class="py-20 bg-slate-900/40 border-t border-white/5 relative">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                <div class="space-y-6">
+                    <span class="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-400 tracking-wide">
+                        Conformidade Fiscal Moçambicana
+                    </span>
+                    <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
+                        Evite Multas Fiscais e Processos Laborais Dolosos
+                    </h2>
+                    <p class="text-slate-400 leading-relaxed">
+                        A nova Lei do Trabalho de Moçambique (Lei nº 13/2023) introduziu critérios rigorosos para contratação a prazo e prazos peremptórios para emissão de avisos prévios de caducidade contratual.
+                    </p>
+                    <div class="space-y-3">
+                        <div class="flex items-start gap-3">
+                            <span class="text-emerald-400 font-bold">✓</span>
+                            <p class="text-sm text-slate-300"><b>Auditor Inteligente</b>: Verifica as datas de início e término contratual para prevenir renovações tácitas irregulares.</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-emerald-400 font-bold">✓</span>
+                            <p class="text-sm text-slate-300"><b>Tratamento de Dependentes no IRPS</b>: Deduz as parcelas corretas em conformidade com as regras de tabelas de retenção na fonte.</p>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-emerald-400 font-bold">✓</span>
+                            <p class="text-sm text-slate-300"><b>Dedução Automática de Vales</b>: Facilita o controle de adiantamentos no ERP com amortização direta na folha de salários.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-slate-950 border border-white/10 p-8 rounded-2xl shadow-xl space-y-6">
+                    <h3 class="text-xl font-bold text-white border-b border-white/10 pb-4">Simulador de Conformidade Legal</h3>
+                    <div class="space-y-4 text-sm font-mono text-slate-300">
+                        <div class="flex justify-between border-b border-white/5 pb-2">
+                            <span>Tipo de Contrato:</span>
+                            <span class="text-indigo-400">Prazo Certo</span>
+                        </div>
+                        <div class="flex justify-between border-b border-white/5 pb-2">
+                            <span>Período de Experiência:</span>
+                            <span class="text-indigo-400">Até 30 dias</span>
+                        </div>
+                        <div class="flex justify-between border-b border-white/5 pb-2">
+                            <span>Prazo de Aviso Prévio:</span>
+                            <span class="text-emerald-400">30 dias mínimos (Art. 41)</span>
+                        </div>
+                        <div class="flex justify-between pb-2">
+                            <span>Retenção INSS:</span>
+                            <span class="text-emerald-400">3.00% (Empregado) + 4.00% (Empresa)</span>
+                        </div>
+                        <div class="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs leading-relaxed">
+                            💡 <b>Análise do Sistema</b>: Contrato regularizado e mapeado em tempo real com alertas ativos de expiração visualizados no painel do administrador.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="precos" class="py-20 border-t border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto space-y-4 mb-16">
+                <h2 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Planos Adequados ao Seu Negócio</h2>
+                <p class="text-slate-400">Quer seja uma Startup iniciando operações ou um Bureau de Outsourcing gerindo centenas de empresas clientes.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <!-- Bronze -->
+                <div class="p-6 rounded-2xl border border-white/5 bg-slate-900/30 space-y-6 flex flex-col justify-between">
+                    <div class="space-y-4">
+                        <span class="text-xs font-bold text-amber-500 uppercase tracking-widest">Bronze</span>
+                        <h3 class="text-2xl font-bold text-white">1 500 MT <span class="text-xs text-slate-500 font-normal">/mês</span></h3>
+                        <p class="text-xs text-slate-400">Para microempresas que buscam conformidade e cálculos fiscais automáticos.</p>
+                        <div class="space-y-2 text-xs border-t border-white/5 pt-4">
+                            <p class="text-slate-300">✓ Até 5 colaboradores</p>
+                            <p class="text-slate-300">✓ Processamento de IRPS/INSS</p>
+                            <p class="text-slate-300">✓ Emissão de Recibos em PDF</p>
+                        </div>
+                    </div>
+                    <a href="/login" class="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold rounded-lg text-xs text-center block transition-all">Começar Agora</a>
+                </div>
+
+                <!-- Silver -->
+                <div class="p-6 rounded-2xl border border-white/5 bg-slate-900/30 space-y-6 flex flex-col justify-between">
+                    <div class="space-y-4">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Silver</span>
+                        <h3 class="text-2xl font-bold text-white">3 500 MT <span class="text-xs text-slate-500 font-normal">/mês</span></h3>
+                        <p class="text-xs text-slate-400">Para pequenas empresas com necessidades de integração móvel inicial.</p>
+                        <div class="space-y-2 text-xs border-t border-white/5 pt-4">
+                            <p class="text-slate-300">✓ Até 25 colaboradores</p>
+                            <p class="text-slate-300">✓ Envio em Lote via M-Pesa</p>
+                            <p class="text-slate-300">✓ Gestão de Adiantamentos (Vales)</p>
+                        </div>
+                    </div>
+                    <a href="/login" class="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold rounded-lg text-xs text-center block transition-all">Começar Agora</a>
+                </div>
+
+                <!-- Gold -->
+                <div class="p-6 rounded-2xl border border-indigo-500/30 bg-slate-900/50 shadow-lg shadow-indigo-500/5 space-y-6 flex flex-col justify-between relative">
+                    <span class="absolute -top-3 right-6 px-2 py-0.5 rounded-full bg-indigo-500 text-[9px] font-bold text-white uppercase tracking-wider">Mais Popular</span>
+                    <div class="space-y-4">
+                        <span class="text-xs font-bold text-yellow-500 uppercase tracking-widest">Gold</span>
+                        <h3 class="text-2xl font-bold text-white">7 500 MT <span class="text-xs text-slate-500 font-normal">/mês</span></h3>
+                        <p class="text-xs text-slate-400">Ideal para médias empresas com foco em automatização integral de RH.</p>
+                        <div class="space-y-2 text-xs border-t border-white/5 pt-4">
+                            <p class="text-slate-300">✓ Até 100 colaboradores</p>
+                            <p class="text-slate-300">✓ Conexão Bancária Primária</p>
+                            <p class="text-slate-300">✓ Alertas de Contratos da Lei 13</p>
+                        </div>
+                    </div>
+                    <a href="/login" class="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white font-bold rounded-lg text-xs text-center block transition-all">Começar Agora</a>
+                </div>
+
+                <!-- Platinum -->
+                <div class="p-6 rounded-2xl border border-white/5 bg-slate-900/30 space-y-6 flex flex-col justify-between">
+                    <div class="space-y-4">
+                        <span class="text-xs font-bold text-emerald-400 uppercase tracking-widest">Platinum</span>
+                        <h3 class="text-2xl font-bold text-white">Custom <span class="text-xs text-slate-500 font-normal">/mês</span></h3>
+                        <p class="text-xs text-slate-400">Para grandes corporações e escritórios de contabilidade terceirizada.</p>
+                        <div class="space-y-2 text-xs border-t border-white/5 pt-4">
+                            <p class="text-slate-300">✓ Colaboradores ilimitados</p>
+                            <p class="text-slate-300">✓ Piloto Automático Completo</p>
+                            <p class="text-slate-300">✓ API Aberta & Suporte Dedicado</p>
+                        </div>
+                    </div>
+                    <a href="/login" class="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold rounded-lg text-xs text-center block transition-all font-semibold">Contactar Vendas</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Form -->
+    <section id="contacto" class="py-20 bg-slate-900/20 border-t border-white/5">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+            <div class="text-center space-y-4">
+                <h2 class="text-3xl font-extrabold text-white tracking-tight">Fale com os Nossos Especialistas</h2>
+                <p class="text-slate-400 text-sm">Preencha o formulário e tenha uma demonstração guiada gratuita de 15 minutos focada no seu modelo de negócio.</p>
+            </div>
+
+            <form class="space-y-4 bg-slate-900/40 p-8 rounded-2xl border border-white/5" onsubmit="event.preventDefault(); alert('Mensagem enviada com sucesso! Um consultor entrará em contacto em breve.');">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Nome Completo</label>
+                        <input type="text" required placeholder="Gerson Cumbane" class="w-full bg-slate-950 border border-white/10 focus:border-indigo-500 p-3 rounded-xl text-sm outline-none transition-colors">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Email Corporativo</label>
+                        <input type="email" required placeholder="gerson@suaempresa.co.mz" class="w-full bg-slate-950 border border-white/10 focus:border-indigo-500 p-3 rounded-xl text-sm outline-none transition-colors">
+                    </div>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Telemóvel (Moçambique)</label>
+                    <input type="tel" required placeholder="+258 86 139 0061" class="w-full bg-slate-950 border border-white/10 focus:border-indigo-500 p-3 rounded-xl text-sm outline-none transition-colors">
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Como podemos ajudar?</label>
+                    <textarea rows="4" placeholder="Quero integrar o processamento de salários da minha equipa com o M-Pesa." class="w-full bg-slate-950 border border-white/10 focus:border-indigo-500 p-3 rounded-xl text-sm outline-none transition-colors resize-none"></textarea>
+                </div>
+                <button type="submit" class="w-full py-4 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white font-bold rounded-xl text-sm shadow-lg transition-all hover:-translate-y-0.5 cursor-pointer">
+                    Solicitar Demonstração Gratuita ⚡
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/5 py-12 bg-slate-950">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center font-bold text-white text-sm">P</div>
+                <span class="font-extrabold text-sm tracking-tight text-white">Payroll Tech Mz</span>
+            </div>
+            <p class="text-xs text-slate-500">
+                &copy; 2026 Payroll Tech Mz Lda. Todos os direitos reservados. Operações financeiras autorizadas em parceria com o Banco Millennium BIM e operadoras de telefonia de Moçambique.
+            </p>
+        </div>
+    </footer>
+
+</body>
+</html>

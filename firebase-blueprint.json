@@ -1,0 +1,24 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System login user registered through Firebase Authentication",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth unique UID" },
+        "email": { "type": "string", "description": "Email address used for sign-in" },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN_PAYROLL", "CLIENTE_EMPRESA"], "description": "Role of the user account" },
+        "companyId": { "type": "string", "description": "ID of the associated client company (optional if Super Admin)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "status": { "type": "string", "enum": ["ativo", "suspenso"], "description": "Whether the user account is active" }
+      },
+      "required": ["uid", "email", "role", "createdAt", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User login accounts and profiles synchronized with Firebase Authentication"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Check if user is super admin (Admin concept check)
+    function isSuperAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // User entity validator
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt', 'status'])
+        && data.keys().size() == 5
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 256
+        && data.role in ['SUPER_ADMIN_PAYROLL', 'CLIENTE_EMPRESA']
+        && data.createdAt is string
+        && data.status in ['ativo', 'suspenso'];
+    }
+
+    // Rules for /users/{userId}
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isSuperAdmin());
+      
+      allow create: if isSignedIn() 
+        && isValidId(userId) 
+        && userId == request.auth.uid 
+        && isValidUser(incoming())
+        && incoming().uid == request.auth.uid;
+        
+      allow update: if isSignedIn() 
+        && isValidId(userId) 
+        && (request.auth.uid == userId || isSuperAdmin())
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action-Based pattern: Update status or Super Admin update
+          (incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+          isSuperAdmin()
+        );
+
+      allow delete: if isSuperAdmin();
+    }
+  }
+}
