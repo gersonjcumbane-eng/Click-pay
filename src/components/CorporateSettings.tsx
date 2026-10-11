@@ -26,7 +26,8 @@ import {
   FileSpreadsheet,
   Database,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Lock
 } from 'lucide-react';
 import { CompanyData, ConfigFiscal, EscalaoFiscalMoz } from '../types';
 import { matrizFiscaisMoçambique } from '../db_tax';
@@ -419,8 +420,8 @@ export default function CorporateSettings({
         </p>
       </div>
 
-      {/* SELECIONAR EMPRESA / SWITCH COMPANY */}
-      {availableCompanies && availableCompanies.length > 1 && onSwitchCompany && (
+      {/* SELECIONAR EMPRESA / SWITCH COMPANY (Exclusivo Super Admin) */}
+      {!isClient && availableCompanies && availableCompanies.length > 1 && onSwitchCompany && (
         <div id="company_switcher_settings" className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-2xl p-6 text-white shadow-sm space-y-4">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-white/10 rounded-xl text-amber-400">
@@ -722,7 +723,7 @@ export default function CorporateSettings({
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="empresa@exemplo.com"
+                  placeholder="empresa@exemplo.co.mz"
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800 font-semibold"
                 />
               </div>
@@ -736,6 +737,41 @@ export default function CorporateSettings({
                   placeholder="+258..."
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800 font-semibold font-mono"
                 />
+              </div>
+            </div>
+
+            {/* DOMÍNIO & PRESENÇA WEB (.CO.MZ) DA EMPRESA */}
+            <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-5 text-white border border-blue-800 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                    🌐
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-white">Domínio Web & Portal Oficial (.CO.MZ)</h4>
+                    <p className="text-[10px] text-slate-300">Compatibilidade nativa com a zona DNS de Moçambique.</p>
+                  </div>
+                </div>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-black uppercase">
+                  clickpay.co.mz
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                <div className="bg-white/10 p-3 rounded-xl border border-white/10 space-y-1">
+                  <span className="text-[9px] text-slate-300 font-bold block uppercase">Endereço Web Ativo</span>
+                  <p className="font-mono font-bold text-emerald-400 text-[11px] truncate">https://clickpay.co.mz</p>
+                  <span className="text-[9px] text-slate-300 block">✓ Certificado SSL/TLS 256-bit</span>
+                </div>
+                <div className="bg-white/10 p-3 rounded-xl border border-white/10 space-y-1">
+                  <span className="text-[9px] text-slate-300 font-bold block uppercase">Apontamento DNS Moçambique</span>
+                  <p className="font-mono font-bold text-blue-300 text-[11px]">CNAME: app.clickpay.co.mz</p>
+                  <span className="text-[9px] text-slate-300 block">✓ CIUEM / TDM Moçambique</span>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-slate-300 bg-white/5 p-2.5 rounded-xl border border-white/10 flex items-center justify-between">
+                <span>Os links de faturas e recibos emitidos utilizam a chancela segura <b>clickpay.co.mz</b>.</span>
               </div>
             </div>
 
@@ -1085,6 +1121,32 @@ export default function CorporateSettings({
                   </span>
                   <span className="text-[10px] text-slate-400">Download</span>
                 </button>
+
+                <a
+                  href="/api/documentos/carta-pedido-apoio-docx"
+                  download="Carta_Pedido_Apoio_Stand_MCTD_ClickPay.docx"
+                  className="w-full py-2.5 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-bold text-blue-900 flex items-center justify-between transition-colors cursor-pointer shadow-xs"
+                  title="Descarregar carta formal em formato Microsoft Word (.docx)"
+                >
+                  <span className="flex items-center gap-2">
+                    <FileText className="text-blue-700" size={15} />
+                    Carta de Pedido de Apoio MCTD (.DOCX / Word)
+                  </span>
+                  <span className="text-[10px] bg-blue-200 text-blue-900 font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider font-mono">Word</span>
+                </a>
+
+                <a
+                  href="/api/download/logo-payroll-png"
+                  download="PayrollTechMZ_Logo.png"
+                  className="w-full py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-900 flex items-center justify-between transition-colors cursor-pointer shadow-xs"
+                  title="Descarregar logótipo original Payroll Tech MZ em formato PNG"
+                >
+                  <span className="flex items-center gap-2">
+                    <img src="/logo-payroll.png" alt="Payroll Tech Mz" className="h-5 w-auto object-contain" referrerPolicy="no-referrer" />
+                    Logótipo Oficial Payroll Tech MZ (.PNG)
+                  </span>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-950 font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider font-mono">PNG</span>
+                </a>
               </div>
             </div>
           </div>

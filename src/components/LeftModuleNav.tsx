@@ -66,15 +66,21 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
     <div className="flex flex-col gap-2.5">
       {/* Brand & System Title (Compact & Crisp) */}
       <div className="flex items-center gap-2 px-1 pb-2 border-b border-slate-200">
-        <div className="w-7 h-7 rounded-lg bg-blue-900 text-white flex items-center justify-center font-black text-xs shadow-xs shrink-0">
-          PT
-        </div>
+        <img 
+          src="/logo-payroll.png" 
+          alt="ClickPay" 
+          className="h-8 w-auto object-contain shrink-0" 
+          referrerPolicy="no-referrer"
+          onError={(e) => {
+            (e.target as HTMLElement).style.display = 'none';
+          }}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1">
-            <span className="text-xs font-black text-black tracking-tight truncate">Payroll Tech Mz</span>
-            <span className="text-[8px] bg-blue-50 text-blue-950 border border-blue-200 font-extrabold px-1 py-0.2 rounded">v1.0</span>
+            <span className="text-xs font-black text-black tracking-tight truncate">ClickPay</span>
+            <span className="text-[8px] bg-blue-50 text-blue-950 border border-blue-200 font-extrabold px-1 py-0.2 rounded">ERP</span>
           </div>
-          <p className="text-[9px] text-slate-800 font-bold truncate">ERP Cloud · Moçambique</p>
+          <p className="text-[9px] text-slate-800 font-bold truncate">Payroll Tech MZ · Moçambique</p>
         </div>
       </div>
 
@@ -102,7 +108,7 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              {availableCompanies && availableCompanies.length > 1 && onSwitchCompany ? (
+              {!isClient && availableCompanies && availableCompanies.length > 1 && onSwitchCompany ? (
                 <select
                   value={availableCompanies.find(c => c.isActive)?.id || ''}
                   onChange={(e) => onSwitchCompany(e.target.value)}

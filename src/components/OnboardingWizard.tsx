@@ -40,15 +40,15 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
   // Main view stage: 'ACCOUNT' (Register screen) | 'WIZARD' (3 steps)
   const [stage, setStage] = useState<'ACCOUNT' | 'WIZARD'>('ACCOUNT');
   
-  // Account Form State (Image 2 & 3)
-  const [nome, setNome] = useState('Tomas');
-  const [apelido, setApelido] = useState('Workshop');
+  // Account Form State
+  const [nome, setNome] = useState('');
+  const [apelido, setApelido] = useState('');
   const [pais, setPais] = useState('Moçambique');
-  const [contacto, setContacto] = useState('841234567');
-  const [email, setEmail] = useState('workshop.demo.843538@payrolltech.mz');
-  const [senha, setSenha] = useState('12345678');
-  const [confirmarSenha, setConfirmarSenha] = useState('12345678');
-  const [resellerCode, setResellerCode] = useState('00000');
+  const [contacto, setContacto] = useState('');
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [resellerCode, setResellerCode] = useState('');
   
   // Wizard Steps State
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
@@ -57,26 +57,26 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
-  // Step 1: Company Profile State (Image 4 & 5)
-  const [nuelSearch, setNuelSearch] = useState('100123456');
+  // Step 1: Company Profile State
+  const [nuelSearch, setNuelSearch] = useState('');
   const [isSearchingNuel, setIsSearchingNuel] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string>('');
-  const [nomeEmpresa, setNomeEmpresa] = useState('Workshop Demo 843538');
+  const [nomeEmpresa, setNomeEmpresa] = useState('');
   const [empresaPais, setEmpresaPais] = useState('Moçambique');
   const [provincia, setProvincia] = useState('Maputo Cidade');
   const [distrito, setDistrito] = useState('KaMpfumo');
   const [regimeIva, setRegimeIva] = useState('IVA Normal');
-  const [nuel, setNuel] = useState('100123456');
-  const [nuit, setNuit] = useState('400123456');
-  const [empresaEmail, setEmpresaEmail] = useState('workshop.demo.843538@payrolltech.mz');
-  const [empresaTelefone, setEmpresaTelefone] = useState('+258841234567');
-  const [endereco, setEndereco] = useState('Av. 25 Setembro, 1234, Maputo');
+  const [nuel, setNuel] = useState('');
+  const [nuit, setNuit] = useState('');
+  const [empresaEmail, setEmpresaEmail] = useState('');
+  const [empresaTelefone, setEmpresaTelefone] = useState('');
+  const [endereco, setEndereco] = useState('');
 
-  // Step 2: Subscription & Payment State (Image 6 & 7)
+  // Step 2: Subscription & Payment State
   const [selectedPlan, setSelectedPlan] = useState<'Starter' | 'Growth' | 'Business' | 'Vitalicio'>('Starter');
   const [paymentSubStep, setPaymentSubStep] = useState<'PLANS' | 'PAYMENT'>('PLANS');
   const [metodoPagamento, setMetodoPagamento] = useState<'ONLINE' | 'VOUCHER'>('ONLINE');
-  const [carteiraNumero, setCarteiraNumero] = useState('841234567');
+  const [carteiraNumero, setCarteiraNumero] = useState('');
   const [voucherCode, setVoucherCode] = useState('');
 
   // Step 3: Warehouse Initial State (Image 8)

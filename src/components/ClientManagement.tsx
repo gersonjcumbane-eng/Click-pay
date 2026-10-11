@@ -146,7 +146,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const [logo, setLogo] = useState('');
   const [feeBase, setFeeBase] = useState('2000');
   const [feePorSlip, setFeePorSlip] = useState('150');
-  const [newPassword, setNewPassword] = useState('senha123');
+  const [newPassword, setNewPassword] = useState('');
   const [subStatus, setSubStatus] = useState<'ativo' | 'suspenso' | 'pendente'>('ativo');
   const [subPlan, setSubPlan] = useState<'Bronze' | 'Silver' | 'Gold' | 'Platinum'>('Bronze');
   const [nextBillingDate, setNextBillingDate] = useState('2026-07-28');
@@ -161,14 +161,14 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const [editFeeBase, setEditFeeBase] = useState('2000');
   const [editFeePorSlip, setEditFeePorSlip] = useState('150');
   const [editNextBillingDate, setEditNextBillingDate] = useState('2026-07-28');
-  const [editPassword, setEditPassword] = useState('senha123');
+  const [editPassword, setEditPassword] = useState('');
   const [updatingSubscription, setUpdatingSubscription] = useState(false);
 
   // Estados para Gestão Dinâmica de Logins Firebase
   const [fbUsers, setFbUsers] = useState<any[]>([]);
   const [loadingFbUsers, setLoadingFbUsers] = useState(false);
   const [newFbEmail, setNewFbEmail] = useState('');
-  const [newFbPassword, setNewFbPassword] = useState('senha123');
+  const [newFbPassword, setNewFbPassword] = useState('');
   const [newFbRole, setNewFbRole] = useState('CLIENTE_EMPRESA');
   const [newFbCompanyId, setNewFbCompanyId] = useState('');
   const [editingUserEmail, setEditingUserEmail] = useState<string | null>(null);
@@ -184,7 +184,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     setEditFeeBase(client.fee_base.toString());
     setEditFeePorSlip(client.fee_por_slip.toString());
     setEditNextBillingDate(client.next_billing_date || '2026-07-28');
-    setEditPassword(client.password || 'senha123');
+    setEditPassword('');
   };
 
   const fetchFbUsers = async () => {
@@ -261,7 +261,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       if (!res.ok) throw new Error('Erro ao sincronizar com o Firebase Auth.');
       alert('Novo utilizador registado e integrado no Firebase Auth com sucesso!');
       setNewFbEmail('');
-      setNewFbPassword('senha123');
+      setNewFbPassword('');
       fetchFbUsers();
       fetchClients();
     } catch (err: any) {
@@ -403,7 +403,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       setLogo('');
       setFeeBase('2000');
       setFeePorSlip('150');
-      setNewPassword('senha123');
+      setNewPassword('');
       setSubStatus('ativo');
       setSubPlan('Bronze');
       setNextBillingDate('2026-07-28');
@@ -632,11 +632,11 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold text-slate-700">Senha do Cliente (SaaS) *</label>
               <input
-                type="text"
+                type="password"
                 required
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Ex: senha123"
+                placeholder="Digite a palavra-passe do cliente"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 font-mono"
               />
             </div>
@@ -800,7 +800,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
                           <span className="text-slate-500 font-semibold">Login:</span>
                           <span className="text-blue-900 font-bold bg-slate-50 px-1 rounded select-all">{client.email || 'N/D'}</span>
                           <span className="text-slate-400 font-semibold">| Senha:</span>
-                          <span className="text-slate-700 font-mono bg-slate-50 px-1 rounded select-all">{client.password || 'senha123'}</span>
+                          <span className="text-slate-500 font-mono bg-slate-50 px-1 rounded">•••••••• (Encriptada)</span>
                           {!isFoundersCo && (
                             <>
                               <span className="text-slate-400 font-semibold">| Expira:</span>
@@ -963,11 +963,12 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
                   <div className="space-y-1 col-span-2">
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-600">Senha de Acesso do Cliente</label>
+                        <label className="text-[10px] font-bold text-slate-600">Nova Senha de Acesso (Opcional)</label>
                         <input
-                          type="text"
+                          type="password"
                           value={editPassword}
                           onChange={(e) => setEditPassword(e.target.value)}
+                          placeholder="Deixe em branco para manter"
                           className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium font-mono text-blue-900 bg-blue-50/30 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       </div>
@@ -1412,7 +1413,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-slate-400 block">Palavra-passe de Acesso *</label>
                 <input
-                  type="text"
+                  type="password"
                   required
                   value={newFbPassword}
                   onChange={(e) => setNewFbPassword(e.target.value)}
@@ -1506,8 +1507,8 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
                           {user.companyName}
                         </span>
                         <span className="text-slate-600">|</span>
-                        <span className="text-slate-500 font-semibold">Senha Atual:</span>
-                        <span className="text-slate-300 font-mono bg-slate-900 px-1 rounded select-all">{user.password}</span>
+                        <span className="text-slate-500 font-semibold">Senha:</span>
+                        <span className="text-slate-400 font-mono bg-slate-900 px-1 rounded">••••••••</span>
                       </div>
                     </div>
 

@@ -1,6 +1,6 @@
 {
-  "name": "Payroll Tech MZ - ERP, Faturação & Gestão Empresarial",
-  "description": "Sistema Integrado de Gestão Empresarial (ERP), Faturação PGC-NIRF com IVA, Processamento de Salários com INSS/IRPS, CRM & Vendas e Tesouraria para Moçambique",
+  "name": "ClickPay Moçambique - ERP, Faturação & Salários (.co.mz)",
+  "description": "Plataforma e Website ERP para Micro, Pequenas e Médias Empresas em Moçambique (clickpay.co.mz). Faturação com IVA e ISPC (3%), Processamento Salarial IRPS/INSS, CRM e Liquidação M-Pesa / e-Mola.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

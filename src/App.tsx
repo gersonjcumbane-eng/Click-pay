@@ -393,6 +393,10 @@ export default function App() {
           <Login 
             selectedPlan={selectedPlan}
             onSelectPlan={setSelectedPlan}
+            onEnterRegister={() => {
+              setShowLogin(false);
+              setShowOnboarding(true);
+            }}
             onLoginSuccess={async () => {
               setAuthenticated(true);
               setShowLogin(false);

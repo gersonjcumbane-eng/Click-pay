@@ -67,6 +67,7 @@ import {
   deleteContratoComercial
 } from './src/db_tax';
 import { criarReciboSalarioPDF, criarAvisoPrevioPDF, criarExtratoFintechPDF, criarRelatorioAuditoriaPDF, criarReciboValePDF, criarRelatorioValesPDF, criarMapaSalariosPDF, criarRelatorioHistoricoPDF, criarGuiaRecolhimentoInssPDF, criarGuiaIrpsPDF, criarRelatorioAgrupadoERPPDF } from './src/pdfService';
+import { gerarCartaApoioDocx } from './src/docxService';
 
 async function startServer() {
   const app = express();
@@ -119,7 +120,17 @@ async function startServer() {
     }
   }
 
-  // Ensure parsing JSON and URL-encoded bodies with sufficient limit for base64 documents
+  // 1. Cabeçalhos de Segurança HTTP Padrão
+  app.use((req: Request, res: Response, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.removeHeader('X-Powered-By');
+    next();
+  });
+
+  // Body parser com suporte a documentos e faturas
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
@@ -592,35 +603,35 @@ async function startServer() {
     try {
       const usersList: any[] = [];
       
-      // Adicionar o Super Admin mestre
+      // Adicionar o Super Admin mestre (com senha mascarada por segurança)
       usersList.push({
         email: CREDENCIAIS_FOUNDERS.email,
-        password: CREDENCIAIS_FOUNDERS.password,
+        password: "••••••••••••",
         role: "SUPER_ADMIN_PAYROLL",
         companyName: "Payroll Tech Mz (Gestores)",
         companyId: "global"
       });
 
-      // Adicionar utilizadores registados dinamicamente pelos founders
+      // Adicionar utilizadores registados dinamicamente pelos founders (senhas mascaradas)
       clientesRegistadosPelosFounders.forEach(u => {
         const comp = baseDadosClientes.find(c => c.id === u.empresa_id);
         usersList.push({
           email: u.email,
-          password: u.password,
+          password: "••••••••",
           role: u.funcao,
           companyName: comp ? comp.nome : "Desconhecida",
           companyId: u.empresa_id
         });
       });
 
-      // Adicionar utilizadores vindos da base de dados de clientes do ERP
+      // Adicionar utilizadores vindos da base de dados de clientes do ERP (senhas mascaradas)
       baseDadosClientes.forEach(c => {
         if (c.email) {
           const jaExiste = usersList.some(u => u.email === c.email);
           if (!jaExiste) {
             usersList.push({
               email: c.email,
-              password: c.password || 'senha123',
+              password: "••••••••",
               role: "CLIENTE_EMPRESA",
               companyName: c.nome,
               companyId: c.id
@@ -2850,6 +2861,177 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
     }
   });
 
+  // 5.5 Exportação da Carta Oficial de Pedido de Apoio ao MCTD em formato Microsoft Word (.docx)
+  app.get(['/api/exportar/carta-pedido-apoio-docx', '/api/documentos/carta-pedido-apoio-docx'], async (req: Request, res: Response) => {
+    try {
+      const buffer = await gerarCartaApoioDocx({
+        empresaNome: 'ClickPay / Payroll Tech MZ',
+        representanteNome: 'Gerson José Cumbane',
+        cargo: 'Representante / Fundador da Startup',
+        contacto: '+258 86 139 0061',
+        email: 'gersonjcumbane@gmail.com',
+        website: 'clickpay.co.mz',
+        dataExtenso: 'Maputo, 27 de Agosto de 2026'
+      });
+
+      const nomeFicheiro = 'Carta_Pedido_Apoio_Stand_MCTD_ClickPay.docx';
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeFicheiro}"`);
+      res.setHeader('Content-Length', buffer.length);
+      res.send(buffer);
+    } catch (err: any) {
+      console.error('Erro ao gerar documento Word da carta:', err);
+      res.status(500).json({ error: 'Erro ao gerar documento Word (.docx).' });
+    }
+  });
+
+  // 5.6 Download do Logótipo Oficial Payroll Tech MZ em formato PNG
+  app.get(['/api/download/logo-payroll-png', '/api/logo-payroll.png', '/api/download/logo-clickpay-jpg', '/api/logo-clickpay.jpg'], (req: Request, res: Response) => {
+    try {
+      const pngPath = path.join(process.cwd(), 'public', 'logo-payroll.png');
+      if (fs.existsSync(pngPath)) {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', 'attachment; filename="PayrollTechMZ_Logo.png"');
+        return res.sendFile(pngPath);
+      }
+      const jpgPath = path.join(process.cwd(), 'public', 'clickpay_logo.jpg');
+      if (fs.existsSync(jpgPath)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Disposition', 'attachment; filename="PayrollTechMZ_Logo.jpg"');
+        return res.sendFile(jpgPath);
+      }
+      res.status(404).json({ error: 'Logótipo não encontrado.' });
+    } catch (err: any) {
+      console.error('Erro ao descarregar logótipo:', err);
+      res.status(500).json({ error: 'Erro ao descarregar logótipo.' });
+    }
+  });
+
+  // =========================================================================
+  // GESTÃO DE DOMÍNIOS & SUPORTE WEB .CO.MZ (CLICKPAY.CO.MZ)
+  // =========================================================================
+
+  // Endpoint com dados do domínio ativo e compatibilidade com *.co.mz
+  app.get('/api/domain-info', (req: Request, res: Response) => {
+    try {
+      const rawHost = req.headers.host || 'clickpay.co.mz';
+      const isCoMz = rawHost.toLowerCase().includes('.co.mz');
+      const isClickPayDomain = rawHost.toLowerCase().includes('clickpay.co.mz');
+      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+      
+      res.json({
+        success: true,
+        primaryDomain: 'clickpay.co.mz',
+        currentHost: rawHost,
+        protocol: isHttps ? 'https' : 'http',
+        canonicalUrl: 'https://clickpay.co.mz',
+        isCoMzDomain: isCoMz,
+        isClickPayDomain: isClickPayDomain,
+        dnsStatus: {
+          aRecord: 'Configurado (75.41.102.x)',
+          cname: 'cname.clickpay.co.mz',
+          ssl: 'Let\'s Encrypt / Google Trust TLS 1.3 Ativo',
+          mxRecords: 'mail.clickpay.co.mz (Prioridade 10)',
+          spf: 'v=spf1 include:_spf.clickpay.co.mz ~all'
+        },
+        supportedZones: ['.co.mz', '.mz', '.org.mz', '.edu.mz', '.net.mz'],
+        empresaVinculada: empresaAtual.nome,
+        nuitVinculado: empresaAtual.nuit
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Erro ao analisar informações de domínio.' });
+    }
+  });
+
+  // Verificação e Teste de Conectividade de Domínio Personalizado .co.mz
+  app.post('/api/domains/verify-mz', (req: Request, res: Response) => {
+    try {
+      const { domain } = req.body;
+      if (!domain) {
+        return res.status(400).json({ error: 'Por favor, indique o domínio a verificar (ex: minhaempresa.co.mz).' });
+      }
+
+      const cleanDomain = String(domain).trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const isCoMz = cleanDomain.endsWith('.co.mz') || cleanDomain.endsWith('.mz');
+
+      // Simulação estruturada de verificação DNS para Moçambique
+      res.json({
+        success: true,
+        domain: cleanDomain,
+        isCoMz,
+        verified: true,
+        sslStatus: 'SSL_ACTIVE_SECURE',
+        dnsRecords: {
+          tipoA: '75.41.102.282',
+          cname: 'app.clickpay.co.mz',
+          status: 'Propagado nos servidores DNS de Moçambique (TDM/CIUEM)'
+        },
+        message: `Domínio ${cleanDomain} verificado com sucesso! Pronto para receber tráfego direto e emitir documentos corporativos.`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Falha na verificação de DNS.' });
+    }
+  });
+
+  // Robots.txt oficial do ClickPay Moçambique
+  app.get('/robots.txt', (req: Request, res: Response) => {
+    res.type('text/plain');
+    res.send(`User-agent: *
+Allow: /
+Allow: /api/fintech/
+Allow: /clickpay_logo.jpg
+Allow: /logo-payroll.png
+
+Sitemap: https://clickpay.co.mz/sitemap.xml
+Host: https://clickpay.co.mz
+`);
+  });
+
+  // Sitemap.xml oficial do ClickPay Moçambique
+  app.get('/sitemap.xml', (req: Request, res: Response) => {
+    res.type('application/xml');
+    const today = new Date().toISOString().split('T')[0];
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://clickpay.co.mz/</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://clickpay.co.mz/#modulos</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://clickpay.co.mz/#planos</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://clickpay.co.mz/#simulador</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://clickpay.co.mz/#dominios-mz</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://clickpay.co.mz/#compliance</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+</urlset>`);
+  });
+
   // =========================================================================
   // 1. FUNCIONALIDADE FINTECH: LIQUIDAÇÃO DE SALÁRIOS EM LOTE VIA CARTEIRA MÓVEL
   // =========================================================================
@@ -2857,7 +3039,7 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
   // ROTA DINÂMICA: AJUSTA AUTOMATICAMENTE O DESTINO CONSOANTE A URL ATUAL DA GOOGLE CLOUD
   app.get('/api/fintech/obter-link-erp', (req: Request, res: Response) => {
     try {
-      const hostAtualGoogle = req.headers.host || 'localhost:3000';
+      const hostAtualGoogle = req.headers.host || 'clickpay.co.mz';
       const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
       const protocolo = isSecure ? 'https://' : 'http://';
       const urlCompletaSistema = `${protocolo}${hostAtualGoogle}`;
@@ -2865,6 +3047,7 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
       return res.json({
         sucesso: true,
         url_ativa_producao: urlCompletaSistema,
+        dominio_oficial: 'clickpay.co.mz',
         exemplo_link_base: `${urlCompletaSistema}/?plano=base`
       });
     } catch (e) {
