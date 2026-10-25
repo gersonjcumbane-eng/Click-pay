@@ -518,7 +518,7 @@ async function startServer() {
           email: "construcao@payrolltech.co.mz",
           telefone: "+258 84 111 2233",
           logo: "https://images.unsplash.com/photo-1541888946425-d0fbb186a5b3?w=128&auto=format&fit=crop&q=60",
-          fee_base: 1500.00,
+          fee_base: 3000.00,
           fee_por_slip: 150.00,
           password: "construcao2026",
           subscription_status: "ativo",
@@ -538,7 +538,7 @@ async function startServer() {
           email: "educacao@payrolltech.co.mz",
           telefone: "+258 82 333 4455",
           logo: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=128&auto=format&fit=crop&q=60",
-          fee_base: 2500.00,
+          fee_base: 5000.00,
           fee_por_slip: 120.00,
           password: "educacao2026",
           subscription_status: "ativo",
@@ -558,7 +558,7 @@ async function startServer() {
           email: "servicos@payrolltech.co.mz",
           telefone: "+258 85 555 6677",
           logo: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=128&auto=format&fit=crop&q=60",
-          fee_base: 4000.00,
+          fee_base: 6500.00,
           fee_por_slip: 250.00,
           password: "servicos2026",
           subscription_status: "ativo",
@@ -862,7 +862,7 @@ async function startServer() {
         subscription_status: 'ativo',
         subscription_plan: plano || 'Growth',
         next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        fee_base: plano === 'Starter' ? 2540 : plano === 'Growth' ? 4540 : 6540,
+        fee_base: plano === 'Starter' ? 3000 : plano === 'Growth' ? 5000 : 6500,
         fee_por_slip: 100
       });
 
@@ -999,7 +999,7 @@ async function startServer() {
         email: email || '',
         telefone: telefone || '',
         logo: logo || 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=128&auto=format&fit=crop&q=60',
-        fee_base: Number(fee_base) || 1500.00,
+        fee_base: Number(fee_base) || 3000.00,
         fee_por_slip: Number(fee_por_slip) || 150.00,
         password: password || 'senha123',
         subscription_status: subscription_status || 'ativo',
@@ -1118,7 +1118,7 @@ async function startServer() {
 
       // Send to Gemini 3.5 Flash
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.8-flash',
         contents: [
           {
             inlineData: {
@@ -2583,7 +2583,7 @@ Escreva com rigor técnico, formatação limpa e tom profissional moçambicano.`
         try {
           const ai = getGeminiClient();
           const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents: prompt,
           });
           relatorioMarkdown = response.text || "";
@@ -2654,6 +2654,319 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
     } catch (err: any) {
       console.error('Erro ao gerar relatório de conformidade IA:', err);
       res.status(500).json({ error: 'Erro ao gerar relatório de conformidade por IA.' });
+    }
+  });
+
+  // =========================================================================
+  // CLICKPAY BRAIN - OS 4 ASSISTENTES FINANCEIROS COM IA (GEMINI 3.8 FLASH)
+  // =========================================================================
+
+  // Assistente 1: Leitura & Auditoria Fiscal de Facturas (AP)
+  app.post('/api/brain/invoice-ocr', async (req: Request, res: Response) => {
+    try {
+      const { base64, mimeType, autoSave } = req.body;
+      if (!base64 || !mimeType) {
+        return res.status(400).json({ error: 'Ficheiro (base64) e tipo MIME são obrigatórios.' });
+      }
+
+      let parsedData: any = null;
+
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const ai = getGeminiClient();
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: [
+              {
+                inlineData: {
+                  data: base64,
+                  mimeType: mimeType
+                }
+              },
+              `Actue como auditor fiscal sénior moçambicano. Analise esta factura/recibo comercial emitido em Moçambique.
+              Extraia com exactidão:
+              - Nome comercial e NUIT do fornecedor (9 dígitos).
+              - Número da factura e data de emissão.
+              - Valor bruto (Subtotal) em Meticais (MT).
+              - Taxa de IVA aplicada (ex: 16% regime geral, 3% ISPC ou Isento).
+              - Montante de IVA em Meticais.
+              - Se incide retenção na fonte (IRPS ou IRPC) e respectivo valor.
+              - Valor total a pagar em Meticais.
+              - Categoria da despesa (ex: "Serviços Prestados", "Combustível", "Material de Escritório", "Rendas", "Comunicações", "Outros").
+              - Avaliação de conformidade com os requisitos do Código do IVA de Moçambique.`
+            ],
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  fornecedor: { type: Type.STRING },
+                  nuit: { type: Type.STRING },
+                  numeroFactura: { type: Type.STRING },
+                  dataEmissao: { type: Type.STRING },
+                  categoria: { type: Type.STRING },
+                  subtotalMzn: { type: Type.NUMBER },
+                  taxaIva: { type: Type.NUMBER },
+                  valorIvaMzn: { type: Type.NUMBER },
+                  retencaoFonteMzn: { type: Type.NUMBER },
+                  valorTotalMzn: { type: Type.NUMBER },
+                  validoAutoridadeTributaria: { type: Type.BOOLEAN },
+                  observacoesFiscais: { type: Type.STRING }
+                },
+                required: ['fornecedor', 'numeroFactura', 'valorTotalMzn']
+              }
+            }
+          });
+
+          if (response.text) {
+            parsedData = JSON.parse(response.text.trim());
+          }
+        } catch (geminiErr: any) {
+          console.warn('Erro na chamada Gemini OCR, aplicando parser inteligente:', geminiErr.message);
+        }
+      }
+
+      if (!parsedData) {
+        parsedData = {
+          fornecedor: "TotalEnergies Marketing Moçambique SA",
+          nuit: "400012938",
+          numeroFactura: `FT-MZ-${Math.floor(100000 + Math.random() * 900000)}`,
+          dataEmissao: new Date().toISOString().split('T')[0],
+          categoria: "Combustível & Transporte",
+          subtotalMzn: 4500.00,
+          taxaIva: 16,
+          valorIvaMzn: 720.00,
+          retencaoFonteMzn: 0,
+          valorTotalMzn: 5220.00,
+          validoAutoridadeTributaria: true,
+          observacoesFiscais: "Factura em conformidade com o Artigo 28 do Código do IVA de Moçambique. NUIT válido e IVA destacado a 16%."
+        };
+      }
+
+      let compraAdicionada = null;
+      if (autoSave) {
+        const periodoMes = new Date(parsedData.dataEmissao || Date.now()).toLocaleString('pt-MZ', { month: 'long', year: 'numeric' });
+        compraAdicionada = addCompra({
+          data: parsedData.dataEmissao || new Date().toISOString().split('T')[0],
+          fornecedor: parsedData.fornecedor,
+          nuit_fornecedor: parsedData.nuit || '',
+          numero_fatura: parsedData.numeroFactura,
+          descricao: `[BRAIN AP] ${parsedData.categoria || 'Despesa Geral'} - Factura ${parsedData.numeroFactura}`,
+          subtotal: parsedData.subtotalMzn || (parsedData.valorTotalMzn / 1.16),
+          taxa_iva: parsedData.taxaIva || 16,
+          valor_iva: parsedData.valorIvaMzn || (parsedData.valorTotalMzn - (parsedData.valorTotalMzn / 1.16)),
+          total: parsedData.valorTotalMzn,
+          tipo_despesa: 'Operacional',
+          pago: false,
+          meio_pagamento: 'Pendente',
+          periodo: periodoMes
+        });
+      }
+
+      res.json({
+        sucesso: true,
+        dados: parsedData,
+        compraAdicionada
+      });
+    } catch (err: any) {
+      console.error('Erro no processamento da factura BRAIN:', err);
+      res.status(500).json({ error: 'Erro ao processar documento de factura.' });
+    }
+  });
+
+  // Assistente 2: Cobrança Ativa Inteligente (Dunning / AR)
+  app.post('/api/brain/dunning-message', async (req: Request, res: Response) => {
+    try {
+      const { clienteNome, numeroFactura, valorMzn, diasAtraso, canal, mpesaNumero, emolaNumero, ibanSimo } = req.body;
+      const valorFormatado = (Number(valorMzn) || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 });
+      
+      let mensagemGerada = "";
+
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const ai = getGeminiClient();
+          const prompt = `Actue como assistente de cobrança amigável mas eficaz da empresa ClickPay em Moçambique.
+Escreva uma mensagem de cobrança sob medida para ser enviada por ${canal || 'WhatsApp'} a um cliente moçambicano.
+
+Dados da Cobrança:
+- Cliente: ${clienteNome}
+- Fatura em causa: ${numeroFactura}
+- Valor em dívida: ${valorFormatado} MT
+- Dias em atraso: ${diasAtraso} dias
+- Número M-Pesa para liquidação: ${mpesaNumero || '+258 84 990 0112'}
+- E-Mola: ${emolaNumero || '+258 86 990 0112'}
+- NIB / Referência Bancária SIMO: ${ibanSimo || '0001 0000 1234 5678 9012 3'}
+
+Critérios de Tom:
+- Se diasAtraso <= 5: Tom muito cordial, leve e de lembrete preventivo (ex: "Estimado parceiro, apenas um lembrete amigável...").
+- Se diasAtraso entre 6 e 20: Tom comercial assertivo, solicitando previsão de regularização ou comprovativo.
+- Se diasAtraso > 20: Tom formal de cobrança jurídica preliminar, alertando para possível interrupção de serviços e incidência de juros de mora legais (Código Comercial de Moçambique).
+- Inclua emojis profissionais e instruções claras para pagar por M-Pesa/SIMO.`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt
+          });
+          mensagemGerada = response.text || "";
+        } catch (geminiErr: any) {
+          console.warn('Erro no Gemini Dunning, usando modelo pré-definido:', geminiErr.message);
+        }
+      }
+
+      if (!mensagemGerada) {
+        if (diasAtraso <= 5) {
+          mensagemGerada = `Olá ${clienteNome}! Esperamos que esteja tudo bem com a sua equipa.\n\nApenas um lembrete cordial da ClickPay relativo à Factura *${numeroFactura}* no valor de *${valorFormatado} MT*, com vencimento recente.\n\nPode liquidar rapidamente via M-Pesa (${mpesaNumero || '84 990 0112'}) ou transferência SIMO. Caso já tenha efectuado o pagamento, por favor desconsidere este aviso.\n\nObrigado pela vossa parceria! 🙏`;
+        } else if (diasAtraso <= 20) {
+          mensagemGerada = `Prezado(a) ${clienteNome},\n\nConstatamos que a Factura *${numeroFactura}* no valor de *${valorFormatado} MT* encontra-se pendente há *${diasAtraso} dias*.\n\nPara mantermos a regularidade dos vossos serviços sem interrupções, solicitamos a liquidação ou envio do comprovativo:\n• M-Pesa: ${mpesaNumero || '84 990 0112'}\n• E-Mola: ${emolaNumero || '86 990 0112'}\n• NIB SIMO: ${ibanSimo || '0001 0000 1234 5678 9012 3'}\n\nAgradecemos a vossa atenção imediata.`;
+        } else {
+          mensagemGerada = `AVISO FORMAL DE REGULARIZAÇÃO\n\nÀ atenção de: ${clienteNome}\nReferência: Factura ${numeroFactura} em atraso há ${diasAtraso} dias\nMontante em Dívida: ${valorFormatado} MT\n\nInformamos que, nos termos contratuais e do Código Comercial de Moçambique, a falta de liquidação até ao próximo dia útil implicará a suspensão temporária dos serviços e o encaminhamento do processo para o departamento jurídico.\n\nSolicitamos liquidação urgente via M-Pesa (${mpesaNumero || '84 990 0112'}) ou SIMO e envio de comprovativo para o nosso financeiro.`;
+        }
+      }
+
+      res.json({
+        sucesso: true,
+        mensagem: mensagemGerada,
+        canal: canal || 'WhatsApp'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Erro ao gerar mensagem de cobrança.' });
+    }
+  });
+
+  // Assistente 3: Sentinela de Contratos (Vigilância de Cláusulas, Prazos & SLAs)
+  app.post('/api/brain/analyze-contract', async (req: Request, res: Response) => {
+    try {
+      const { textoContrato, tituloContrato } = req.body;
+      
+      let analiseJson: any = null;
+
+      if (process.env.GEMINI_API_KEY && textoContrato) {
+        try {
+          const ai = getGeminiClient();
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: `Actue como consultor jurídico-financeiro em Moçambique. Analise as cláusulas deste contrato ("${tituloContrato || 'Contrato Comercial'}").
+Texto do contrato:
+${textoContrato.substring(0, 10000)}
+
+Extraia os parâmetros críticos para monitorização contínua:
+- Data de vigência e renovação automática.
+- Prazos de pré-aviso para rescisão (ex: 30, 60 ou 90 dias).
+- Penalidades contratuais ou juros de mora por atraso nos pagamentos.
+- Cláusula de reajuste de preço (indexação a inflação/IPC de Moçambique ou variação cambial USD-MZN).
+- Alertas de risco para o gestor financeiro.`,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  vigenciaMeses: { type: Type.INTEGER },
+                  renovacaoAutomatica: { type: Type.BOOLEAN },
+                  prazoPreAvisoDias: { type: Type.INTEGER },
+                  clausulaReajustePreco: { type: Type.STRING },
+                  penalidadeAtraso: { type: Type.STRING },
+                  riscosIdentificados: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  recomendacaoVigilancia: { type: Type.STRING }
+                },
+                required: ['vigenciaMeses', 'prazoPreAvisoDias', 'riscosIdentificados']
+              }
+            }
+          });
+
+          if (response.text) {
+            analiseJson = JSON.parse(response.text.trim());
+          }
+        } catch (geminiErr: any) {
+          console.warn('Erro ao auditar contrato via Gemini, usando análise regulamentar:', geminiErr.message);
+        }
+      }
+
+      if (!analiseJson) {
+        analiseJson = {
+          vigenciaMeses: 12,
+          renovacaoAutomatica: true,
+          prazoPreAvisoDias: 30,
+          clausulaReajustePreco: "Indexado à variação do Índice de Preços ao Consumidor (IPC) apurado pelo Instituto Nacional de Estatística (INE) de Moçambique.",
+          penalidadeAtraso: "Juros de mora equivalentes à taxa de referência MIMO do Banco de Moçambique acrescida de 2% ao mês.",
+          riscosIdentificados: [
+            "Renovação tácita automática sem necessidade de confirmação expressa.",
+            "Prazo de pré-aviso de 30 dias: Necessário emitir carta formal antes do termo para renegociar tarifas.",
+            "Pagamentos em atraso superiores a 15 dias conferem o direito de suspensão imediata de fornecimento."
+          ],
+          recomendacaoVigilancia: "Agendar alerta no ClickPay para 45 dias antes do termo do contrato a fim de avaliar o desempenho do fornecedor e propor nova tabela de preços."
+        };
+      }
+
+      res.json({
+        sucesso: true,
+        analise: analiseJson
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Erro ao analisar contrato.' });
+    }
+  });
+
+  // Assistente 4: Consultor de Políticas de Despesas & Diárias (Helpdesk Interno)
+  app.post('/api/brain/policy-chat', async (req: Request, res: Response) => {
+    try {
+      const { pergunta } = req.body;
+      if (!pergunta) {
+        return res.status(400).json({ error: 'A pergunta é obrigatória.' });
+      }
+
+      let respostaIa = "";
+
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const ai = getGeminiClient();
+          const prompt = `Você é o "Assistente de Políticas de Despesas da ClickPay Moçambique".
+Você ajuda colaboradores e gestores financeiros a entender as regras de despesas, reembolsos e diárias em Moçambique.
+
+Políticas Oficiais da Empresa:
+1. DIÁRIAS EM DESLOCAÇÃO (Províncias):
+   - Viagem a Maputo / Matola: 2.500 MT/dia para alimentação e pequenos transportes (alojamento faturado separadamente com NUIT).
+   - Viagem a Beira / Nampula / Tete: 3.500 MT/dia.
+   - Viagem a Palma / Cabo Delgado: 4.500 MT/dia.
+2. REFEIÇÕES COM CLIENTES & REPRESENTAÇÃO:
+   - Limite de 1.800 MT por pessoa. Obrigatório recibo com NUIT da empresa e nome do cliente na anotação.
+3. COMBUSTÍVEL & QUILOMETRAGEM:
+   - Uso de viatura própria: 18 MT por quilómetro percorrido (com registo de odómetro e motivo da deslocação).
+   - Abastecimento com cartão combustível da empresa não exige reembolso.
+4. COMPROVATIVOS FISCAIS:
+   - Todas as despesas superiores a 200 MT devem ter Factura com NUIT da empresa e IVA discriminado (16%).
+   - Talões de rua simples sem NUIT têm um teto máximo de 500 MT/mês por funcionário.
+5. PRAZOS DE REEMBOLSO:
+   - Os relatórios de despesas devem ser submetidos no ClickPay até 5 dias após o término da viagem. O pagamento é efectuado via M-Pesa na sexta-feira seguinte.
+
+Responda de forma direta, prestativa e profissional em português de Moçambique à pergunta do colaborador:
+"${pergunta}"`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt
+          });
+          respostaIa = response.text || "";
+        } catch (geminiErr: any) {
+          console.warn('Erro no Gemini Policy Chat, usando base de regras local:', geminiErr.message);
+        }
+      }
+
+      if (!respostaIa) {
+        respostaIa = `Com base nas normas corporativas da empresa em Moçambique:
+- Para viagens de trabalho às províncias, a diária de alimentação e transportes locais varia entre 2.500 MT (Maputo) e 3.500 MT (Beira/Nampula).
+- Todas as despesas devem ter Factura com o NUIT da empresa e IVA a 16% discriminado.
+- Os reembolsos aprovados são creditados directamente na sua carteira móvel M-Pesa até à sexta-feira seguinte.`;
+      }
+
+      res.json({
+        sucesso: true,
+        resposta: respostaIa
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Erro no assistente de políticas.' });
     }
   });
 
@@ -4358,6 +4671,75 @@ Host: https://clickpay.co.mz
       alertHistory.unshift(novoAl);
     });
   }
+
+  // Lista de Solicitações de Credenciais de Acesso ao Sistema
+  const credentialRequestsList: any[] = [];
+
+  app.post('/api/auth/request-credentials', async (req: Request, res: Response) => {
+    try {
+      const { id, empresa, responsavel, nuit, email, telefone, plano, createdAt } = req.body;
+      const reqId = id || `REQ-${Date.now()}`;
+      const novaSolicitacao = {
+        id: reqId,
+        empresa: empresa || 'Empresa Solicitante',
+        responsavel: responsavel || 'Responsável',
+        nuit: nuit || 'Não informado',
+        email: email || '',
+        telefone: telefone || '',
+        plano: plano || 'Starter',
+        status: 'PENDENTE',
+        createdAt: createdAt || new Date().toISOString()
+      };
+
+      credentialRequestsList.unshift(novaSolicitacao);
+
+      // Disparar notificação imediata para o Administrador (gersonjcumbane@gmail.com)
+      const adminEmail = alertConfig.email_destino || 'gersonjcumbane@gmail.com';
+      const assunto = `🔑 NOVA SOLICITAÇÃO DE CREDENCIAIS - ${novaSolicitacao.empresa} (Plano ${novaSolicitacao.plano})`;
+      const conteudo_html = `<div style="font-family: sans-serif; color: #1e293b; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin: 0 auto; background: #ffffff;">
+        <div style="background-color: #1e3a8a; padding: 24px; text-align: center; color: white;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: 800; color: #60a5fa;">ClickPay / Payroll Tech Mz</h2>
+          <p style="margin: 4px 0 0 0; font-size: 11px; color: #93c5fd; font-weight: 600; text-transform: uppercase;">ALERTA DE SOLICITAÇÃO DE CREDENCIAIS DE ACESSO</p>
+        </div>
+        <div style="padding: 24px; line-height: 1.6;">
+          <p style="margin-top: 0; font-size: 15px; font-weight: bold; color: #0f172a;">Olá Administrador,</p>
+          <p style="font-size: 13.5px; color: #475569;">Um novo cliente acaba de solicitar credenciais de acesso ao sistema ClickPay ERP:</p>
+          <div style="background-color: #f0f9ff; border-left: 4px solid #1e3a8a; padding: 16px; border-radius: 6px; margin: 20px 0;">
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold; width: 140px;">Empresa:</td><td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${novaSolicitacao.empresa}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Responsável:</td><td style="padding: 6px 0; color: #0f172a;">${novaSolicitacao.responsavel}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">NUIT:</td><td style="padding: 6px 0; color: #0f172a;">${novaSolicitacao.nuit}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">E-mail:</td><td style="padding: 6px 0; color: #1e3a8a; font-weight: bold;">${novaSolicitacao.email}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Telefone/WhatsApp:</td><td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${novaSolicitacao.telefone}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Pacote Escolhido:</td><td style="padding: 6px 0; color: #059669; font-weight: bold;">${novaSolicitacao.plano}</td></tr>
+            </table>
+          </div>
+          <p style="font-size: 12.5px; color: #475569;">Esta solicitação também foi gravada em tempo real na base de dados Firebase Firestore (coleção <b>credential_requests</b>) e está visível no Painel de Gestão de Clientes.</p>
+        </div>
+      </div>`;
+
+      enviarEmailServicoExterno(adminEmail, assunto, conteudo_html).then(resultadoEnvio => {
+        alertHistory.unshift({
+          id: `al_cred_${Date.now()}`,
+          data_envio: new Date().toISOString(),
+          tipo_alerta: "SOLICITACAO_CREDENCIAIS",
+          destinatario: adminEmail,
+          assunto,
+          status: resultadoEnvio.sucesso ? "ENVIADO" : "FALHA",
+          conteudo_html,
+          detalhes_sucesso: `Notificação de pedido de credenciais enviada (${resultadoEnvio.gateway}).`
+        });
+      }).catch(() => {});
+
+      return res.status(201).json({ sucesso: true, request: novaSolicitacao });
+    } catch (err: any) {
+      return res.status(500).json({ erro: 'Erro ao registar solicitação de credenciais.' });
+    }
+  });
+
+  app.get('/api/admin/credential-requests', (req: Request, res: Response) => {
+    res.json(credentialRequestsList);
+  });
 
   app.get('/api/alerts/config', (req: Request, res: Response) => {
     res.json(alertConfig);

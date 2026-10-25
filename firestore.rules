@@ -23,20 +23,64 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // Check if user is super admin (Admin concept check)
+    // Check if user is super admin
     function isSuperAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email == "gersonjcumbane@gmail.com" && request.auth.token.email_verified == true)
+      );
     }
 
     // User entity validator
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'role', 'createdAt', 'status'])
-        && data.keys().size() == 5
+        && data.keys().hasOnly(['uid', 'email', 'role', 'companyId', 'createdAt', 'status'])
         && data.uid is string && data.uid.size() <= 128
         && data.email is string && data.email.size() <= 256
         && data.role in ['SUPER_ADMIN_PAYROLL', 'CLIENTE_EMPRESA']
-        && data.createdAt is string
+        && data.createdAt is string && data.createdAt.size() <= 64
         && data.status in ['ativo', 'suspenso'];
+    }
+
+    // ClientCompany validator
+    function isValidClientCompany(data) {
+      return data.keys().hasAll(['id', 'nome', 'nuit', 'email', 'subscription_plan', 'subscription_status', 'fee_base', 'updatedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.nome is string && data.nome.size() <= 256
+        && data.nuit is string && data.nuit.size() <= 32
+        && data.email is string && data.email.size() <= 256
+        && data.subscription_plan in ['Starter', 'Growth', 'Business', 'Bronze', 'Silver', 'Gold', 'Platinum']
+        && data.subscription_status in ['ativo', 'suspenso', 'pendente']
+        && data.fee_base is number
+        && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    // CloudBackup validator
+    function isValidCloudBackup(data) {
+      return data.keys().hasAll(['id', 'empresaId', 'empresaNome', 'timestamp', 'tipo', 'quantidadeColaboradores', 'quantidadeLancamentos', 'tamanhoKb', 'snapshotJson'])
+        && data.id is string && data.id.size() <= 128
+        && data.empresaId is string && data.empresaId.size() <= 128
+        && data.empresaNome is string && data.empresaNome.size() <= 256
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && data.tipo is string && data.tipo.size() <= 128
+        && data.quantidadeColaboradores is number
+        && data.quantidadeLancamentos is number
+        && data.tamanhoKb is number
+        && data.snapshotJson is string && data.snapshotJson.size() <= 900000;
+    }
+
+    // CredentialRequest validator
+    function isValidCredentialRequest(data) {
+      return data.keys().hasAll(['id', 'nomeEmpresa', 'nomeResponsavel', 'email', 'telefone', 'planoEscolhido', 'precoMensal', 'status', 'dataSolicitacao'])
+        && data.id is string && data.id.size() <= 128
+        && data.nomeEmpresa is string && data.nomeEmpresa.size() <= 256
+        && data.nomeResponsavel is string && data.nomeResponsavel.size() <= 256
+        && data.email is string && data.email.size() <= 256
+        && data.telefone is string && data.telefone.size() <= 64
+        && data.planoEscolhido is string && data.planoEscolhido.size() <= 64
+        && data.precoMensal is number
+        && data.status in ['PENDENTE', 'APROVADO', 'CREDENCIAIS_ENVIADAS']
+        && data.dataSolicitacao is string && data.dataSolicitacao.size() <= 64;
     }
 
     // Rules for /users/{userId}
@@ -57,12 +101,51 @@ service cloud.firestore {
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
         && (
-          // Action-Based pattern: Update status or Super Admin update
           (incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
           isSuperAdmin()
         );
 
       allow delete: if isSuperAdmin();
+    }
+
+    // Rules for /erp_clients/{clientId}
+    match /erp_clients/{clientId} {
+      allow get, list: if isSuperAdmin() || (isSignedIn() && resource.data.id == clientId);
+      allow create, update: if isValidId(clientId) && isValidClientCompany(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Rules for /erp_backups/{backupId}
+    match /erp_backups/{backupId} {
+      allow get, list: if isSuperAdmin() || (isSignedIn() && resource.data.id == backupId);
+      allow create, update: if isValidId(backupId) && isValidCloudBackup(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Rules for /erp_credential_requests/{requestId}
+    match /erp_credential_requests/{requestId} {
+      allow get, list: if isSuperAdmin() || (isSignedIn() && resource.data.id == requestId);
+      allow create: if isValidId(requestId) && isValidCredentialRequest(incoming());
+      allow update: if isValidId(requestId) && isValidCredentialRequest(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['status']) || isSuperAdmin()
+      );
+      allow delete: if isSuperAdmin();
+    }
+
+    match /saas_clients/{clientId} {
+      allow read, write: if true;
+    }
+
+    match /backups/{backupId} {
+      allow read, write: if true;
+    }
+
+    match /credential_requests/{requestId} {
+      allow read, write: if true;
+    }
+
+    match /companies/{companyId} {
+      allow read, write: if true;
     }
   }
 }
