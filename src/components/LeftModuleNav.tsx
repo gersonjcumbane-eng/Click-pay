@@ -15,7 +15,9 @@ import {
   LogOut,
   Building2,
   Calendar,
-  CheckCircle2
+  CheckCircle2,
+  Brain,
+  Sparkles
 } from 'lucide-react';
 import { CompanyData } from '../types';
 
@@ -179,7 +181,43 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
           }`} />
         </button>
 
-        {/* 2. CRM & Vendas */}
+        {/* 2. BRAIN IA · 4 Assistentes Financeiros (Inspirado Bujeti) */}
+        <button
+          onClick={() => {
+            onSelectTab('brain');
+            onCloseMobile();
+          }}
+          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+            activeTab === 'brain'
+              ? 'bg-blue-950 text-white shadow-xs border border-blue-800'
+              : 'bg-gradient-to-r from-blue-50/70 to-indigo-50/70 hover:from-blue-100 hover:to-indigo-100 text-black border border-blue-200 hover:border-blue-400'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
+              activeTab === 'brain' ? 'bg-blue-500/30 text-blue-300' : 'bg-blue-700 text-white shadow-2xs'
+            }`}>
+              <Brain size={14} strokeWidth={2.4} />
+            </div>
+            <div className="min-w-0 flex items-center gap-1.5">
+              <span className={`text-[11px] font-black truncate leading-tight ${
+                activeTab === 'brain' ? 'text-white' : 'text-blue-950'
+              }`}>
+                BRAIN IA
+              </span>
+              <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase flex items-center gap-0.5 ${
+                activeTab === 'brain' ? 'bg-blue-500/30 text-blue-200' : 'bg-blue-900 text-white font-extrabold'
+              }`}>
+                <Sparkles size={8} /> 4 AGENTES
+              </span>
+            </div>
+          </div>
+          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
+            activeTab === 'brain' ? 'text-white' : 'text-blue-900 group-hover:text-black'
+          }`} />
+        </button>
+
+        {/* 3. CRM & Vendas */}
         <button
           onClick={() => {
             onSelectTab('crm');

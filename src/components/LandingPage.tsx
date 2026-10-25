@@ -51,6 +51,7 @@ import {
   Shield
 } from 'lucide-react';
 import { calcularFolhaSalario } from '../db_tax';
+import { db, doc, setDoc } from '../lib/firebase';
 
 interface LandingPageProps {
   onEnterLogin: () => void;
@@ -73,6 +74,15 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
   const [isCheckingDomain, setIsCheckingDomain] = useState<boolean>(false);
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [erpUrl, setErpUrl] = useState<string>('');
+
+  // Estados para solicitação de credenciais
+  const [reqEmpresa, setReqEmpresa] = useState<string>('');
+  const [reqResponsavel, setReqResponsavel] = useState<string>('');
+  const [reqNuit, setReqNuit] = useState<string>('');
+  const [reqEmail, setReqEmail] = useState<string>('');
+  const [reqTelefone, setReqTelefone] = useState<string>('');
+  const [reqSubmitting, setReqSubmitting] = useState<boolean>(false);
+  const [reqSuccess, setReqSuccess] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchLink = async () => {
@@ -98,7 +108,47 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
 
   const handleOpenContact = (planName: string) => {
     setSelectedPlanForContact(planName);
+    setReqSuccess(false);
     setShowContactModal(true);
+  };
+
+  const handleSubmitCredentialRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reqEmpresa || !reqEmail || !reqTelefone) return;
+    setReqSubmitting(true);
+    const reqId = `REQ-${Date.now()}`;
+    const payload = {
+      id: reqId,
+      empresa: reqEmpresa,
+      responsavel: reqResponsavel,
+      nuit: reqNuit || 'Não informado',
+      email: reqEmail,
+      telefone: reqTelefone,
+      plano: selectedPlanForContact,
+      status: 'PENDENTE',
+      createdAt: new Date().toISOString()
+    };
+    try {
+      await fetch('/api/auth/request-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (err) {
+      console.error('Erro ao notificar API local:', err);
+    }
+    try {
+      await setDoc(doc(db, 'credential_requests', reqId), payload, { merge: true });
+    } catch (err) {
+      console.warn('Aviso ao gravar solicitação no Firebase:', err);
+    }
+    setReqSubmitting(false);
+    setReqSuccess(true);
+    setReqEmpresa('');
+    setReqResponsavel('');
+    setReqNuit('');
+    setReqEmail('');
+    setReqTelefone('');
   };
 
   const handleCheckDomain = async (e: React.FormEvent) => {
@@ -216,13 +266,8 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800 antialiased overflow-x-hidden selection:bg-blue-900 selection:text-white">
-      {/* Top Banner: Mozambique Domain & Regulatory Compliance */}
+      {/* Top Banner: Mozambique Regulatory Compliance */}
       <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-blue-950 text-white text-[11px] font-semibold py-2 px-4 border-b border-blue-900/60 text-center flex items-center justify-center gap-2 sm:gap-4 flex-wrap">
-        <span className="inline-flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded border border-emerald-400/30">
-          <Globe size={12} className="animate-pulse" />
-          <span>DOMÍNIO OFICIAL: clickpay.co.mz</span>
-        </span>
-        <span className="text-slate-300 hidden sm:inline">•</span>
         <span className="text-slate-200">
           🇲🇿 O ERP Cloud Nacional para Micro, Pequenas e Médias Empresas de Moçambique
         </span>
@@ -249,7 +294,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="text-lg font-black text-slate-950 tracking-tight">ClickPay</span>
-                <span className="text-[9px] bg-blue-900 text-white font-extrabold px-1.5 py-0.5 rounded tracking-widest uppercase">.CO.MZ</span>
               </div>
               <p className="text-[10px] text-slate-500 font-bold tracking-tight">Payroll Tech MZ · Moçambique</p>
             </div>
@@ -303,7 +347,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
               <span>PLATAFORMA ERP EM NUVEM · MOÇAMBIQUE 🇲🇿</span>
-              <span className="bg-blue-900 text-white text-[9px] px-1.5 py-0.2 rounded font-black">clickpay.co.mz</span>
             </div>
 
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-[1.12]">
@@ -427,139 +470,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                   <span>Abrir Demo</span>
                   <ArrowRight size={12} />
                 </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* SEÇÃO NOVIDADE: GESTÃO & COMPATIBILIDADE DE DOMÍNIOS .CO.MZ */}
-      <section id="dominios-mz" className="py-16 bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white border-b border-blue-900">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-          <div className="text-center space-y-3 max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full border border-emerald-500/30 text-[10px] font-black uppercase tracking-widest">
-              <Globe size={12} />
-              <span>PRESENÇA DIGITAL MOÇAMBICANA</span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">
-              O Seu ERP e Portal de Facturação no Domínio <span className="text-emerald-400">.CO.MZ</span>
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed">
-              O ClickPay aceita e configura automaticamente domínios nacionais moçambicanos (<code className="text-white bg-white/10 px-1 rounded font-bold">clickpay.co.mz</code> e <code className="text-white bg-white/10 px-1 rounded font-bold">suaempresa.co.mz</code>). Os seus clientes e funcionários acedem a faturas e recibos com o seu endereço exclusivo e certificado SSL ativo.
-            </p>
-          </div>
-
-          {/* Interactive Domain Check & Feature Box */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            {/* Left: Domain search & simulator */}
-            <div className="lg:col-span-6 bg-white/10 border border-white/15 rounded-3xl p-6 sm:p-8 backdrop-blur-md space-y-6">
-              <h3 className="text-base font-black text-white flex items-center gap-2">
-                <Search size={18} className="text-emerald-400" />
-                <span>Testador de Compatibilidade de Domínio (.co.mz)</span>
-              </h3>
-              <p className="text-xs text-slate-300 font-medium">
-                Introduza o nome de domínio da sua empresa em Moçambique para verificar a compatibilidade com os servidores Cloud do ClickPay:
-              </p>
-
-              <form onSubmit={handleCheckDomain} className="flex flex-col sm:flex-row gap-2.5">
-                <div className="relative flex-1">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Globe size={16} />
-                  </div>
-                  <input
-                    type="text"
-                    value={domainSearchInput}
-                    onChange={(e) => setDomainSearchInput(e.target.value)}
-                    placeholder="ex: empresa.co.mz"
-                    className="w-full pl-10 pr-4 py-3 bg-white/15 border border-white/20 rounded-2xl text-xs font-bold text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={isCheckingDomain}
-                  className="px-5 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 shrink-0"
-                >
-                  {isCheckingDomain ? (
-                    <span>A verificar...</span>
-                  ) : (
-                    <>
-                      <span>Verificar Domínio</span>
-                      <ArrowRight size={14} />
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {/* Result display */}
-              {domainCheckResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-emerald-950/70 border border-emerald-500/50 rounded-2xl p-4 space-y-2 text-xs"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-emerald-300 flex items-center gap-1.5">
-                      <CheckCircle2 size={16} className="text-emerald-400" />
-                      {domainCheckResult.domain} — Compatível!
-                    </span>
-                    <span className="text-[10px] bg-emerald-400 text-slate-950 font-black px-2 py-0.5 rounded">
-                      SSL ATIVO
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-200">
-                    {domainCheckResult.message || 'Pronto para configurar o apontamento DNS e ativar o portal da sua empresa.'}
-                  </p>
-                </motion.div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3 text-[11px] text-slate-300 pt-2 border-t border-white/10">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck size={16} className="text-emerald-400 shrink-0" />
-                  <span>Certificado SSL/TLS Automático</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Server size={16} className="text-blue-400 shrink-0" />
-                  <span>DNS Moçambique (TDM/CIUEM)</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: 3 Key Domain Features */}
-            <div className="lg:col-span-6 space-y-4">
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-2 hover:bg-white/10 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-600/30 text-blue-300 flex items-center justify-center font-black">
-                    🌐
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-white">Domínio Oficial e Subdomínios Dedicados</h4>
-                    <p className="text-xs text-slate-300 font-medium">Acesso centralizado através de <b>clickpay.co.mz</b> ou no seu próprio subdomínio.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-2 hover:bg-white/10 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-600/30 text-emerald-300 flex items-center justify-center font-black">
-                    📄
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-white">Facturas e Recibos com Link Oficial</h4>
-                    <p className="text-xs text-slate-300 font-medium">Os seus clientes recebem links de validação direta e QR Code que abrem no endereço .co.mz seguro.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-2 hover:bg-white/10 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-600/30 text-amber-300 flex items-center justify-center font-black">
-                    🔒
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-white">Portal do Funcionário em .CO.MZ</h4>
-                    <p className="text-xs text-slate-300 font-medium">Os colaboradores podem consultar recibos de salário, férias e histórico laboral com login protegido.</p>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -727,7 +637,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
 
             <div className="md:col-span-5 bg-gradient-to-br from-slate-900 to-blue-950 text-white p-6 rounded-2xl space-y-4 shadow-inner">
               <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <span className="text-[10px] font-mono text-emerald-400 font-bold">CLICKPAY CLOUD MZ</span>
                 <span className="text-[10px] text-slate-400 font-bold">Moçambique</span>
               </div>
               <div className="space-y-2">
@@ -908,10 +817,10 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                 </p>
                 <div>
                   <span className="text-2xl sm:text-3xl font-black text-slate-950 font-mono">
-                    {annualBilling ? '1.250,00 MT' : '1.500,00 MT'}
+                    {annualBilling ? '2.500,00 MT' : '3.000,00 MT'}
                   </span>
                   <span className="text-[10px] text-slate-400 font-bold block">
-                    {annualBilling ? 'Por mês (Cobrança anual: 15.000 MT)' : 'Mensal / Sem fidelização'}
+                    {annualBilling ? 'Por mês (Cobrança anual: 30.000 MT)' : 'Mensal / Sem fidelização'}
                   </span>
                 </div>
                 
@@ -932,7 +841,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>1 Armazém de Stock</span>
+                    <span>1 Armazém de Stock + Backup Firebase</span>
                   </li>
                   <li className="flex items-center gap-2">
                     <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
@@ -965,10 +874,10 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                 </p>
                 <div>
                   <span className="text-2xl sm:text-3xl font-black text-blue-900 font-mono">
-                    {annualBilling ? '2.500,00 MT' : '3.000,00 MT'}
+                    {annualBilling ? '4.166,00 MT' : '5.000,00 MT'}
                   </span>
                   <span className="text-[10px] text-slate-400 font-bold block">
-                    {annualBilling ? 'Por mês (Cobrança anual: 30.000 MT)' : 'Mensal / Acesso completo RH'}
+                    {annualBilling ? 'Por mês (Cobrança anual: 50.000 MT)' : 'Mensal / Acesso completo RH'}
                   </span>
                 </div>
                 
@@ -1018,10 +927,10 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                 </p>
                 <div>
                   <span className="text-2xl sm:text-3xl font-black text-slate-950 font-mono">
-                    {annualBilling ? '3.750,00 MT' : '4.500,00 MT'}
+                    {annualBilling ? '5.416,00 MT' : '6.500,00 MT'}
                   </span>
                   <span className="text-[10px] text-slate-400 font-bold block">
-                    {annualBilling ? 'Por mês (Cobrança anual: 45.000 MT)' : 'Mensal / Multi-armazém'}
+                    {annualBilling ? 'Por mês (Cobrança anual: 65.000 MT)' : 'Mensal / Multi-armazém'}
                   </span>
                 </div>
                 
@@ -1062,54 +971,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
         </div>
       </section>
 
-      {/* SEÇÃO: PERGUNTAS FREQUENTES (FAQ) INTERACTIVAS */}
-      <section id="faq" className="py-20 bg-white border-t border-slate-200/80">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-          <div className="text-center space-y-3">
-            <span className="text-blue-900 font-black text-xs uppercase tracking-widest block">Perguntas Frequentes</span>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">
-              Esclareça as Suas Dúvidas Sobre o ClickPay
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 font-medium">
-              Tudo o que precisa de saber sobre o funcionamento do ERP em Moçambique e a vinculação do seu domínio .co.mz.
-            </p>
-          </div>
-
-          <div className="space-y-3 text-left">
-            {faqItems.map((faq, fidx) => {
-              const isOpen = openFaqIndex === fidx;
-              return (
-                <div 
-                  key={fidx} 
-                  className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden transition-all"
-                >
-                  <button
-                    onClick={() => setOpenFaqIndex(isOpen ? null : fidx)}
-                    className="w-full p-5 text-left flex items-center justify-between gap-4 font-bold text-xs sm:text-sm text-slate-900 cursor-pointer"
-                  >
-                    <span>{faq.q}</span>
-                    <ChevronDown size={18} className={`text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  <AnimatePresence>
-                    {isOpen && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="px-5 pb-5 text-xs text-slate-600 leading-relaxed font-medium border-t border-slate-200/60 pt-3"
-                      >
-                        {faq.a}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
       {/* SEÇÃO CONTACTO & AGENDAMENTO DE DEMO */}
       <section id="contacto" className="py-20 bg-slate-900 text-white">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-12 gap-10 items-center text-left">
@@ -1119,7 +980,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
               Pronto para Simplificar a Gestão da Sua Empresa?
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed">
-              Agende uma demonstração prática de 15 minutos com a nossa equipa ou inicie a sua conta grátis agora mesmo.
+              Agende uma demonstração prática de 15 minutos com a nossa equipa ou solicite as suas credenciais de acesso agora mesmo.
             </p>
 
             <div className="space-y-3 text-xs pt-2">
@@ -1156,7 +1017,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
           </div>
 
           <div className="md:col-span-6 bg-white/10 border border-white/15 p-6 sm:p-8 rounded-3xl backdrop-blur-md space-y-4">
-            <h3 className="text-base font-black text-white">Criar Conta ou Solicitar Demonstração</h3>
+            <h3 className="text-base font-black text-white">Criar Conta ou Solicitar Credenciais</h3>
             <p className="text-xs text-slate-300 font-medium">Preencha os dados e receba acesso imediato ao ambiente do ClickPay ERP:</p>
             
             <div className="space-y-3">
@@ -1166,6 +1027,14 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
               >
                 <Building2 size={16} />
                 <span>Registar Empresa Online</span>
+              </button>
+
+              <button
+                onClick={() => handleOpenContact('Starter')}
+                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-2xl text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Mail size={16} />
+                <span>Solicitar Credenciais de Acesso</span>
               </button>
 
               <a
@@ -1198,7 +1067,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
               />
               <div>
                 <span className="text-sm font-black tracking-wider block text-white">ClickPay Moçambique</span>
-                <span className="text-[10px] text-emerald-400 font-bold block uppercase tracking-widest">https://clickpay.co.mz</span>
               </div>
             </div>
             
@@ -1214,16 +1082,16 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
             </p>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
-              <span className="text-slate-400 font-mono">clickpay.co.mz · Servidores Cloud MZ</span>
+              <span className="text-slate-400 font-mono">clickpay.co.mz · Servidores Cloud MZ (Firebase Sync)</span>
             </div>
           </div>
         </div>
       </footer>
 
-      {/* Modal de Contacto para Subscrições */}
+      {/* Modal de Contacto e Solicitação de Credenciais */}
       {showContactModal && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative space-y-6">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative space-y-5 max-h-[92vh] overflow-y-auto">
             <button
               onClick={() => setShowContactModal(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors p-1 cursor-pointer"
@@ -1231,55 +1099,124 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
               <X size={18} />
             </button>
 
-            <div className="space-y-2 text-center">
+            <div className="space-y-1.5 text-center">
               <div className="w-12 h-12 bg-blue-50 text-blue-900 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">
-                🏢
+                🔑
               </div>
-              <h3 className="text-lg font-black text-slate-950">Subscrição do Plano {selectedPlanForContact}</h3>
+              <h3 className="text-lg font-black text-slate-950">Solicitar Credenciais ({selectedPlanForContact})</h3>
               <p className="text-xs text-slate-500 font-medium">
-                Pode criar conta autonomamente ou contactar a equipa comercial para fatura pró-forma:
+                Solicite as suas credenciais de acesso ou crie a conta diretamente. O Administrador será notificado de imediato!
               </p>
             </div>
 
-            <div className="space-y-3">
+            {reqSuccess ? (
+              <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-3">
+                <div className="w-10 h-10 bg-emerald-600 text-white rounded-full flex items-center justify-center mx-auto">
+                  <CheckCircle2 size={20} />
+                </div>
+                <h4 className="text-sm font-black text-emerald-950">Pedido Enviado com Sucesso!</h4>
+                <p className="text-xs text-emerald-800 leading-relaxed">
+                  O Administrador (<b>gersonjcumbane@gmail.com</b>) recebeu a notificação em tempo real no sistema e no Firebase. As suas credenciais serão enviadas em breve!
+                </p>
+                <button
+                  onClick={() => {
+                    setReqSuccess(false);
+                    setShowContactModal(false);
+                  }}
+                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitCredentialRequest} className="space-y-3 text-left">
+                <div>
+                  <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">Nome da Empresa *</label>
+                  <input
+                    type="text"
+                    required
+                    value={reqEmpresa}
+                    onChange={(e) => setReqEmpresa(e.target.value)}
+                    placeholder="Ex: Comercial Maputo Lda"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">Responsável *</label>
+                    <input
+                      type="text"
+                      required
+                      value={reqResponsavel}
+                      onChange={(e) => setReqResponsavel(e.target.value)}
+                      placeholder="Seu Nome"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">NUIT da Empresa</label>
+                    <input
+                      type="text"
+                      value={reqNuit}
+                      onChange={(e) => setReqNuit(e.target.value)}
+                      placeholder="400123456"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:bg-white focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">E-mail Corporativo *</label>
+                    <input
+                      type="email"
+                      required
+                      value={reqEmail}
+                      onChange={(e) => setReqEmail(e.target.value)}
+                      placeholder="email@empresa.co.mz"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">Telefone / WhatsApp *</label>
+                    <input
+                      type="tel"
+                      required
+                      value={reqTelefone}
+                      onChange={(e) => setReqTelefone(e.target.value)}
+                      placeholder="+258 84..."
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={reqSubmitting}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-extrabold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Mail size={14} />
+                  <span>{reqSubmitting ? 'A Notificar Administrador...' : 'Solicitar Credenciais ao Administrador'}</span>
+                </button>
+              </form>
+            )}
+
+            <div className="space-y-3 pt-1">
+              <div className="relative my-2">
+                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
+                <div className="relative flex justify-center text-[10px] font-bold uppercase"><span className="bg-white px-3 text-slate-400">OU REGISTO DIRETO</span></div>
+              </div>
+
               <button
                 onClick={() => {
                   setShowContactModal(false);
                   if (onEnterRegister) onEnterRegister();
                   else onEnterLogin();
                 }}
-                className="w-full py-3.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-2xl text-xs transition-all shadow-md shadow-blue-900/15 cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2"
               >
                 <Building2 size={15} />
-                <span>Registar Empresa & Iniciar Agora</span>
+                <span>Criar Conta & Configurar Automaticamente</span>
               </button>
-
-              <div className="relative my-3">
-                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
-                <div className="relative flex justify-center text-[10px] font-bold uppercase"><span className="bg-white px-3 text-slate-400">OU FALE COM O SUPORTE</span></div>
-              </div>
-
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3 text-xs">
-                <div className="flex items-center gap-3">
-                  <Mail size={15} className="text-blue-900 shrink-0" />
-                  <div>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">Email Direto</p>
-                    <a href="mailto:gersonjcumbane@gmail.com" className="font-bold text-blue-900 hover:underline">
-                      gersonjcumbane@gmail.com
-                    </a>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <Phone size={15} className="text-emerald-600 shrink-0" />
-                  <div>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">Telefone / WhatsApp</p>
-                    <a href="tel:+258842014173" className="font-bold text-slate-800 hover:underline">
-                      +258 84 201 4173 / +258 86 139 0061
-                    </a>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>

@@ -2746,19 +2746,23 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
       let compraAdicionada = null;
       if (autoSave) {
         const periodoMes = new Date(parsedData.dataEmissao || Date.now()).toLocaleString('pt-MZ', { month: 'long', year: 'numeric' });
+        const categoriaMapeada = (['Insumos', 'Equipamentos', 'Servicos', 'Renda', 'Transporte'].includes(parsedData.categoria)
+          ? parsedData.categoria
+          : 'Servicos') as any;
+
         compraAdicionada = addCompra({
           data: parsedData.dataEmissao || new Date().toISOString().split('T')[0],
           fornecedor: parsedData.fornecedor,
           nuit_fornecedor: parsedData.nuit || '',
-          numero_fatura: parsedData.numeroFactura,
+          numero_factura: parsedData.numeroFactura,
           descricao: `[BRAIN AP] ${parsedData.categoria || 'Despesa Geral'} - Factura ${parsedData.numeroFactura}`,
-          subtotal: parsedData.subtotalMzn || (parsedData.valorTotalMzn / 1.16),
+          categoria: categoriaMapeada,
+          valor_base: parsedData.subtotalMzn || (parsedData.valorTotalMzn / 1.16),
           taxa_iva: parsedData.taxaIva || 16,
           valor_iva: parsedData.valorIvaMzn || (parsedData.valorTotalMzn - (parsedData.valorTotalMzn / 1.16)),
-          total: parsedData.valorTotalMzn,
-          tipo_despesa: 'Operacional',
-          pago: false,
-          meio_pagamento: 'Pendente',
+          total_com_iva: parsedData.valorTotalMzn,
+          estado: 'Pendente',
+          metodo_pagamento: 'Transferencia_Bancaria',
           periodo: periodoMes
         });
       }

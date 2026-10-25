@@ -30,6 +30,7 @@ import {
   Warehouse,
   Tag
 } from 'lucide-react';
+import { db, doc, setDoc } from '../lib/firebase';
 
 interface OnboardingWizardProps {
   onCancel: () => void;
@@ -181,6 +182,40 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
       const data = await res.json();
 
       if (res.ok && data.sucesso) {
+        // Sincronizar empresa, senha e alerta de credenciais no Firebase Firestore
+        try {
+          const clientId = data.usuario?.id || `CLI-${Date.now()}`;
+          await setDoc(doc(db, 'saas_clients', clientId), {
+            id: clientId,
+            companyName: nomeEmpresa || `${nome} ${apelido}`,
+            tradeName: nomeEmpresa || `${nome} ${apelido}`,
+            nuit: nuit || '400000000',
+            email,
+            phone: `+258${contacto}`,
+            address: `${endereco || 'Maputo'}, ${provincia}`,
+            plan: selectedPlan === 'Starter' ? 'Bronze' : selectedPlan === 'Growth' ? 'Silver' : 'Gold',
+            monthlyFee: selectedPlan === 'Starter' ? 3000 : selectedPlan === 'Growth' ? 5000 : 6500,
+            status: 'Ativo',
+            adminName: `${nome} ${apelido}`.trim(),
+            adminPassword: senha,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          await setDoc(doc(db, 'credential_requests', `ONB-${Date.now()}`), {
+            id: `ONB-${Date.now()}`,
+            empresa: nomeEmpresa || `${nome} ${apelido}`,
+            responsavel: `${nome} ${apelido}`.trim(),
+            nuit: nuit || 'Não informado',
+            email,
+            telefone: `+258${contacto}`,
+            plano: selectedPlan,
+            status: 'REGISTADO_ONLINE',
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (fbErr) {
+          console.warn('Aviso ao sincronizar onboarding no Firebase:', fbErr);
+        }
+
         localStorage.setItem('paytek_auth', 'true');
         localStorage.setItem('paytek_token', data.token);
         localStorage.setItem('paytek_user', email);
@@ -206,9 +241,9 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
   // Price formatting helper
   const getPlanPrice = (plan: 'Starter' | 'Growth' | 'Business') => {
     switch (plan) {
-      case 'Starter': return '1 500,00 MT';
-      case 'Growth': return '3 000,00 MT';
-      case 'Business': return '4 500,00 MT';
+      case 'Starter': return '3 000,00 MT';
+      case 'Growth': return '5 000,00 MT';
+      case 'Business': return '6 500,00 MT';
     }
   };
 
@@ -990,16 +1025,16 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
                       <div className="space-y-2">
                         <h3 className="text-sm font-extrabold text-slate-900">Starter</h3>
                         <div>
-                          <span className="text-xl font-black text-slate-900">1 500,00 MT</span>
+                          <span className="text-xl font-black text-slate-900">3 000,00 MT</span>
                           <span className="text-[10px] text-slate-400 font-bold">/mês</span>
                         </div>
-                        <p className="text-[10px] text-slate-500 font-semibold">Até 2 utilizador(es)</p>
+                        <p className="text-[10px] text-slate-500 font-semibold">Até 5 utilizador(es)</p>
 
                         <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> 2 utilizadores</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo a todas as funcionalidades</li>
+                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 5 utilizadores</li>
+                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo + Backup Cloud Firebase</li>
                           <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Conformidade fiscal MZ/ZA</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte por email</li>
+                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte por email e WhatsApp</li>
                         </ul>
                       </div>
                     </div>
@@ -1020,13 +1055,13 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
                       <div className="space-y-2">
                         <h3 className="text-sm font-extrabold text-slate-900">Growth</h3>
                         <div>
-                          <span className="text-xl font-black text-slate-900">3 000,00 MT</span>
+                          <span className="text-xl font-black text-slate-900">5 000,00 MT</span>
                           <span className="text-[10px] text-slate-400 font-bold">/mês</span>
                         </div>
-                        <p className="text-[10px] text-slate-500 font-semibold">Até 4 utilizador(es)</p>
+                        <p className="text-[10px] text-slate-500 font-semibold">Até 15 utilizador(es)</p>
 
                         <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 4 utilizadores</li>
+                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 15 utilizadores</li>
                           <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo a todas as funcionalidades</li>
                           <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Conformidade fiscal MZ/ZA</li>
                           <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte prioritário</li>
@@ -1046,16 +1081,16 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
                       <div className="space-y-2">
                         <h3 className="text-sm font-extrabold text-slate-900">Business</h3>
                         <div>
-                          <span className="text-xl font-black text-slate-900">4 500,00 MT</span>
+                          <span className="text-xl font-black text-slate-900">6 500,00 MT</span>
                           <span className="text-[10px] text-slate-400 font-bold">/mês</span>
                         </div>
-                        <p className="text-[10px] text-slate-500 font-semibold">Até 6 utilizador(es)</p>
+                        <p className="text-[10px] text-slate-500 font-semibold">Até 30 utilizador(es)</p>
 
                         <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 6 utilizadores</li>
+                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 30 utilizadores</li>
                           <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo a todas as funcionalidades</li>
                           <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Conformidade fiscal MZ/ZA</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte prioritário</li>
+                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte prioritário VIP</li>
                         </ul>
                       </div>
                     </div>

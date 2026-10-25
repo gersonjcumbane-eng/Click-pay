@@ -20,9 +20,12 @@ import {
   Lock,
   UserPlus,
   RefreshCw,
-  ArrowUpRight
+  ArrowUpRight,
+  Bell,
+  Cloud
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 
 interface ClientCompany {
   id: string;
@@ -144,7 +147,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
   const [logo, setLogo] = useState('');
-  const [feeBase, setFeeBase] = useState('2000');
+  const [feeBase, setFeeBase] = useState('3000');
   const [feePorSlip, setFeePorSlip] = useState('150');
   const [newPassword, setNewPassword] = useState('');
   const [subStatus, setSubStatus] = useState<'ativo' | 'suspenso' | 'pendente'>('ativo');
@@ -158,11 +161,15 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   // Edit fields state for managing the subscription of selected client
   const [editStatus, setEditStatus] = useState<'ativo' | 'suspenso' | 'pendente'>('ativo');
   const [editPlan, setEditPlan] = useState<'Bronze' | 'Silver' | 'Gold' | 'Platinum'>('Bronze');
-  const [editFeeBase, setEditFeeBase] = useState('2000');
+  const [editFeeBase, setEditFeeBase] = useState('3000');
   const [editFeePorSlip, setEditFeePorSlip] = useState('150');
   const [editNextBillingDate, setEditNextBillingDate] = useState('2026-07-28');
   const [editPassword, setEditPassword] = useState('');
   const [updatingSubscription, setUpdatingSubscription] = useState(false);
+
+  // Solicitações de Credenciais em tempo real (Firebase + API)
+  const [credentialRequests, setCredentialRequests] = useState<any[]>([]);
+  const [firebaseSynced, setFirebaseSynced] = useState<boolean>(true);
 
   // Estados para Gestão Dinâmica de Logins Firebase
   const [fbUsers, setFbUsers] = useState<any[]>([]);
@@ -236,9 +243,56 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     }
   };
 
+  const fetchCredentialRequests = async () => {
+    try {
+      const res = await fetch('/api/admin/credential-requests');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setCredentialRequests(prev => {
+            const combined = [...prev];
+            data.forEach(item => {
+              if (!combined.some(c => c.id === item.id)) combined.unshift(item);
+            });
+            return combined;
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao buscar solicitações de credenciais:', e);
+    }
+  };
+
   useEffect(() => {
     fetchClients();
     fetchFbUsers();
+    fetchCredentialRequests();
+
+    let unsubReq: (() => void) | undefined;
+    try {
+      unsubReq = onSnapshot(collection(db, 'credential_requests'), (snap) => {
+        const list: any[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        if (list.length > 0) {
+          setCredentialRequests(prev => {
+            const combined = [...prev];
+            list.forEach(item => {
+              if (!combined.some(c => c.id === item.id)) {
+                combined.unshift(item);
+                showSuccess(`🔑 Nova solicitação de credenciais recebida: ${item.empresa || item.email}`);
+              }
+            });
+            return combined;
+          });
+        }
+      });
+    } catch (e) {
+      console.warn('Listener Firebase credential_requests:', e);
+    }
+
+    return () => {
+      if (unsubReq) unsubReq();
+    };
   }, []);
 
   const handleCreateFbUser = async (e: React.FormEvent) => {
@@ -247,6 +301,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       alert('Por favor, defina o e-mail e a palavra-passe do utilizador.');
       return;
     }
+    const targetCompanyId = newFbCompanyId || (clients[0]?.id || 'cli_bronze');
     try {
       const res = await fetch('/api/firebase-auth/users', {
         method: 'POST',
@@ -255,17 +310,29 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
           email: newFbEmail,
           password: newFbPassword,
           role: newFbRole,
-          companyId: newFbCompanyId || (clients[0]?.id || 'cli_bronze')
+          companyId: targetCompanyId
         })
       });
       if (!res.ok) throw new Error('Erro ao sincronizar com o Firebase Auth.');
-      alert('Novo utilizador registado e integrado no Firebase Auth com sucesso!');
+
+      try {
+        await setDoc(doc(db, 'saas_clients', targetCompanyId), {
+          email: newFbEmail,
+          adminPassword: newFbPassword,
+          role: newFbRole,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (fbErr) {
+        console.warn('Aviso ao gravar utilizador no Firestore:', fbErr);
+      }
+
+      showSuccess('Novo utilizador registado e sincronizado no Firebase com sucesso!');
       setNewFbEmail('');
       setNewFbPassword('');
       fetchFbUsers();
       fetchClients();
     } catch (err: any) {
-      alert(err.message || 'Erro ao criar conta de acesso.');
+      showError(err.message || 'Erro ao criar conta de acesso.');
     }
   };
 
@@ -284,13 +351,27 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
         })
       });
       if (!res.ok) throw new Error('Erro ao atualizar palavra-passe.');
-      alert(`Palavra-passe de ${email} atualizada com sucesso no Firebase!`);
+
+      try {
+        const comp = clients.find(c => c.email === email);
+        if (comp) {
+          await setDoc(doc(db, 'saas_clients', comp.id), {
+            email,
+            adminPassword: editingUserPassword,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      } catch (fbErr) {
+        console.warn('Aviso ao atualizar senha no Firestore:', fbErr);
+      }
+
+      showSuccess(`Palavra-passe de ${email} atualizada com sucesso no Firebase!`);
       setEditingUserEmail(null);
       setEditingUserPassword('');
       fetchFbUsers();
       fetchClients();
     } catch (err: any) {
-      alert(err.message || 'Erro ao guardar nova senha.');
+      showError(err.message || 'Erro ao guardar nova senha.');
     }
   };
 
@@ -389,8 +470,30 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       });
 
       if (!res.ok) throw new Error('Erro ao registar nova empresa cliente.');
+      const resData = await res.json();
+      const createdId = resData.cliente?.id || `cli_${Date.now()}`;
+
+      try {
+        await setDoc(doc(db, 'saas_clients', createdId), {
+          id: createdId,
+          companyName: nome,
+          tradeName: nome,
+          nuit,
+          email,
+          phone: telefone,
+          address: `${endereco}, ${distrito}, ${provincia}`,
+          plan: subPlan,
+          monthlyFee: Number(feeBase),
+          status: subStatus === 'ativo' ? 'Ativo' : subStatus === 'suspenso' ? 'Suspenso' : 'Pendente',
+          adminName: nome,
+          adminPassword: newPassword,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (fbErr) {
+        console.warn('Aviso ao gravar cliente no Firebase:', fbErr);
+      }
       
-      showSuccess('Nova empresa cliente registada com sucesso no portfólio de outsourcing!');
+      showSuccess('Nova empresa cliente registada e sincronizada no Firebase com sucesso!');
       setShowAddForm(false);
       
       // Reset fields
@@ -401,7 +504,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       setEmail('');
       setTelefone('');
       setLogo('');
-      setFeeBase('2000');
+      setFeeBase('3000');
       setFeePorSlip('150');
       setNewPassword('');
       setSubStatus('ativo');
@@ -435,7 +538,22 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
 
       if (!res.ok) throw new Error('Erro ao atualizar dados da assinatura SaaS.');
       const data = await res.json();
-      showSuccess(data.mensagem || 'Assinatura atualizada com sucesso!');
+
+      try {
+        const fbUpdate: any = {
+          plan: editPlan,
+          monthlyFee: Number(editFeeBase),
+          status: editStatus === 'ativo' ? 'Ativo' : editStatus === 'suspenso' ? 'Suspenso' : 'Pendente',
+          nextBillingDate: editNextBillingDate,
+          updatedAt: new Date().toISOString()
+        };
+        if (editPassword) fbUpdate.adminPassword = editPassword;
+        await setDoc(doc(db, 'saas_clients', selectedInvoiceClient.id), fbUpdate, { merge: true });
+      } catch (fbErr) {
+        console.warn('Aviso ao atualizar assinatura no Firebase:', fbErr);
+      }
+
+      showSuccess(data.mensagem || 'Assinatura e credenciais sincronizadas no Firebase!');
       await fetchClients();
     } catch (err: any) {
       showError(err.message || 'Erro ao guardar alterações.');
@@ -465,14 +583,76 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-900 hover:bg-blue-850 text-white rounded-xl text-xs font-bold transition-all shadow-md hover:shadow-lg active:scale-95 cursor-pointer shrink-0"
-        >
-          <Plus size={16} />
-          {showAddForm ? 'Fechar Formulário' : 'Novo Cliente Outsourcing'}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-[11px] font-extrabold">
+            <Cloud size={14} className="text-emerald-600" />
+            Firebase Realtime Sync Ativo
+          </span>
+          <button
+            onClick={() => setShowAddForm(!showAddForm)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-900 hover:bg-blue-850 text-white rounded-xl text-xs font-bold transition-all shadow-md hover:shadow-lg active:scale-95 cursor-pointer shrink-0"
+          >
+            <Plus size={16} />
+            {showAddForm ? 'Fechar Formulário' : 'Novo Cliente Outsourcing'}
+          </button>
+        </div>
       </div>
+
+      {/* Painel de Notificações de Solicitação de Credenciais em Tempo Real */}
+      {credentialRequests.length > 0 && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-5 shadow-xs space-y-3 print:hidden">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-amber-500 text-white rounded-xl">
+                <Bell size={16} />
+              </div>
+              <div>
+                <h3 className="text-xs font-black text-amber-950 uppercase tracking-wider">
+                  Notificações de Solicitação de Credenciais ({credentialRequests.length})
+                </h3>
+                <p className="text-[11px] text-amber-800">
+                  Clientes que solicitaram credenciais de acesso na página oficial (sincronizado via Firebase).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {credentialRequests.slice(0, 6).map((req) => (
+              <div key={req.id} className="bg-white p-3.5 rounded-xl border border-amber-200 shadow-2xs flex flex-col justify-between gap-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-900">{req.empresa}</span>
+                    <span className="text-[9px] font-black uppercase px-2 py-0.5 bg-blue-100 text-blue-900 rounded">
+                      {req.plano || 'Starter'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium">
+                    <b>Resp:</b> {req.responsavel || 'N/D'} | <b>NUIT:</b> {req.nuit || 'N/D'}
+                  </p>
+                  <p className="text-[11px] text-blue-900 font-mono font-bold">{req.email}</p>
+                  <p className="text-[11px] text-emerald-700 font-bold">Tel: {req.telefone}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddForm(true);
+                    setNome(req.empresa || '');
+                    setNuit(req.nuit && req.nuit !== 'Não informado' ? req.nuit : '');
+                    setEmail(req.email || '');
+                    setTelefone(req.telefone || '');
+                    setSubPlan(req.plano === 'Business' ? 'Gold' : req.plano === 'Growth' ? 'Silver' : 'Bronze');
+                    setFeeBase(req.plano === 'Business' ? '6500' : req.plano === 'Growth' ? '5000' : '3000');
+                  }}
+                  className="w-full py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-[10px] font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
+                >
+                  Provisionar Credenciais no Firebase
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Add Client Form Collapsible Panel (Hidden during print) */}
       {showAddForm && (

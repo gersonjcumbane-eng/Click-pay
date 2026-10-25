@@ -47,6 +47,7 @@ import { CRMVendas } from './components/CRMVendas';
 import OnboardingWizard from './components/OnboardingWizard';
 import { QuickIRPSWidget } from './components/QuickIRPSWidget';
 import { LeftModuleNav } from './components/LeftModuleNav';
+import { ClickPayBrain } from './components/ClickPayBrain';
 import { updateConfiguracaoFiscal, updateEmpresa } from './db_tax';
 import { useToast } from './context/ToastContext';
 
@@ -98,7 +99,7 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
 
 export default function App() {
   const { showSuccess, showError, showInfo } = useToast();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'employees' | 'simulator' | 'sissmo' | 'settings' | 'fintech' | 'contracts' | 'alerts' | 'clients' | 'financial'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'employees' | 'simulator' | 'sissmo' | 'settings' | 'fintech' | 'contracts' | 'alerts' | 'clients' | 'financial' | 'brain'>('dashboard');
   const [financialSubTab, setFinancialSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>('conformidade');
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [showLogin, setShowLogin] = useState<boolean>(false);
@@ -689,6 +690,15 @@ export default function App() {
                       company={company}
                       selectedPeriod={selectedPeriod}
                       initialSubTab={financialSubTab}
+                    />
+                  )}
+                  {activeTab === 'brain' && (
+                    <ClickPayBrain
+                      company={company}
+                      onNavigateToTab={(tab, subTab) => {
+                        setActiveTab(tab as any);
+                        if (subTab) setFinancialSubTab(subTab as any);
+                      }}
                     />
                   )}
                 </motion.div>

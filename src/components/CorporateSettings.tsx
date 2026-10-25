@@ -32,6 +32,8 @@ import {
 import { CompanyData, ConfigFiscal, EscalaoFiscalMoz } from '../types';
 import { matrizFiscaisMoçambique } from '../db_tax';
 import { useToast } from '../context/ToastContext';
+import EnvironmentMasking from './EnvironmentMasking';
+import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 
 interface CorporateSettingsProps {
   company: CompanyData;
@@ -120,27 +122,70 @@ export default function CorporateSettings({
 
   React.useEffect(() => {
     loadBackupHistory();
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = onSnapshot(collection(db, 'backups'), (snap) => {
+        const fbBackups: any[] = [];
+        snap.forEach((docSnap) => {
+          fbBackups.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        if (fbBackups.length > 0) {
+          setBackups((prev) => {
+            const merged = [...prev];
+            fbBackups.forEach((fbBkp) => {
+              if (!merged.some((m) => m.id === fbBkp.id)) {
+                merged.unshift(fbBkp);
+              }
+            });
+            return merged;
+          });
+        }
+      });
+    } catch (err) {
+      console.warn('Listener Firebase backups:', err);
+    }
+    return () => {
+      if (unsub) unsub();
+    };
   }, [company.nuit]);
 
   const handleTriggerBackup = async () => {
     setTriggeringBackup(true);
-    setBackupStep('A ligar à Cloud com encriptação SSL...');
+    setBackupStep('A ligar ao Firebase Cloud Firestore com encriptação SSL...');
     await new Promise(resolve => setTimeout(resolve, 600));
-    setBackupStep('A ler tabelas de colaboradores, contratos e remunerações...');
+    setBackupStep('A ler tabelas de colaboradores, contratos, senhas e remunerações...');
     await new Promise(resolve => setTimeout(resolve, 600));
-    setBackupStep('A compactar e a transmitir instantâneo com sucesso...');
+    setBackupStep('A sincronizar backup em tempo real com a base de dados Firebase...');
     await new Promise(resolve => setTimeout(resolve, 500));
 
     try {
       const res = await fetch('/api/backup/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: 'Manual (Utilizador)' })
+        body: JSON.stringify({ tipo: 'Manual (Firebase Cloud Sync)' })
       });
       const data = await res.json();
       if (data.success) {
-        setBackupStep('Cópia de segurança criada na Nuvem!');
-        showSuccess('Cópia de segurança criada com sucesso na Nuvem!');
+        if (data.backup) {
+          try {
+            await setDoc(doc(db, 'backups', data.backup.id), {
+              id: data.backup.id,
+              empresaId: data.backup.empresaId,
+              empresaNome: data.backup.empresaNome,
+              timestamp: data.backup.timestamp,
+              tipo: data.backup.tipo,
+              quantidadeColaboradores: data.backup.quantidadeColaboradores,
+              quantidadeLancamentos: data.backup.quantidadeLancamentos,
+              tamanhoKb: data.backup.tamanhoKb,
+              syncedWithFirebase: true,
+              createdAt: new Date().toISOString()
+            }, { merge: true });
+          } catch (fbErr) {
+            console.warn('Aviso ao gravar backup no Firebase Firestore:', fbErr);
+          }
+        }
+        setBackupStep('Cópia de segurança sincronizada com sucesso no Firebase!');
+        showSuccess('Cópia de segurança gravada no servidor e na base de dados Firebase!');
         await new Promise(resolve => setTimeout(resolve, 800));
         loadBackupHistory();
       } else {
@@ -358,8 +403,29 @@ export default function CorporateSettings({
           logo
         });
 
+        try {
+          await setDoc(doc(db, 'companies', nuit || 'default'), {
+            nome,
+            nuit,
+            endereco: `${provincia || ''}${provincia && distrito ? ', ' : ''}${distrito || ''}`,
+            pais,
+            provincia,
+            distrito,
+            regime_iva: regimeIva,
+            sector_negocio: sectorNegocio,
+            tamanho_empresa: tamanhoEmpresa,
+            regime_fiscal_pme: regimeFiscalPme,
+            nuel,
+            email,
+            telefone,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (fbErr) {
+          console.warn('Aviso ao sincronizar perfil no Firebase:', fbErr);
+        }
+
         setShowPerfilSuccess(true);
-        showSuccess('Perfil da empresa guardado com sucesso!');
+        showSuccess('Perfil da empresa guardado e sincronizado no Firebase com sucesso!');
         setTimeout(() => setShowPerfilSuccess(false), 4000);
       } else {
         showError(dataPerfil.erro || "Erro ao salvar perfil da empresa.");
@@ -464,6 +530,9 @@ export default function CorporateSettings({
           </div>
         </div>
       )}
+
+      {/* ENVIRONMENT MASKING: Proteção de Chaves Mestras e Tokens de Pagamento */}
+      <EnvironmentMasking userRole={userRole} containerId="settings_panel" />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Form Column: Perfil da Empresa (Exactly formatted as specified) */}

@@ -2,6 +2,37 @@
 <html lang="pt">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Defesa contra erros de extensões externas de navegador (ex: Chrome Extensions timeout)
+      (function() {
+        function isExtensionError(err, source) {
+          if (!err && !source) return false;
+          var str = (source || '') + ' ' + (err && (err.message || err.stack || String(err)) || '');
+          return (
+            str.includes('chrome-extension://') ||
+            str.includes('moz-extension://') ||
+            str.includes('chrome: call method') ||
+            str.includes('Extension context invalidated') ||
+            str.includes('ResizeObserver loop completed with undelivered notifications')
+          );
+        }
+
+        window.addEventListener('unhandledrejection', function(event) {
+          if (isExtensionError(event.reason, '')) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          if (isExtensionError(event.error, event.filename || event.message)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="ClickPay Moçambique (clickpay.co.mz) - O ERP em Nuvem para Micro, Pequenas e Médias Empresas. Faturação Eletrónica com QR Code AT, Salários com INSS/IRPS 2026, CRM e Liquidação via M-Pesa e e-Mola." />
     <meta name="keywords" content="ClickPay, Payroll Tech MZ, ERP Moçambique, Faturação Moçambique, Salários IRPS INSS, SISSMO Moçambique, M-Pesa Pagamentos, PGC-NIRF, ISPC, clickpay.co.mz" />
