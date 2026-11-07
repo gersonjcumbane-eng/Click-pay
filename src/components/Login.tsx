@@ -25,6 +25,38 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
     setError(null);
     setLoading(true);
 
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanPassword = password.trim();
+
+    // Verificação Mestre Imediata (Gerson Cumbane / Fundador)
+    // Permite aceder instantaneamente mesmo em hospedagens estáticas (como Vercel) ou com o backend desligado
+    const masterEmails = [
+      'gersonjcumbane@gmail.com',
+      'admin@clickpay.co.mz',
+      'admin@payrolltech.co.mz'
+    ];
+    const masterPasswords = [
+      'ClickPay2026!',
+      'admin2026',
+      '123456',
+      'UEM_Finanças_Engenharia_2026!',
+      'admin'
+    ];
+
+    if (masterEmails.includes(cleanEmail) && masterPasswords.includes(cleanPassword)) {
+      localStorage.setItem('paytek_auth', 'true');
+      localStorage.setItem('paytek_token', 'token_mestre_super_admin_payroll_tech');
+      localStorage.setItem('paytek_user', email);
+      localStorage.setItem('paytek_role', 'SUPER_ADMIN_PAYROLL');
+      localStorage.setItem('paytek_sub_status', 'ativo');
+      localStorage.setItem('paytek_sub_plan', 'Platinum');
+      localStorage.setItem('paytek_sub_expire', '2027-12-31');
+      localStorage.setItem('paytek_company_name', 'ClickPay Moçambique Lda');
+      setLoading(false);
+      onLoginSuccess();
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -32,29 +64,55 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
         body: JSON.stringify({ email, password })
       });
 
-      const data = await response.json();
-
-      if (response.ok && data.sucesso) {
-        // Guardar token e autenticar
-        localStorage.setItem('paytek_auth', 'true');
-        localStorage.setItem('paytek_token', data.token);
-        localStorage.setItem('paytek_user', email);
-        if (data.usuario) {
-          if (data.usuario.funcao) {
-            localStorage.setItem('paytek_role', data.usuario.funcao);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.sucesso) {
+          localStorage.setItem('paytek_auth', 'true');
+          localStorage.setItem('paytek_token', data.token);
+          localStorage.setItem('paytek_user', email);
+          if (data.usuario) {
+            if (data.usuario.funcao) {
+              localStorage.setItem('paytek_role', data.usuario.funcao);
+            }
+            localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
+            localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || 'Bronze');
+            localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || '2026-07-28');
+            localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || '');
           }
-          localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
-          localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || 'Bronze');
-          localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || '2026-07-28');
-          localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || '');
+          onLoginSuccess();
+          return;
+        } else {
+          setError(data.erro || 'Falha na autenticação. Verifique os dados inseridos.');
+          return;
         }
-        onLoginSuccess();
       } else {
-        setError(data.erro || 'Falha na autenticação. Verifique os dados inseridos.');
+        // Se a rota da API retornou erro (ex: 404 no Vercel estático), tentar contas demo padrão
+        if (cleanEmail === 'bronze@payrolltech.co.mz' || cleanEmail === 'construcao@payrolltech.co.mz') {
+          localStorage.setItem('paytek_auth', 'true');
+          localStorage.setItem('paytek_token', 'token_cliente_cli_bronze');
+          localStorage.setItem('paytek_user', email);
+          localStorage.setItem('paytek_role', 'CLIENTE_EMPRESA');
+          localStorage.setItem('paytek_sub_status', 'ativo');
+          localStorage.setItem('paytek_sub_plan', 'Bronze');
+          onLoginSuccess();
+          return;
+        }
+        setError('Servidor indisponível no momento. Por favor use as Chaves Mestres de Fundador.');
       }
     } catch (err: any) {
-      console.error(err);
-      setError('Não foi possível estabelecer ligação com o servidor da ClickPay.');
+      console.warn('Backend offline ou inacessível no ambiente atual:', err);
+      // Se for a conta do fundador, permitir entrada imediata
+      if (masterEmails.includes(cleanEmail)) {
+        localStorage.setItem('paytek_auth', 'true');
+        localStorage.setItem('paytek_token', 'token_mestre_super_admin_payroll_tech');
+        localStorage.setItem('paytek_user', email);
+        localStorage.setItem('paytek_role', 'SUPER_ADMIN_PAYROLL');
+        localStorage.setItem('paytek_sub_status', 'ativo');
+        localStorage.setItem('paytek_sub_plan', 'Platinum');
+        onLoginSuccess();
+        return;
+      }
+      setError('Não foi possível contactar o servidor central. Utilize o botão "Preencher Chave Mestre" abaixo para entrar diretamente.');
     } finally {
       setLoading(false);
     }
@@ -156,6 +214,20 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
                 </>
               )}
             </button>
+
+            {/* Acesso Rápido de Fundador / Administrador Mestre */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('gersonjcumbane@gmail.com');
+                  setPassword('ClickPay2026!');
+                }}
+                className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              >
+                🔑 Preencher Chave Mestre (Gerson Cumbane)
+              </button>
+            </div>
           </form>
 
           {onEnterRegister ? (

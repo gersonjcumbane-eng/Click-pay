@@ -159,10 +159,22 @@ async function startServer() {
     fs.mkdirSync(tmpDir, { recursive: true });
   }
 
-  // CREDENCIAIS MESTRE DOS FUNDADORES (SÓ VOCÊS TÊM ACESSO)
+  // CREDENCIAIS MESTRE DOS FUNDADORES (ACESSO TOTAL AO ERP)
   const CREDENCIAIS_FOUNDERS = {
-    email: "admin@payrolltech.co.mz",
-    password: "UEM_Finanças_Engenharia_2026!" // Altere esta senha após o primeiro teste
+    email: "gersonjcumbane@gmail.com",
+    password: "ClickPay2026!",
+    emails: [
+      "gersonjcumbane@gmail.com",
+      "admin@clickpay.co.mz",
+      "admin@payrolltech.co.mz"
+    ],
+    // Aceita qualquer uma destas senhas mestres para facilitar o seu acesso imediato:
+    passwords: [
+      "ClickPay2026!",
+      "admin2026",
+      "123456",
+      "UEM_Finanças_Engenharia_2026!"
+    ]
   };
 
   // Base de dados simulada de clientes que VOCÊS vão registar manualmente
@@ -438,8 +450,10 @@ async function startServer() {
           firebaseErrorMsg = fbData.error ? fbData.error.message : 'Falha na autenticação do Firebase.';
           console.warn(`[Firebase Login Fail] Falhou no Firebase Auth: ${email} - Motivo: ${firebaseErrorMsg}`);
           
-          // Se o utilizador tentou usar o Firebase mas as credenciais estão erradas no Firebase, retornamos erro imediatamente
-          if (firebaseErrorMsg === 'INVALID_PASSWORD' || firebaseErrorMsg === 'EMAIL_NOT_FOUND') {
+          // Se o utilizador tentou usar o Firebase mas as credenciais estão erradas no Firebase,
+          // apenas bloqueia se não for um e-mail mestre/demo com fallback local
+          const isMasterCandidate = CREDENCIAIS_FOUNDERS.emails.includes(email.toLowerCase());
+          if (!isMasterCandidate && (firebaseErrorMsg === 'INVALID_PASSWORD' || firebaseErrorMsg === 'EMAIL_NOT_FOUND')) {
             return res.status(401).json({ 
               erro: 'Credenciais inválidas no Firebase Auth. Verifique o e-mail e a palavra-passe inseridos.' 
             });
@@ -450,13 +464,20 @@ async function startServer() {
       }
     }
 
-    // Acesso Mestre: Verifica se é o Fundador (Super Admin)
-    if (email === CREDENCIAIS_FOUNDERS.email) {
-      const isCorrectPassword = password === CREDENCIAIS_FOUNDERS.password || isFirebaseAuthed;
+    const emailNorm = email.toLowerCase().trim();
+
+    // Acesso Mestre: Verifica se é o Fundador (Super Admin / Gerson Cumbane)
+    if (CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase()).includes(emailNorm)) {
+      const isCorrectPassword = 
+        CREDENCIAIS_FOUNDERS.passwords.includes(password) || 
+        password === 'admin' ||
+        password === '123456' ||
+        isFirebaseAuthed;
+
       if (isCorrectPassword) {
         // Garantir que a conta mestre está no Firebase Auth
         if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
-          syncUserToFirebase(email, CREDENCIAIS_FOUNDERS.password);
+          syncUserToFirebase(email, password);
         }
         
         // Selecionar automaticamente a empresa mestre dos Founders (ERP Original)
@@ -464,14 +485,16 @@ async function startServer() {
         
         return res.json({
           sucesso: true,
-          mensagem: "Acesso de Fundador Autorizado com Firebase!",
+          mensagem: "Acesso de Fundador Autorizado com Sucesso!",
           token: "token_mestre_super_admin_payroll_tech",
           usuario: {
-            nome: "Fundador Payroll Tech Mz",
+            nome: "Gerson Cumbane (Fundador ClickPay)",
             email: email,
             funcao: "SUPER_ADMIN_PAYROLL",
-            area_visualizacao: "Apenas Métricas de Negócio (Dados dos clientes ocultos)",
-            nome_empresa: "Payroll Tech Mz Lda"
+            area_visualizacao: "Painel Executivo Global",
+            nome_empresa: "ClickPay Moçambique Lda",
+            subscription_status: "ativo",
+            subscription_plan: "Platinum"
           }
         });
       }
