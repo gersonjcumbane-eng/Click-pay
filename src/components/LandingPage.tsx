@@ -3,52 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState } from 'react';
 import { 
-  Calculator, 
-  Percent, 
-  ShieldCheck, 
-  ArrowRight, 
+  Building2, 
   Lock, 
-  FileSpreadsheet, 
-  Users, 
-  CreditCard, 
-  Bell, 
-  FileText, 
+  ArrowRight, 
   CheckCircle2, 
-  Zap, 
-  ChevronRight, 
-  Info, 
-  Briefcase,
-  Play,
+  Users, 
+  Receipt, 
+  TrendingUp, 
+  Smartphone, 
+  ShieldCheck, 
+  Calculator, 
   Sparkles,
-  DollarSign,
-  Smartphone,
-  ShieldAlert,
-  ArrowUpRight,
-  TrendingUp,
-  Cpu,
-  Mail,
   Phone,
-  X,
-  Building2,
-  Warehouse,
-  Receipt,
-  Search,
-  Check,
-  Tag,
-  Globe,
-  Server,
-  Laptop,
-  ChevronDown,
-  HelpCircle,
+  Mail,
   MapPin,
-  Award,
-  ExternalLink,
-  Layers,
-  BarChart3,
-  Shield
+  X,
+  FileText
 } from 'lucide-react';
 import { calcularFolhaSalario } from '../db_tax';
 import { db, doc, setDoc } from '../lib/firebase';
@@ -60,49 +32,22 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlanDemo }: LandingPageProps) {
-  // Mini calculator state
   const [salarioBase, setSalarioBase] = useState<number>(35000);
   const [dependentes, setDependentes] = useState<number>(1);
-  const [selectedSectorLanding, setSelectedSectorLanding] = useState<string>('Comércio & Retalho');
-  const [loadingPlan, setLoadingPlan] = useState<'Bronze' | 'Silver' | 'Gold' | null>(null);
   const [showContactModal, setShowContactModal] = useState<boolean>(false);
-  const [selectedPlanForContact, setSelectedPlanForContact] = useState<string>('Growth');
-  const [annualBilling, setAnnualBilling] = useState<boolean>(false);
-  const [activeModuleTab, setActiveModuleTab] = useState<number>(0);
-  const [domainSearchInput, setDomainSearchInput] = useState<string>('minhaempresa.co.mz');
-  const [domainCheckResult, setDomainCheckResult] = useState<any>(null);
-  const [isCheckingDomain, setIsCheckingDomain] = useState<boolean>(false);
-  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
-  const [erpUrl, setErpUrl] = useState<string>('');
+  const [selectedPlanForContact, setSelectedPlanForContact] = useState<string>('Starter');
+  const [activeTab, setActiveTab] = useState<'salarios' | 'faturacao' | 'fintech' | 'crm'>('salarios');
 
-  // Estados para solicitação de credenciais
+  // Contact modal state
   const [reqEmpresa, setReqEmpresa] = useState<string>('');
   const [reqResponsavel, setReqResponsavel] = useState<string>('');
-  const [reqNuit, setReqNuit] = useState<string>('');
   const [reqEmail, setReqEmail] = useState<string>('');
   const [reqTelefone, setReqTelefone] = useState<string>('');
   const [reqSubmitting, setReqSubmitting] = useState<boolean>(false);
   const [reqSuccess, setReqSuccess] = useState<boolean>(false);
 
-  useEffect(() => {
-    const fetchLink = async () => {
-      try {
-        const response = await fetch('/api/fintech/obter-link-erp');
-        const data = await response.json();
-        if (data.sucesso) {
-          setErpUrl(data.url_ativa_producao);
-        }
-      } catch (err) {
-        console.error("A aguardar propagação estável do Cloud Run:", err);
-      }
-    };
-    fetchLink();
-  }, []);
-
-  // Compute live tax data for the landing page hero calculator
+  // Live calculation
   const res = calcularFolhaSalario(salarioBase, 0, dependentes);
-  const percentagemLiquido = salarioBase > 0 ? (res.salarioLiquido / salarioBase) * 100 : 0;
-  const percentagemDeducoes = salarioBase > 0 ? (res.totalDescontos / salarioBase) * 100 : 0;
   const encargoPatronalInss = salarioBase * 0.04;
   const custoTotalEmpresa = salarioBase + encargoPatronalInss;
 
@@ -112,7 +57,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
     setShowContactModal(true);
   };
 
-  const handleSubmitCredentialRequest = async (e: React.FormEvent) => {
+  const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reqEmpresa || !reqEmail || !reqTelefone) return;
     setReqSubmitting(true);
@@ -121,7 +66,6 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
       id: reqId,
       empresa: reqEmpresa,
       responsavel: reqResponsavel,
-      nuit: reqNuit || 'Não informado',
       email: reqEmail,
       telefone: reqTelefone,
       plano: selectedPlanForContact,
@@ -133,1111 +77,593 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
-    } catch (err) {
-      console.error('Erro ao notificar API local:', err);
-    }
-    try {
-      await setDoc(doc(db, 'credential_requests', reqId), payload, { merge: true });
-    } catch (err) {
-      console.warn('Aviso ao gravar solicitação no Firebase:', err);
-    }
-    setReqSubmitting(false);
-    setReqSuccess(true);
-    setReqEmpresa('');
-    setReqResponsavel('');
-    setReqNuit('');
-    setReqEmail('');
-    setReqTelefone('');
-  };
-
-  const handleCheckDomain = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!domainSearchInput) return;
-    setIsCheckingDomain(true);
-    try {
-      const resp = await fetch('/api/domains/verify-mz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: domainSearchInput })
-      });
-      const data = await resp.json();
-      setDomainCheckResult(data);
-    } catch (err) {
-      setDomainCheckResult({
-        success: true,
-        domain: domainSearchInput,
-        isCoMz: true,
-        verified: true,
-        sslStatus: 'SSL_ACTIVE_SECURE',
-        message: `Domínio ${domainSearchInput} 100% compatível com a infraestrutura ClickPay Cloud em Moçambique!`
-      });
+      }).catch(() => null);
+      await setDoc(doc(db, 'credential_requests', reqId), payload, { merge: true }).catch(() => null);
     } finally {
-      setIsCheckingDomain(false);
+      setReqSubmitting(false);
+      setReqSuccess(true);
     }
   };
-
-  const handlePlanClick = async (plan: 'Bronze' | 'Silver' | 'Gold') => {
-    setLoadingPlan(plan);
-    try {
-      await onEnterPlanDemo(plan);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingPlan(null);
-    }
-  };
-
-  // Modules interactive showcase data
-  const modulesList = [
-    {
-      id: 'salarios',
-      title: 'Salários & RH Moçambique',
-      icon: Users,
-      badge: 'IRPS 2026 + INSS SISSMO',
-      description: 'Automatize a folha de vencimentos em 1 clique. Retenções automáticas de IRPS por dependentes familiares, 3% trabalhador + 4% patronal de INSS, e exportação direta da guia SISSMO.',
-      features: ['Emissão de Recibos em PDF/A4', 'Contratos Lei 13/2023', 'Exportação SISSMO Oficial', 'Liquidação via M-Pesa & e-Mola']
-    },
-    {
-      id: 'faturacao',
-      title: 'Facturação Eletrónica & Vendas',
-      icon: Receipt,
-      badge: 'ISPC (3%) ou IVA (16%)',
-      description: 'Emita Facturas (FT), Facturas-Recibo (FR), Vendas a Dinheiro (VD) e Pró-Formas certificadas com QR Code da Autoridade Tributária e referência de pagamento.',
-      features: ['Regime ISPC para Microempresas', 'Regime Geral IVA 16%', 'QR Code Oficial AT', 'Envio automático por WhatsApp e Email']
-    },
-    {
-      id: 'crm',
-      title: 'CRM & Pipeline Comercial',
-      icon: TrendingUp,
-      badge: 'Gestão de Clientes',
-      description: 'Acompanhe leads, crie propostas comerciais profissionais e converta oportunidades em vendas fechadas e facturas com total integração financeira.',
-      features: ['Pipeline visual Kanban', 'Histórico de Contactos', 'Conversão direta em Venda', 'Controlo de Margens de Lucro']
-    },
-    {
-      id: 'compras',
-      title: 'Compras, Stocks & Armazéns',
-      icon: Warehouse,
-      badge: 'Multi-Armazém',
-      description: 'Registo de faturas de fornecedores com dedução de IVA suportado, controlo de inventário em múltiplos armazéns e alertas de ruptura de stock.',
-      features: ['Dedução de IVA Suportado', 'Multi-armazéns e Lojas', 'Ponto de Encomenda Automático', 'Valorização de Stock PGC-NIRF']
-    },
-    {
-      id: 'fintech',
-      title: 'Fintech M-Pesa / e-Mola',
-      icon: Smartphone,
-      badge: 'Liquidação em Lote',
-      description: 'Pague ordenados e fornecedores instantaneamente através de carteiras móveis nacionais sem filas em balcões de bancos.',
-      features: ['Pagamentos em Lote (B2C)', 'Disparo para M-Pesa e e-Mola', 'Extratos e Comprovativos', 'Conciliação Bancária SIMO']
-    },
-    {
-      id: 'contabilidade',
-      title: 'Painel & Relatórios PGC-NIRF',
-      icon: Calculator,
-      badge: 'Sem Jargão Contabilístico',
-      description: 'Entenda a saúde da sua empresa em segundos: Lucro Líquido Real, Caixa Disponível, Custos Fixos, Balancete e Demonstração de Resultados.',
-      features: ['Painel Simplificado para Leigos', 'Balancete de Verificação', 'Apuramento de IVA Modelo A', 'Cópias de Segurança na Nuvem']
-    }
-  ];
-
-  // FAQ items for Mozambique MPMEs
-  const faqItems = [
-    {
-      q: 'O que é o domínio .co.mz e como a minha empresa pode utilizá-lo com o ClickPay?',
-      a: 'O domínio .co.mz é a extensão oficial para empresas comerciais na República de Moçambique. Ao subscrever o ClickPay, a sua empresa pode vincular o seu domínio próprio (ex: suaempresa.co.mz) para que clientes e colaboradores acedam às facturas, recibos de salário e portal corporativo com o seu logótipo e endereço oficial.'
-    },
-    {
-      q: 'O ClickPay está adaptado às regras fiscais da Autoridade Tributária e INSS de Moçambique?',
-      a: 'Sim, 100%! O ClickPay foi construído especificamente para o quadro regulatório moçambicano: cálculo de IRPS de acordo com a tabela 2025/2026, desconto de INSS (3% trabalhador e 4% patronal), exportação do mapa para o portal SISSMO e conformidade com o regime do ISPC (3%) ou IVA (16%).'
-    },
-    {
-      q: 'Como funciona a liquidação de salários via M-Pesa e e-Mola?',
-      a: 'Com o módulo Fintech da ClickPay, basta carregar ou aprovar a folha de salários do mês e disparar o pagamento em lote. Os colaboradores recebem o valor líquido diretamente nas suas contas móveis M-Pesa ou e-Mola, recebendo também o recibo digital no telemóvel.'
-    },
-    {
-      q: 'Posso usar o ClickPay mesmo que a minha empresa seja pequena ou individual?',
-      a: 'Sim. O ClickPay foi concebido especialmente para micro e pequenas empresas (comércio, restaurantes, prestadores de serviços, oficinas). O plano Starter permite gerir até 5 funcionários e facturar sem complicações técnicas por apenas 1.500 MT/mês.'
-    },
-    {
-      q: 'Os dados da minha empresa estão seguros na Nuvem?',
-      a: 'Sim. Utilizamos servidores de alta disponibilidade com encriptação SSL/TLS de 256 bits, cópias de segurança (backups) automáticas diárias e autenticação com múltiplos níveis de acesso para proteger a privacidade dos seus dados financeiros.'
-    }
-  ];
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800 antialiased overflow-x-hidden selection:bg-blue-900 selection:text-white">
-      {/* Top Banner: Mozambique Regulatory Compliance */}
-      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-blue-950 text-white text-[11px] font-semibold py-2 px-4 border-b border-blue-900/60 text-center flex items-center justify-center gap-2 sm:gap-4 flex-wrap">
-        <span className="text-slate-200">
-          🇲🇿 O ERP Cloud Nacional para Micro, Pequenas e Médias Empresas de Moçambique
-        </span>
-        <span className="text-slate-300 hidden md:inline">•</span>
-        <span className="text-amber-300 font-bold hidden md:inline">
-          Tabelas IRPS 2026 & INSS SISSMO Integradas
-        </span>
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800 antialiased selection:bg-blue-900 selection:text-white">
+      {/* Top Banner Oficial */}
+      <div className="bg-slate-900 text-white text-[11px] font-medium py-2 px-4 text-center border-b border-slate-800 flex items-center justify-center gap-3">
+        <span className="font-bold text-emerald-400">🇲🇿 Moçambique</span>
+        <span>•</span>
+        <span>ClickPay ERP em Nuvem · Faturação Eletrónica com QR Code AT, IRPS 2026 e SISSMO</span>
       </div>
 
-      {/* Header (Navbar) */}
-      <nav className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-50 shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
-          {/* Brand Logo ClickPay */}
+      {/* Navbar Minimalista e Limpa */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <img 
               src="/logo-payroll.png" 
               alt="ClickPay" 
-              className="h-10 w-auto object-contain shrink-0" 
-              referrerPolicy="no-referrer"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
+              className="h-8 w-auto object-contain" 
+              onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
             />
             <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-lg font-black text-slate-950 tracking-tight">ClickPay</span>
-              </div>
-              <p className="text-[10px] text-slate-500 font-bold tracking-tight">Payroll Tech MZ · Moçambique</p>
+              <span className="text-lg font-black text-slate-950 tracking-tight">ClickPay</span>
+              <span className="text-[10px] ml-1 bg-blue-900 text-white px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">.CO.MZ</span>
             </div>
           </div>
 
-          {/* Nav Links */}
-          <div className="hidden md:flex items-center gap-8 text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-            <a href="#modulos" className="hover:text-blue-900 transition-colors py-1 hover:border-b-2 hover:border-blue-900">
-              Módulos ERP
-            </a>
-            <a href="#simulador" className="hover:text-blue-900 transition-colors py-1 hover:border-b-2 hover:border-blue-900">
-              Simulador IRPS
-            </a>
-          </div>
+          <nav className="hidden md:flex items-center gap-6 text-xs font-bold text-slate-600">
+            <a href="#modulos" className="hover:text-blue-900 transition-colors">Funcionalidades</a>
+            <a href="#simulador" className="hover:text-blue-900 transition-colors">Simulador IRPS</a>
+            <a href="#planos" className="hover:text-blue-900 transition-colors">Planos & Preços</a>
+            <a href="#contacto" className="hover:text-blue-900 transition-colors">Contacto</a>
+          </nav>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <button
               onClick={onEnterLogin}
-              className="px-3.5 py-2 text-slate-700 hover:text-blue-900 hover:bg-slate-50 rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer border border-transparent hover:border-slate-200"
-              id="btn-nav-entrar-login"
+              className="px-4 py-2 text-slate-700 hover:text-blue-900 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-slate-200"
             >
               <Lock size={13} />
-              <span>Entrar no ERP</span>
+              <span>Entrar</span>
             </button>
-
             <button
               onClick={onEnterRegister || onEnterLogin}
-              className="px-4.5 py-2.5 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-extrabold transition-all shadow-md shadow-blue-900/20 inline-flex items-center gap-1.5 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-              id="btn-nav-criar-conta"
+              className="px-4.5 py-2 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
             >
               <Sparkles size={13} className="text-amber-400" />
-              <span>Criar Conta Grátis</span>
+              <span>Criar Conta</span>
             </button>
           </div>
         </div>
-      </nav>
+      </header>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden bg-white border-b border-slate-200/60 py-16 lg:py-24">
-        <div className="absolute inset-0 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px] opacity-40"></div>
-        <div className="absolute -top-40 -right-40 w-96 h-96 rounded-full bg-blue-50 blur-3xl opacity-60"></div>
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 rounded-full bg-emerald-50 blur-3xl opacity-60"></div>
-
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          {/* Hero Left Column */}
+      {/* Hero Section Direto e Profissional */}
+      <section className="py-16 md:py-24 bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-7 space-y-6 text-left">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-blue-50 to-emerald-50 text-blue-950 rounded-full border border-blue-200/80 font-extrabold text-[11px] tracking-wide">
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span>PLATAFORMA ERP EM NUVEM · MOÇAMBIQUE 🇲🇿</span>
-            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-900 rounded-full text-xs font-bold border border-blue-100">
+              <ShieldCheck size={14} className="text-blue-700" />
+              Conforme a Autoridade Tributária & INSS Moçambique
+            </span>
 
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-[1.12]">
-              O Sistema Completo de <span className="text-blue-900">Salários, Facturação & Gestão</span> para a Sua Empresa
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-[1.15]">
+              Gestão Financeira, Salários e Facturação <span className="text-blue-900">num só lugar.</span>
             </h1>
 
-            <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-2xl font-medium">
-              Desenvolvido para a realidade moçambicana. Processe salários com <b>IRPS 2026 e INSS (SISSMO)</b>, emita facturas certificadas com <b>IVA ou ISPC (3%)</b>, gira compras e stocks e efetue pagamentos em lote via <b>M-Pesa e e-Mola</b> — tudo sob o domínio seguro <code className="text-blue-900 bg-blue-50 px-1.5 py-0.5 rounded font-mono font-bold">clickpay.co.mz</code>.
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed font-normal max-w-xl">
+              Elimine o papel e as folhas de cálculo. O <b>ClickPay</b> automatiza o processamento salarial com a nova tabela de <b>IRPS 2026</b>, gera guias do <b>SISSMO</b>, emite facturas com <b>IVA ou ISPC (3%)</b> e liquida pagamentos em lote via <b>M-Pesa e e-Mola</b>.
             </p>
 
-            {/* CTAs */}
-            <div className="flex flex-wrap gap-3.5 pt-2">
+            <div className="flex flex-wrap gap-3 pt-2">
               <button
                 onClick={onEnterRegister || onEnterLogin}
-                className="px-6 py-3.5 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-blue-900/25 flex items-center gap-2 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                className="px-6 py-3 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
               >
-                <Building2 size={16} />
-                <span>EXPERIMENTAR GRÁTIS · REGISTO NUEL</span>
+                <Building2 size={15} />
+                <span>Iniciar Demonstração Gratuita</span>
                 <ArrowRight size={14} />
               </button>
 
               <button
                 onClick={onEnterLogin}
-                className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-900 rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer border border-slate-300"
+                className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border border-slate-200"
               >
-                <Lock size={14} className="text-blue-900" />
-                <span>Entrar no Painel ERP</span>
+                <Lock size={14} />
+                <span>Aceder ao Painel ERP</span>
               </button>
             </div>
 
-            {/* Hero Highlights */}
-            <div className="pt-6 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-xl">
-              <div className="space-y-0.5">
-                <span className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">CONFORMIDADE AT</span>
-                <p className="text-xs font-bold text-slate-800">IRPS 2026 & SISSMO</p>
+            <div className="pt-6 border-t border-slate-100 grid grid-cols-3 gap-4 max-w-md">
+              <div>
+                <span className="text-lg font-black text-slate-900 block font-mono">100%</span>
+                <span className="text-[11px] text-slate-500 font-medium">Leis de Moçambique</span>
               </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] font-black text-emerald-700 uppercase tracking-wider block">FACTURAÇÃO</span>
-                <p className="text-xs font-bold text-slate-800">ISPC 3% & IVA 16%</p>
+              <div>
+                <span className="text-lg font-black text-slate-900 block font-mono">SISSMO</span>
+                <span className="text-[11px] text-slate-500 font-medium">Exportação Oficial</span>
               </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] font-black text-amber-700 uppercase tracking-wider block">DOMÍNIO MZ</span>
-                <p className="text-xs font-bold text-slate-800">clickpay.co.mz</p>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider block">CARTEIRAS MÓVEIS</span>
-                <p className="text-xs font-bold text-slate-800">M-Pesa & e-Mola</p>
+              <div>
+                <span className="text-lg font-black text-slate-900 block font-mono">M-Pesa</span>
+                <span className="text-[11px] text-slate-500 font-medium">Pagamento em Lote</span>
               </div>
             </div>
           </div>
 
-          {/* Hero Right Column: Interactive ERP Live Preview */}
+          {/* Hero Preview Card */}
           <div className="lg:col-span-5">
-            <div className="bg-[#0B1736] text-white rounded-3xl p-6 shadow-2xl border border-blue-950 space-y-5 relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-emerald-500 text-slate-950 text-[9px] font-black px-3 py-1 uppercase tracking-wider rounded-bl-xl flex items-center gap-1">
-                <span>⚡ CLOUD ERP MOÇAMBIQUE</span>
-              </div>
-              
-              <div className="flex items-center justify-between border-b border-blue-900/60 pb-3.5">
+            <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-xl border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                  <span className="text-[11px] font-extrabold uppercase tracking-widest text-blue-300">
-                    https://clickpay.co.mz
-                  </span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                  <span className="text-xs font-bold tracking-wider text-slate-300">clickpay.co.mz</span>
                 </div>
-                <span className="text-[9px] bg-blue-900 text-blue-200 px-2 py-0.5 rounded font-mono font-bold">SSL 256-Bit</span>
+                <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono font-bold">Seguro SSL</span>
               </div>
 
-              {/* KPI Cards */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-blue-950/80 p-3.5 rounded-2xl border border-blue-800/80 space-y-1">
-                  <span className="text-[9px] font-extrabold text-emerald-400 uppercase tracking-wider block">SALDO EM CAIXA REAL</span>
-                  <span className="text-base font-black text-white font-mono">245.800,00 MT</span>
-                  <span className="text-[9px] text-emerald-300 font-bold block">✓ Tesouraria & M-Pesa</span>
+              <div className="space-y-3">
+                <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700 space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Resumo da Folha Salarial</span>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xl font-bold font-mono text-white">450.000,00 MT</span>
+                    <span className="text-xs text-emerald-400 font-bold">12 Funcionários</span>
+                  </div>
                 </div>
 
-                <div className="bg-blue-950/80 p-3.5 rounded-2xl border border-blue-800/80 space-y-1">
-                  <span className="text-[9px] font-extrabold text-amber-400 uppercase tracking-wider block">LUCRO LÍQUIDO MÊS</span>
-                  <span className="text-base font-black text-white font-mono">68.450,00 MT</span>
-                  <span className="text-[9px] text-blue-300 font-bold block">PGC-NIRF Moçambique</span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-slate-800/50 p-2.5 rounded-lg border border-slate-700/60">
+                    <span className="text-[10px] text-slate-400 block font-medium">INSS (3% + 4%)</span>
+                    <span className="font-bold font-mono text-slate-200">31.500,00 MT</span>
+                  </div>
+                  <div className="bg-slate-800/50 p-2.5 rounded-lg border border-slate-700/60">
+                    <span className="text-[10px] text-slate-400 block font-medium">IRPS Retido</span>
+                    <span className="font-bold font-mono text-slate-200">42.800,00 MT</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Live Status Row */}
-              <div className="bg-white/5 rounded-2xl p-4 border border-blue-800/60 space-y-3">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-extrabold text-blue-200 flex items-center gap-1.5">
+                <div className="p-3 bg-blue-950/60 border border-blue-900/60 rounded-xl flex items-center justify-between text-xs">
+                  <span className="font-bold text-blue-200 flex items-center gap-1.5">
                     <CheckCircle2 size={14} className="text-emerald-400" />
-                    Processamento Salarial Ativo
+                    Piloto Automático M-Pesa
                   </span>
-                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-extrabold px-2 py-0.5 rounded border border-emerald-500/30">
-                    MÊS CORRENTE
+                  <span className="text-[10px] bg-emerald-950 text-emerald-300 font-bold px-2 py-0.5 rounded">
+                    Dispersão Pronta
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-blue-950/60 p-2 rounded-xl">
-                    <span className="text-[9px] text-slate-400 block font-bold">Colaboradores</span>
-                    <span className="text-xs font-black text-white">12 Ativos</span>
-                  </div>
-                  <div className="bg-blue-950/60 p-2 rounded-xl">
-                    <span className="text-[9px] text-slate-400 block font-bold">INSS (3%+4%)</span>
-                    <span className="text-xs font-black text-emerald-400">14.280 MT</span>
-                  </div>
-                  <div className="bg-blue-950/60 p-2 rounded-xl">
-                    <span className="text-[9px] text-slate-400 block font-bold">IRPS Retido</span>
-                    <span className="text-xs font-black text-amber-400">22.400 MT</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Actions inside Card */}
-              <div className="flex items-center justify-between pt-1">
-                <div className="flex items-center gap-2 text-xs text-slate-300 font-medium">
-                  <Smartphone size={15} className="text-emerald-400" />
-                  <span>Disparo M-Pesa / e-Mola</span>
-                </div>
-                <button
-                  onClick={onEnterLogin}
-                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1 cursor-pointer transition-all shadow-xs"
-                >
-                  <span>Abrir Demo</span>
-                  <ArrowRight size={12} />
-                </button>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* SEÇÃO: DEMONSTRAÇÃO INTERACTIVA DE ADAPTAÇÃO POR SECTOR EM MOÇAMBIQUE */}
-      <section id="sectores" className="py-20 bg-white border-b border-slate-200/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-          <div className="text-center space-y-3 max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-900 rounded-full border border-blue-200 text-[10px] font-black uppercase tracking-widest">
-              <span>⚡ ADAPTADOR MULTISSECTORIAL</span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-950 tracking-tight">
-              Escolha o Ramo da Sua Empresa e Veja o ERP Adaptar-se
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">
-              O ClickPay ajusta automaticamente o regime fiscal (ISPC 3% vs IVA 16%), as categorias de compras, o modelo de fatura e as regras laborais para o seu setor.
-            </p>
-          </div>
-
-          {/* Grid of 9 Sectors */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2.5">
-            {[
-              { id: 'Comércio & Retalho', icon: '🛒', label: 'Comércio' },
-              { id: 'Prestação de Serviços & Tecnologia', icon: '💼', label: 'Serviços & TI' },
-              { id: 'Restauração & Hotelaria', icon: '🍽️', label: 'Restaurante' },
-              { id: 'Construção & Obras', icon: '🏗️', label: 'Construção' },
-              { id: 'Indústria & Oficina', icon: '🛠️', label: 'Oficinas' },
-              { id: 'Transporte & Logística', icon: '🚚', label: 'Transportes' },
-              { id: 'Educação & Formação', icon: '🏫', label: 'Educação' },
-              { id: 'Saúde & Beleza', icon: '🩺', label: 'Saúde' },
-              { id: 'Agricultura & Agronegócio', icon: '🌾', label: 'Agricultura' }
-            ].map((sec) => {
-              const active = selectedSectorLanding === sec.id;
-              return (
-                <button
-                  key={sec.id}
-                  onClick={() => setSelectedSectorLanding(sec.id)}
-                  className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
-                    active 
-                      ? 'bg-blue-900 border-blue-900 text-white shadow-lg ring-2 ring-blue-400/50 scale-105' 
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="text-2xl mb-1">{sec.icon}</div>
-                  <div className="text-[11px] font-bold leading-tight">{sec.label}</div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Details Panel for Selected Sector */}
-          <div className="bg-slate-50 border border-slate-200/80 rounded-3xl p-6 sm:p-8 grid grid-cols-1 md:grid-cols-3 gap-6 text-left shadow-xs">
-            <div className="space-y-2 bg-white p-5 rounded-2xl border border-slate-200">
-              <span className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">1. REGIME FISCAL RECOMENDADO</span>
-              <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
-                {selectedSectorLanding.includes('Serviços') || selectedSectorLanding.includes('Construção') ? 'Regime Geral IVA (16%)' :
-                 selectedSectorLanding.includes('Educação') || selectedSectorLanding.includes('Saúde') ? 'Isento de IVA (Artigo 9º)' : 'ISPC - Imposto Simplificado (3%)'}
-              </h4>
-              <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                {selectedSectorLanding.includes('Serviços') || selectedSectorLanding.includes('Construção')
-                  ? 'Permite deduzir IVA suportado em compras de equipamentos e insumos com prestação de contas PGC-NIRF.'
-                  : selectedSectorLanding.includes('Educação') || selectedSectorLanding.includes('Saúde')
-                  ? 'Isenção direta sob o Artigo 9º do Código do IVA de Moçambique com apuramento simplificado.'
-                  : 'Ideal para Microempresas com facturação até 2.500.000,00 MT/ano. Pague apenas 3% sobre vendas sem declarações complexas.'}
-              </p>
-            </div>
-
-            <div className="space-y-2 bg-white p-5 rounded-2xl border border-slate-200">
-              <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider block">2. MODELO DE FACTURAÇÃO</span>
-              <h4 className="text-sm sm:text-base font-extrabold text-slate-900">
-                {selectedSectorLanding.includes('Comércio') || selectedSectorLanding.includes('Restauração') ? 'Venda a Dinheiro & Factura-Recibo Rápida' :
-                 selectedSectorLanding.includes('Construção') || selectedSectorLanding.includes('Serviços') ? 'Pró-Formas, Autos de Medição & Facturas FT' : 'Factura-Recibo & Recibo de Mensalidade'}
-              </h4>
-              <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                Impressão instantânea em A4 ou POS/Térmica com QR Code da Autoridade Tributária e referência de pagamento via M-Pesa.
-              </p>
-            </div>
-
-            <div className="space-y-2 bg-white p-5 rounded-2xl border border-slate-200">
-              <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider block">3. RECURSOS HUMANOS & SALÁRIOS</span>
-              <h4 className="text-sm sm:text-base font-extrabold text-slate-900">INSS + IRPS 2026 Automático</h4>
-              <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                Geração automática do mapa de salários, retenção de IRPS por dependentes e exportação direta da Guia de Recolha de INSS para o portal SISSMO.
-              </p>
-            </div>
-          </div>
+      {/* Módulos do Sistema */}
+      <section id="modulos" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 w-full">
+        <div className="text-center max-w-2xl mx-auto space-y-2 mb-10">
+          <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Módulos Essenciais</span>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">Tudo o que a sua Empresa Precisa</h2>
+          <p className="text-xs sm:text-sm text-slate-600 font-normal">Uma solução integrada sem jargões desnecessários.</p>
         </div>
-      </section>
 
-      {/* SEÇÃO: MÓDULOS ERP COMPLETOS E INTERATIVOS */}
-      <section id="modulos" className="py-20 bg-[#F8FAFC]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          <div className="space-y-3 text-center max-w-3xl mx-auto">
-            <span className="text-blue-900 font-black text-xs uppercase tracking-widest block">Módulos Integrados</span>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-950 tracking-tight">
-              Tudo o que a sua Empresa Precisa num Único ERP
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-              Elimine o uso de folhas de cálculo dispersas. O ClickPay Cloud ERP unifica todas as áreas operacionais com total rigor regulatório moçambicano.
-            </p>
-          </div>
-
-          {/* Tab selector for modules */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {modulesList.map((m, idx) => {
-              const Icon = m.icon;
-              const active = activeModuleTab === idx;
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => setActiveModuleTab(idx)}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-                    active 
-                      ? 'bg-blue-900 text-white shadow-md' 
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <Icon size={15} />
-                  <span>{m.title.split(' ')[0]}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Active Module Showcase Card */}
-          <div className="bg-white rounded-3xl p-6 sm:p-10 border border-slate-200 shadow-sm max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-8 items-center text-left">
-            <div className="md:col-span-7 space-y-4">
-              <span className="text-[10px] bg-blue-50 text-blue-900 font-extrabold px-3 py-1 rounded-full border border-blue-200 uppercase tracking-wider inline-block">
-                {modulesList[activeModuleTab].badge}
-              </span>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-950">
-                {modulesList[activeModuleTab].title}
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                {modulesList[activeModuleTab].description}
-              </p>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
-                {modulesList[activeModuleTab].features.map((feat, fidx) => (
-                  <div key={fidx} className="flex items-center gap-2 text-xs font-bold text-slate-800 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>{feat}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="pt-4 flex items-center gap-3">
-                <button
-                  onClick={onEnterLogin}
-                  className="px-5 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <span>Aceder ao Módulo</span>
-                  <ArrowRight size={14} />
-                </button>
-                <button
-                  onClick={() => handleOpenContact(modulesList[activeModuleTab].title)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
-                >
-                  Pedir Demonstração
-                </button>
-              </div>
-            </div>
-
-            <div className="md:col-span-5 bg-gradient-to-br from-slate-900 to-blue-950 text-white p-6 rounded-2xl space-y-4 shadow-inner">
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <span className="text-[10px] text-slate-400 font-bold">Moçambique</span>
-              </div>
-              <div className="space-y-2">
-                <span className="text-xs text-slate-300 font-medium">Regulado e Compatível com:</span>
-                <ul className="text-xs font-bold text-white space-y-1.5">
-                  <li className="flex items-center gap-2">✓ Autoridade Tributária (AT)</li>
-                  <li className="flex items-center gap-2">✓ Instituto Nacional de Segurança Social (INSS)</li>
-                  <li className="flex items-center gap-2">✓ Lei do Trabalho Moçambicana (Lei 13/2023)</li>
-                  <li className="flex items-center gap-2">✓ Carteiras M-Pesa, e-Mola & Rede SIMO</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* SEÇÃO: SIMULADOR FISCAL E LABORAL INTERACTIVO */}
-      <section id="simulador" className="py-20 bg-white border-y border-slate-200/80">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-12">
-          <div className="space-y-3">
-            <span className="text-blue-900 font-black text-xs uppercase tracking-widest block">Simulador Interativo Moçambique</span>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-950 tracking-tight">
-              Calcule as Retenções Fiscais e Custo Real em Tempo Real
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 max-w-2xl mx-auto font-medium">
-              Simule instantaneamente o Salário Líquido, a Retenção de IRPS 2026, o INSS Trabalhador (3%), o Encargo da Empresa (4%) e o Custo Total do Colaborador.
-            </p>
-          </div>
-
-          <div className="bg-slate-50 rounded-3xl p-6 sm:p-10 border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-8 text-left shadow-sm">
-            {/* Input area */}
-            <div className="space-y-6">
-              <h3 className="font-black text-slate-900 text-sm border-b border-slate-200 pb-3 flex items-center gap-2">
-                <Calculator size={18} className="text-blue-900" />
-                <span>Parâmetros de Simulação Salarial</span>
-              </h3>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-bold">
-                  <span className="text-slate-700">Salário Base Mensal:</span>
-                  <span className="text-blue-900 font-mono font-black text-sm">{salarioBase.toLocaleString('pt-MZ')} MT</span>
-                </div>
-                <input
-                  type="range"
-                  min="5000"
-                  max="200000"
-                  step="2500"
-                  value={salarioBase}
-                  onChange={(e) => setSalarioBase(Number(e.target.value))}
-                  className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-900"
-                />
-                <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                  <span>5.000 MT</span>
-                  <span>100.000 MT</span>
-                  <span>200.000 MT</span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 block">Número de Dependentes Familiares:</label>
-                <select
-                  value={dependentes}
-                  onChange={(e) => setDependentes(Number(e.target.value))}
-                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-900/20"
-                >
-                  <option value={0}>0 Dependentes (Solteiro / Sem encargos)</option>
-                  <option value={1}>1 Dependente</option>
-                  <option value={2}>2 Dependentes</option>
-                  <option value={3}>3 Dependentes</option>
-                  <option value={4}>4 ou mais Dependentes</option>
-                </select>
-              </div>
-
-              <div className="bg-blue-50/70 p-4 rounded-2xl text-[11px] text-slate-700 font-medium border border-blue-100 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-blue-950">
-                  <Info size={15} className="text-blue-900 shrink-0" />
-                  <span>Enquadramento Legal Moçambique:</span>
-                </div>
-                <p>Cálculo rigoroso baseado nas tabelas de retenção na fonte do IRPS (Decreto 38/2002 e atualizações) e Regulamento da Segurança Social (Decreto 51/2017).</p>
-              </div>
-            </div>
-
-            {/* Results breakdown */}
-            <div className="bg-white rounded-2xl p-6 border border-slate-200 flex flex-col justify-between space-y-6 shadow-xs">
-              <div className="space-y-4">
-                <h3 className="font-black text-slate-900 text-sm border-b border-slate-100 pb-2 flex items-center justify-between">
-                  <span>Demonstrativo do Vencimento</span>
-                  <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded">Cálculo Exato</span>
-                </h3>
-
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs font-bold text-slate-700">
-                    <span>Salário Líquido a Receber:</span>
-                    <span className="text-emerald-700 font-mono font-black">{percentagemLiquido.toFixed(1)}%</span>
-                  </div>
-                  <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex">
-                    <div style={{ width: `${percentagemLiquido}%` }} className="h-full bg-emerald-600" />
-                    <div style={{ width: `${percentagemDeducoes}%` }} className="h-full bg-rose-500" />
-                  </div>
-                </div>
-
-                <div className="space-y-2 text-xs font-mono">
-                  <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span className="text-slate-600">Salário Bruto:</span>
-                    <span className="font-bold text-slate-900">{salarioBase.toLocaleString('pt-MZ')} MT</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span className="text-slate-600">INSS Trabalhador (3%):</span>
-                    <span className="font-bold text-rose-600">-{res.inssTrabalhador.toLocaleString('pt-MZ', { maximumFractionDigits: 2 })} MT</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span className="text-slate-600">Retenção de IRPS 2026:</span>
-                    <span className="font-bold text-rose-600">-{res.irpsConstatado.toLocaleString('pt-MZ', { maximumFractionDigits: 2 })} MT</span>
-                  </div>
-                  <div className="flex justify-between py-2 px-3 bg-emerald-50 text-emerald-950 rounded-xl font-bold">
-                    <span>Salário Líquido:</span>
-                    <span className="font-black text-sm">{res.salarioLiquido.toLocaleString('pt-MZ', { maximumFractionDigits: 2 })} MT</span>
-                  </div>
-                  <div className="flex justify-between py-1 px-3 bg-blue-50/60 text-blue-950 rounded-xl font-medium text-[11px]">
-                    <span>Custo Total Empresa (+4% INSS):</span>
-                    <span className="font-bold">{custoTotalEmpresa.toLocaleString('pt-MZ', { maximumFractionDigits: 2 })} MT</span>
-                  </div>
-                </div>
-              </div>
-
+        {/* Tab Buttons */}
+        <div className="flex flex-wrap justify-center gap-2 mb-8">
+          {[
+            { id: 'salarios', label: 'Salários & INSS', icon: Users },
+            { id: 'faturacao', label: 'Facturação Eletrónica', icon: Receipt },
+            { id: 'fintech', label: 'Pagamentos M-Pesa', icon: Smartphone },
+            { id: 'crm', label: 'CRM & Vendas', icon: TrendingUp }
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
               <button
-                onClick={onEnterRegister || onEnterLogin}
-                className="w-full py-3 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-blue-900/15"
-              >
-                <span>Processar Folha Completa no ERP</span>
-                <ArrowRight size={14} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* SEÇÃO: PREÇOS E SUBSCRIÇÕES TRANSPARENTES EM METICAIS (MT) */}
-      <section id="planos" className="py-20 bg-[#F8FAFC]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12 text-center">
-          <div className="space-y-3 max-w-2xl mx-auto">
-            <span className="text-blue-900 font-black text-xs uppercase tracking-widest block">Subscrições em Meticais (MT)</span>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-950 tracking-tight">
-              Planos Adaptados à Dimensão da Sua Empresa
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-              Sem surpresas cambiais de dólar nem fidelizações obrigatórias. Pague em Meticais via M-Pesa, e-Mola ou Transferência Bancária.
-            </p>
-
-            {/* Annual billing toggle */}
-            <div className="pt-3 flex items-center justify-center gap-3">
-              <span className={`text-xs font-bold ${!annualBilling ? 'text-blue-950' : 'text-slate-500'}`}>Mensal</span>
-              <button
-                onClick={() => setAnnualBilling(!annualBilling)}
-                className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
-                  annualBilling ? 'bg-blue-900 justify-end' : 'bg-slate-300 justify-start'
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer transition-all ${
+                  active ? 'bg-blue-900 text-white shadow-sm' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <div className="bg-white w-4 h-4 rounded-full shadow-md"></div>
+                <Icon size={14} />
+                <span>{tab.label}</span>
               </button>
-              <span className={`text-xs font-bold flex items-center gap-1 ${annualBilling ? 'text-blue-950' : 'text-slate-500'}`}>
-                <span>Anual</span>
-                <span className="text-[10px] bg-emerald-100 text-emerald-900 font-extrabold px-1.5 py-0.2 rounded">2 Meses Grátis</span>
-              </span>
-            </div>
-          </div>
+            );
+          })}
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left max-w-5xl mx-auto">
-            {/* Starter */}
-            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm flex flex-col justify-between space-y-6">
-              <div className="space-y-4">
-                <span className="text-[10px] bg-slate-100 text-slate-800 font-black px-2.5 py-1 rounded-md uppercase tracking-wider border border-slate-200 inline-block">
-                  Starter
-                </span>
-                <h3 className="text-xl font-black text-slate-900">Plano Starter</h3>
-                <p className="text-xs text-slate-500 leading-normal font-medium">
-                  Ideal para microempresas, consultores e pequenos comércios.
+        {/* Content Box */}
+        <div className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-sm max-w-4xl mx-auto">
+          {activeTab === 'salarios' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              <div className="space-y-3">
+                <span className="text-[10px] font-bold text-blue-900 uppercase">Recursos Humanos</span>
+                <h3 className="text-lg font-bold text-slate-900">Processamento Salarial sem Erros</h3>
+                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                  Cálculo automático de INSS (3% trabalhador e 4% patronal), escalões progressivos de IRPS por número de dependentes e geração do ficheiro oficial para carregar diretamente no portal do SISSMO.
                 </p>
-                <div>
-                  <span className="text-2xl sm:text-3xl font-black text-slate-950 font-mono">
-                    {annualBilling ? '2.500,00 MT' : '3.000,00 MT'}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-bold block">
-                    {annualBilling ? 'Por mês (Cobrança anual: 30.000 MT)' : 'Mensal / Sem fidelização'}
-                  </span>
-                </div>
-                
-                <div className="h-[1px] bg-slate-100 w-full" />
-                
-                <ul className="space-y-2.5 text-xs text-slate-700 font-medium">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Até 5 Funcionários Ativos</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Facturação Eletrónica (IVA 16% / ISPC 3%)</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Gestão de Vendas & Clientes</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>1 Armazém de Stock + Backup Firebase</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Suporte via WhatsApp</span>
-                  </li>
+                <ul className="space-y-2 text-xs text-slate-700">
+                  <li className="flex items-center gap-2">✓ Recibos de vencimento em PDF com código QR</li>
+                  <li className="flex items-center gap-2">✓ Auditoria de contratos e avisos prévios (Lei 13/2023)</li>
+                  <li className="flex items-center gap-2">✓ Controlo de faltas e adiantamentos (vales)</li>
                 </ul>
               </div>
-
-              <button
-                onClick={() => handleOpenContact('Starter')}
-                className="w-full py-3 bg-slate-900 hover:bg-slate-950 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-xs"
-              >
-                Subscrever Starter
-              </button>
-            </div>
-
-            {/* Growth */}
-            <div className="bg-white rounded-3xl p-6 sm:p-8 border-2 border-blue-900 shadow-xl flex flex-col justify-between relative overflow-hidden space-y-6">
-              <div className="absolute top-0 right-0 bg-blue-900 text-white text-[9px] font-black px-3.5 py-1.5 uppercase tracking-wider rounded-bl-2xl">
-                Mais Popular
-              </div>
-
-              <div className="space-y-4">
-                <span className="text-[10px] bg-blue-50 text-blue-900 font-black px-2.5 py-1 rounded-md uppercase tracking-wider border border-blue-200 inline-block">
-                  Growth
-                </span>
-                <h3 className="text-xl font-black text-blue-950">Plano Growth</h3>
-                <p className="text-xs text-slate-500 leading-normal font-medium">
-                  Para empresas em crescimento que exigem módulo completo de salários.
-                </p>
-                <div>
-                  <span className="text-2xl sm:text-3xl font-black text-blue-900 font-mono">
-                    {annualBilling ? '4.166,00 MT' : '5.000,00 MT'}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-bold block">
-                    {annualBilling ? 'Por mês (Cobrança anual: 50.000 MT)' : 'Mensal / Acesso completo RH'}
-                  </span>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
+                <span className="font-bold text-slate-800 block">Recibo de Vencimento Digital</span>
+                <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1 font-mono text-[11px]">
+                  <div className="flex justify-between"><span>Salário Base:</span><span>35.000,00 MT</span></div>
+                  <div className="flex justify-between text-rose-600"><span>INSS (3%):</span><span>-1.050,00 MT</span></div>
+                  <div className="flex justify-between text-rose-600"><span>IRPS Retido:</span><span>-1.275,00 MT</span></div>
+                  <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-700">
+                    <span>Líquido a Transferir:</span><span>32.675,00 MT</span>
+                  </div>
                 </div>
-                
-                <div className="h-[1px] bg-slate-100 w-full" />
-                
-                <ul className="space-y-2.5 text-xs text-slate-700 font-medium">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span className="font-bold">Até 15 Funcionários Ativos</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Facturação + Compras & Despesas</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Folha de Salários IRPS + INSS (SISSMO)</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Pagamentos em Lote M-Pesa / e-Mola</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Vincular Domínio .CO.MZ da Empresa</span>
-                  </li>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'faturacao' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              <div className="space-y-3">
+                <span className="text-[10px] font-bold text-blue-900 uppercase">Vendas & Clientes</span>
+                <h3 className="text-lg font-bold text-slate-900">Facturação Conforme a Autoridade Tributária</h3>
+                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                  Emita Facturas (FT), Facturas-Recibo (FR), Vendas a Dinheiro (VD) e Cotações Pró-Forma. Suporte completo para o regime simplificado ISPC (3%) ou Regime Geral de IVA (16%).
+                </p>
+                <ul className="space-y-2 text-xs text-slate-700">
+                  <li className="flex items-center gap-2">✓ QR Code oficial da Autoridade Tributária</li>
+                  <li className="flex items-center gap-2">✓ Envio por WhatsApp e E-mail em 1 clique</li>
+                  <li className="flex items-center gap-2">✓ Controlo de pagamentos pendentes e recibos</li>
                 </ul>
               </div>
-
-              <button
-                onClick={() => handleOpenContact('Growth')}
-                className="w-full py-3 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-md shadow-blue-900/20"
-              >
-                Subscrever Growth
-              </button>
-            </div>
-
-            {/* Business */}
-            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-sm flex flex-col justify-between space-y-6">
-              <div className="space-y-4">
-                <span className="text-[10px] bg-indigo-50 text-indigo-900 font-black px-2.5 py-1 rounded-md uppercase tracking-wider border border-indigo-200 inline-block">
-                  Business
-                </span>
-                <h3 className="text-xl font-black text-slate-900">Plano Business</h3>
-                <p className="text-xs text-slate-500 leading-normal font-medium">
-                  Gestão avançada, múltiplos armazéns e inteligência comercial.
-                </p>
-                <div>
-                  <span className="text-2xl sm:text-3xl font-black text-slate-950 font-mono">
-                    {annualBilling ? '5.416,00 MT' : '6.500,00 MT'}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-bold block">
-                    {annualBilling ? 'Por mês (Cobrança anual: 65.000 MT)' : 'Mensal / Multi-armazém'}
-                  </span>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
+                <span className="font-bold text-slate-800 block">Factura Eletrónica Oficial</span>
+                <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 text-[11px]">
+                  <div className="flex justify-between font-bold text-slate-900">
+                    <span>FACTURA FT 2026/089</span>
+                    <span className="text-emerald-700">QR CODE AT ✓</span>
+                  </div>
+                  <div className="text-slate-500">Cliente: Empresa Comercial Lda (NUIT 400123456)</div>
+                  <div className="border-t border-slate-100 pt-1 flex justify-between font-bold font-mono">
+                    <span>Total com IVA:</span><span>58.000,00 MT</span>
+                  </div>
                 </div>
-                
-                <div className="h-[1px] bg-slate-100 w-full" />
-                
-                <ul className="space-y-2.5 text-xs text-slate-700 font-medium">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Até 30 Funcionários Ativos</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Todos os Módulos do ERP Integrados</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Múltiplos Armazéns & Contabilidade</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>CRM Comercial & Pipeline de Vendas</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                    <span>Suporte VIP Prioritário 24/7</span>
-                  </li>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'fintech' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              <div className="space-y-3">
+                <span className="text-[10px] font-bold text-blue-900 uppercase">Canais de Pagamento</span>
+                <h3 className="text-lg font-bold text-slate-900">Dispersão em Massa via Carteiras Móveis</h3>
+                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                  Liquide os salários da equipa diretamente para as contas M-Pesa e e-Mola dos trabalhadores, sem filas nos bancos ou circulação perigosa de dinheiro físico.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-700">
+                  <li className="flex items-center gap-2">✓ Pagamentos instantâneos para 84, 85, 86, 87</li>
+                  <li className="flex items-center gap-2">✓ Piloto Automático com 1 clique</li>
+                  <li className="flex items-center gap-2">✓ Extrato e comprovativos detalhados</li>
                 </ul>
               </div>
-
-              <button
-                onClick={() => handleOpenContact('Business')}
-                className="w-full py-3 bg-slate-900 hover:bg-slate-950 text-white font-extrabold rounded-xl text-xs transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-xs"
-              >
-                Subscrever Business
-              </button>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
+                <span className="font-bold text-slate-800 block">Piloto Automático M-Pesa</span>
+                <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-2 text-[11px]">
+                  <div className="flex justify-between items-center text-emerald-700 font-bold">
+                    <span>12 de 12 Pagamentos Concluídos</span>
+                    <span>✓ Sucesso</span>
+                  </div>
+                  <p className="text-slate-500 text-[10px]">Todos os funcionários receberam SMS de confirmação no telemóvel.</p>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
+
+          {activeTab === 'crm' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              <div className="space-y-3">
+                <span className="text-[10px] font-bold text-blue-900 uppercase">Comercial</span>
+                <h3 className="text-lg font-bold text-slate-900">CRM & Gestão de Contratos</h3>
+                <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                  Gerencie oportunidades de negócio, elabore propostas comerciais profissionais e converta cotações diretamente em vendas sem retrabalho.
+                </p>
+                <ul className="space-y-2 text-xs text-slate-700">
+                  <li className="flex items-center gap-2">✓ Pipeline visual de negociações</li>
+                  <li className="flex items-center gap-2">✓ Controlo de datas de renovação de contratos</li>
+                  <li className="flex items-center gap-2">✓ Histórico de faturamento por cliente</li>
+                </ul>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
+                <span className="font-bold text-slate-800 block">Pipeline de Oportunidades</span>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 bg-white rounded border border-slate-200">
+                    <span className="text-[9px] text-slate-400 block">Em Negociação</span>
+                    <span className="font-bold text-slate-800">180.000 MT</span>
+                  </div>
+                  <div className="p-2 bg-white rounded border border-slate-200">
+                    <span className="text-[9px] text-emerald-600 block">Fechado / Ganho</span>
+                    <span className="font-bold text-emerald-800">420.000 MT</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* SEÇÃO CONTACTO & AGENDAMENTO DE DEMO */}
-      <section id="contacto" className="py-20 bg-slate-900 text-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-12 gap-10 items-center text-left">
-          <div className="md:col-span-6 space-y-5">
-            <span className="text-emerald-400 font-black text-xs uppercase tracking-widest block">FALE CONNOSCO EM MOÇAMBIQUE</span>
-            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">
-              Pronto para Simplificar a Gestão da Sua Empresa?
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed">
-              Agende uma demonstração prática de 15 minutos com a nossa equipa ou solicite as suas credenciais de acesso agora mesmo.
-            </p>
-
-            <div className="space-y-3 text-xs pt-2">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-emerald-400">
-                  <Phone size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-bold block">TELEFONE / WHATSAPP</span>
-                  <a href="tel:+258842014173" className="font-bold text-white hover:underline">+258 84 201 4173 / +258 86 139 0061</a>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-blue-400">
-                  <Mail size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-bold block">EMAIL COMERCIAL</span>
-                  <a href="mailto:gersonjcumbane@gmail.com" className="font-bold text-white hover:underline">comercial@clickpay.co.mz / gersonjcumbane@gmail.com</a>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-amber-400">
-                  <MapPin size={15} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-bold block">SEDE</span>
-                  <span className="font-bold text-white">Maputo, Moçambique</span>
-                </div>
-              </div>
-            </div>
+      {/* Simulador de Salário IRPS 2026 */}
+      <section id="simulador" className="py-16 bg-white border-t border-b border-slate-200">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6">
+          <div className="text-center space-y-2 mb-8">
+            <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Simulador Interativo</span>
+            <h2 className="text-2xl font-black text-slate-950">Simulador de Salário & Impostos Moçambique</h2>
+            <p className="text-xs text-slate-600">Teste o cálculo do IRPS 2026 e INSS em tempo real:</p>
           </div>
 
-          <div className="md:col-span-6 bg-white/10 border border-white/15 p-6 sm:p-8 rounded-3xl backdrop-blur-md space-y-4">
-            <h3 className="text-base font-black text-white">Criar Conta ou Solicitar Credenciais</h3>
-            <p className="text-xs text-slate-300 font-medium">Preencha os dados e receba acesso imediato ao ambiente do ClickPay ERP:</p>
-            
-            <div className="space-y-3">
-              <button
-                onClick={onEnterRegister || onEnterLogin}
-                className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 text-white font-extrabold rounded-2xl text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Building2 size={16} />
-                <span>Registar Empresa Online</span>
-              </button>
-
-              <button
-                onClick={() => handleOpenContact('Starter')}
-                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-2xl text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Mail size={16} />
-                <span>Solicitar Credenciais de Acesso</span>
-              </button>
-
-              <a
-                href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20agendar%20uma%20demonstra%C3%A7%C3%A3o%20do%20ClickPay%20ERP%20(clickpay.co.mz)."
-                target="_blank"
-                rel="noreferrer"
-                className="w-full py-3.5 bg-[#25D366] hover:bg-[#20ba5a] text-slate-950 font-black rounded-2xl text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Smartphone size={16} />
-                <span>Conversar no WhatsApp</span>
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Rodapé (Footer) */}
-      <footer className="bg-slate-950 text-white py-12 border-t border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-800">
-            <div className="flex items-center gap-3">
-              <img 
-                src="/logo-payroll.png" 
-                alt="ClickPay" 
-                className="h-9 w-auto object-contain shrink-0" 
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
+          <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+            <div className="space-y-4">
               <div>
-                <span className="text-sm font-black tracking-wider block text-white">ClickPay Moçambique</span>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Salário Base Mensal: <span className="font-mono text-blue-900 font-bold">{salarioBase.toLocaleString()} MT</span>
+                </label>
+                <input 
+                  type="range" 
+                  min="5000" 
+                  max="150000" 
+                  step="1000" 
+                  value={salarioBase} 
+                  onChange={(e) => setSalarioBase(Number(e.target.value))}
+                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-900"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Número de Dependentes: <span className="text-blue-900 font-bold">{dependentes}</span>
+                </label>
+                <div className="flex gap-2">
+                  {[0, 1, 2, 3, 4].map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setDependentes(d)}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                        dependentes === d ? 'bg-blue-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      {d === 4 ? '4+' : d}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-            
-            <div className="flex flex-wrap gap-6 text-xs text-slate-400 font-bold">
-              <a href="#modulos" className="hover:text-white transition-colors">Módulos ERP</a>
-              <a href="#simulador" className="hover:text-white transition-colors">Simulador IRPS</a>
+
+            <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2 text-xs font-mono">
+              <div className="flex justify-between py-1 border-b border-slate-100">
+                <span className="text-slate-600 font-sans">INSS Trabalhador (3%):</span>
+                <span className="text-rose-600 font-bold">-{res.inssTrabalhador.toFixed(2)} MT</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-100">
+                <span className="text-slate-600 font-sans">Retenção IRPS 2026:</span>
+                <span className="text-rose-600 font-bold">-{res.irpsConstatado.toFixed(2)} MT</span>
+              </div>
+              <div className="flex justify-between py-1.5 px-2 bg-emerald-50 text-emerald-950 rounded-lg font-bold">
+                <span className="font-sans">Salário Líquido:</span>
+                <span className="text-sm font-bold text-emerald-700">{res.salarioLiquido.toFixed(2)} MT</span>
+              </div>
+              <div className="flex justify-between py-1 px-2 text-slate-500 text-[10px] font-sans">
+                <span>Custo Total Empregador (+4% INSS):</span>
+                <span>{custoTotalEmpresa.toFixed(2)} MT</span>
+              </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Planos & Preços Transparentes */}
+      <section id="planos" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 w-full">
+        <div className="text-center max-w-2xl mx-auto space-y-2 mb-10">
+          <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Preços em Meticais</span>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-950">Planos sem Fidelização</h2>
+          <p className="text-xs text-slate-600">Sem surpresas de câmbio em dólares. Pague via M-Pesa, e-Mola ou Transferência Bancária.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {/* Starter */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-5">
+            <div className="space-y-3">
+              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Starter</span>
+              <h3 className="text-lg font-bold text-slate-900">Microempresa</h3>
+              <p className="text-xs text-slate-500 font-normal">Ideal para pequenos negócios e comércio local.</p>
+              <div className="pt-2">
+                <span className="text-2xl font-black text-slate-950 font-mono">3.000,00 MT</span>
+                <span className="text-[10px] text-slate-400 block">/mês</span>
+              </div>
+              <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
+                <li className="flex items-center gap-2">✓ Até 5 Funcionários</li>
+                <li className="flex items-center gap-2">✓ Facturação ISPC (3%) ou IVA</li>
+                <li className="flex items-center gap-2">✓ Recibos de Salário & SISSMO</li>
+                <li className="flex items-center gap-2">✓ Suporte via WhatsApp</li>
+              </ul>
+            </div>
+            <button
+              onClick={() => onEnterPlanDemo('Bronze')}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+            >
+              Escolher Starter
+            </button>
           </div>
 
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] text-slate-500 font-medium">
-            <p>
-              © 2018 – 2026 ClickPay / Payroll Tech MZ. Todos os direitos reservados. Regulado pela Autoridade Tributária de Moçambique e INSS.
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
-              <span className="text-slate-400 font-mono">clickpay.co.mz · Servidores Cloud MZ (Firebase Sync)</span>
+          {/* Growth / Silver */}
+          <div className="bg-white rounded-2xl p-6 border-2 border-blue-900 shadow-md flex flex-col justify-between space-y-5 relative">
+            <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-900 text-white text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider">
+              Mais Popular
+            </span>
+            <div className="space-y-3">
+              <span className="text-[10px] bg-blue-50 text-blue-900 font-bold px-2 py-0.5 rounded uppercase">Profissional</span>
+              <h3 className="text-lg font-bold text-slate-900">Pequena Empresa</h3>
+              <p className="text-xs text-slate-500 font-normal">Para empresas com equipa em crescimento e mais movimento.</p>
+              <div className="pt-2">
+                <span className="text-2xl font-black text-blue-900 font-mono">5.000,00 MT</span>
+                <span className="text-[10px] text-slate-400 block">/mês</span>
+              </div>
+              <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
+                <li className="flex items-center gap-2">✓ Até 15 Funcionários</li>
+                <li className="flex items-center gap-2">✓ Piloto Automático M-Pesa / e-Mola</li>
+                <li className="flex items-center gap-2">✓ CRM de Vendas & Propostas</li>
+                <li className="flex items-center gap-2">✓ Gestão de Compras e Despesas</li>
+                <li className="flex items-center gap-2">✓ Apoio prioritário</li>
+              </ul>
             </div>
+            <button
+              onClick={() => onEnterPlanDemo('Silver')}
+              className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-sm"
+            >
+              Escolher Profissional
+            </button>
           </div>
+
+          {/* Business / Gold */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-5">
+            <div className="space-y-3">
+              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Empresarial</span>
+              <h3 className="text-lg font-bold text-slate-900">Média Empresa</h3>
+              <p className="text-xs text-slate-500 font-normal">Solução avançada com relatórios PGC-NIRF completos.</p>
+              <div className="pt-2">
+                <span className="text-2xl font-black text-slate-950 font-mono">6.500,00 MT</span>
+                <span className="text-[10px] text-slate-400 block">/mês</span>
+              </div>
+              <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
+                <li className="flex items-center gap-2">✓ Até 25 Funcionários</li>
+                <li className="flex items-center gap-2">✓ Multi-Armazém de Stock</li>
+                <li className="flex items-center gap-2">✓ Demonstração de Resultados (DRE)</li>
+                <li className="flex items-center gap-2">✓ Assistente IA Financeiro</li>
+                <li className="flex items-center gap-2">✓ Gestor de conta dedicado</li>
+              </ul>
+            </div>
+            <button
+              onClick={() => onEnterPlanDemo('Gold')}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+            >
+              Escolher Empresarial
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Secção de Contacto Simples e Direta */}
+      <section id="contacto" className="py-12 bg-slate-900 text-white">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="space-y-1 text-center md:text-left">
+            <h3 className="text-lg font-bold">Precisa de assistência ou demonstração presencial?</h3>
+            <p className="text-xs text-slate-400">A nossa equipa técnica e de suporte em Maputo está disponível para apoiar.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a 
+              href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20ClickPay%20ERP%20(clickpay.co.mz)."
+              target="_blank"
+              rel="noreferrer"
+              className="px-4 py-2.5 bg-[#25D366] hover:bg-[#20ba5a] text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-colors"
+            >
+              <span>WhatsApp: +258 84 201 4173</span>
+            </a>
+            <button
+              onClick={() => handleOpenContact('Starter')}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-colors"
+            >
+              <Mail size={13} />
+              <span>Solicitar Acesso</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-slate-950 text-slate-400 py-8 border-t border-slate-800 text-xs text-center">
+        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <p>© 2026 ClickPay Moçambique · clickpay.co.mz. Todos os direitos reservados.</p>
+          <p className="text-[11px] text-slate-500">Conforme o Código do IRPS, Lei do Trabalho 13/2023 e Regulamento SISSMO.</p>
         </div>
       </footer>
 
-      {/* Modal de Contacto e Solicitação de Credenciais */}
+      {/* Modal de Solicitação de Credenciais */}
       {showContactModal && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 relative space-y-5 max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 relative space-y-4">
             <button
               onClick={() => setShowContactModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors p-1 cursor-pointer"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
             >
               <X size={18} />
             </button>
 
-            <div className="space-y-1.5 text-center">
-              <div className="w-12 h-12 bg-blue-50 text-blue-900 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">
-                🔑
-              </div>
-              <h3 className="text-lg font-black text-slate-950">Solicitar Credenciais ({selectedPlanForContact})</h3>
-              <p className="text-xs text-slate-500 font-medium">
-                Solicite as suas credenciais de acesso ou crie a conta diretamente. O Administrador será notificado de imediato!
-              </p>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-slate-950">Solicitar Acesso ao ERP</h3>
+              <p className="text-xs text-slate-500">Preencha os dados e receba as credenciais da sua empresa:</p>
             </div>
 
             {reqSuccess ? (
-              <div className="p-5 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-3">
-                <div className="w-10 h-10 bg-emerald-600 text-white rounded-full flex items-center justify-center mx-auto">
-                  <CheckCircle2 size={20} />
-                </div>
-                <h4 className="text-sm font-black text-emerald-950">Pedido Enviado com Sucesso!</h4>
-                <p className="text-xs text-emerald-800 leading-relaxed">
-                  O Administrador (<b>gersonjcumbane@gmail.com</b>) recebeu a notificação em tempo real no sistema e no Firebase. As suas credenciais serão enviadas em breve!
-                </p>
+              <div className="p-4 bg-emerald-50 text-emerald-900 rounded-xl text-xs text-center space-y-2">
+                <p className="font-bold">✓ Solicitação Registada!</p>
+                <p className="text-[11px]">As credenciais de acesso para a empresa <b>{reqEmpresa}</b> foram enviadas ao administrador.</p>
                 <button
-                  onClick={() => {
-                    setReqSuccess(false);
-                    setShowContactModal(false);
-                  }}
-                  className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs cursor-pointer"
+                  onClick={() => setShowContactModal(false)}
+                  className="mt-2 w-full py-2 bg-emerald-700 text-white rounded-lg font-bold"
                 >
                   Fechar
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleSubmitCredentialRequest} className="space-y-3 text-left">
+              <form onSubmit={handleSubmitRequest} className="space-y-3 text-xs">
                 <div>
-                  <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">Nome da Empresa *</label>
+                  <label className="font-bold text-slate-700 block mb-1">Nome da Empresa *</label>
                   <input
                     type="text"
                     required
                     value={reqEmpresa}
                     onChange={(e) => setReqEmpresa(e.target.value)}
-                    placeholder="Ex: Comercial Maputo Lda"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
+                    placeholder="Ex: Comercial Limpopo Lda"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">Responsável *</label>
-                    <input
-                      type="text"
-                      required
-                      value={reqResponsavel}
-                      onChange={(e) => setReqResponsavel(e.target.value)}
-                      placeholder="Seu Nome"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">NUIT da Empresa</label>
-                    <input
-                      type="text"
-                      value={reqNuit}
-                      onChange={(e) => setReqNuit(e.target.value)}
-                      placeholder="400123456"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:bg-white focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Nome do Responsável</label>
+                  <input
+                    type="text"
+                    value={reqResponsavel}
+                    onChange={(e) => setReqResponsavel(e.target.value)}
+                    placeholder="Seu Nome"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">E-mail Corporativo *</label>
-                    <input
-                      type="email"
-                      required
-                      value={reqEmail}
-                      onChange={(e) => setReqEmail(e.target.value)}
-                      placeholder="email@empresa.co.mz"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-extrabold text-slate-700 uppercase block mb-1">Telefone / WhatsApp *</label>
-                    <input
-                      type="tel"
-                      required
-                      value={reqTelefone}
-                      onChange={(e) => setReqTelefone(e.target.value)}
-                      placeholder="+258 84..."
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">E-mail *</label>
+                  <input
+                    type="email"
+                    required
+                    value={reqEmail}
+                    onChange={(e) => setReqEmail(e.target.value)}
+                    placeholder="email@empresa.co.mz"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
                 </div>
-
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Telefone / WhatsApp *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={reqTelefone}
+                    onChange={(e) => setReqTelefone(e.target.value)}
+                    placeholder="+258 84..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
+                </div>
                 <button
                   type="submit"
                   disabled={reqSubmitting}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-extrabold rounded-xl text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl transition-all cursor-pointer shadow-sm"
                 >
-                  <Mail size={14} />
-                  <span>{reqSubmitting ? 'A Notificar Administrador...' : 'Solicitar Credenciais ao Administrador'}</span>
+                  {reqSubmitting ? 'A Enviar...' : 'Enviar Pedido'}
                 </button>
               </form>
             )}
-
-            <div className="space-y-3 pt-1">
-              <div className="relative my-2">
-                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
-                <div className="relative flex justify-center text-[10px] font-bold uppercase"><span className="bg-white px-3 text-slate-400">OU REGISTO DIRETO</span></div>
-              </div>
-
-              <button
-                onClick={() => {
-                  setShowContactModal(false);
-                  if (onEnterRegister) onEnterRegister();
-                  else onEnterLogin();
-                }}
-                className="w-full py-3 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Building2 size={15} />
-                <span>Criar Conta & Configurar Automaticamente</span>
-              </button>
-            </div>
           </div>
         </div>
       )}
-
-      {/* Botão de WhatsApp Flutuante */}
-      <a
-        href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20ClickPay%20ERP%20(clickpay.co.mz)."
-        target="_blank"
-        rel="noreferrer"
-        className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#20ba5a] text-slate-950 p-3.5 rounded-full shadow-lg hover:shadow-xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 group"
-        title="Contactar via WhatsApp"
-        id="btn_whatsapp_flutuante"
-      >
-        <svg className="w-6 h-6 fill-current text-white" viewBox="0 0 24 24">
-          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.18 1.449 4.825 1.451 5.436 0 9.86-4.42 9.864-9.864.002-2.637-1.03-5.115-2.906-6.99C16.55 1.87 14.075.841 11.973.841c-5.441 0-9.865 4.422-9.869 9.865-.001 1.761.47 3.473 1.365 4.975l-.991 3.619 3.714-.974zm12.335-7.39c-.316-.158-1.87-.924-2.155-1.027-.285-.104-.492-.158-.7.158-.207.317-.803.104-.984.316-.18.213-.362.213-.678.055-.316-.158-1.334-.491-2.541-1.57C11.533 9.444 10.9 8.01 10.74 7.746c-.158-.317-.017-.488.141-.645.142-.142.316-.369.474-.554.158-.185.21-.317.316-.528.106-.211.053-.396-.026-.554-.079-.158-.7-1.691-.959-2.316-.252-.61-.51-.527-.7-.537-.181-.009-.39-.01-.599-.01-.21 0-.554.079-.844.396-.29.317-1.11 1.083-1.11 2.64 0 1.557 1.133 3.064 1.292 3.275.158.21 2.227 3.4 5.397 4.767.753.325 1.343.52 1.802.666.759.241 1.449.207 1.995.126.608-.091 1.87-.765 2.134-1.466.264-.702.264-1.303.185-1.428-.079-.126-.285-.21-.601-.368z"/>
-        </svg>
-        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 ease-out whitespace-nowrap text-xs font-bold pl-0 group-hover:pl-2 text-white">
-          WhatsApp Suporte
-        </span>
-      </a>
     </div>
   );
 }

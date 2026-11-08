@@ -1403,6 +1403,12 @@ export function resetDbTotal() {
   paymentLogs.length = 0;
   baseDadosVales.length = 0;
   baseDadosContratosGerais.length = 0;
+  comprasStore.length = 0;
+  vendasStore.length = 0;
+  caixaStore.length = 0;
+  leadsStore.length = 0;
+  propostasStore.length = 0;
+  contratosComerciaisStore.length = 0;
   
   // Set empty company data so all fields are blank
   empresaAtual.nome = "";
@@ -1415,6 +1421,17 @@ export function resetDbTotal() {
   empresaAtual.email = "";
   empresaAtual.telefone = "";
   empresaAtual.logo = "";
+}
+
+// Zerar todos os cálculos fiscais, vendas, compras, faturas e caixa
+export function zerarCalculosEResetFinanceiro() {
+  comprasStore.length = 0;
+  vendasStore.length = 0;
+  caixaStore.length = 0;
+  paymentLogs.length = 0;
+  baseDadosVales.length = 0;
+  leadsStore.length = 0;
+  propostasStore.length = 0;
 }
 
 export function seedDemoData() {

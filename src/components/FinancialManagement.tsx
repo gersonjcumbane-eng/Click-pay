@@ -67,8 +67,14 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const [caixa, setCaixa] = useState<LivroCaixaItem[]>([]);
   const [apuramentoIva, setApuramentoIva] = useState<ApuramentoIVA | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  
+  // Universal Interactive Filters across all financial areas
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterType, setFilterType] = useState<string>('todos');
+  const [vendasSearch, setVendasSearch] = useState<string>('');
+  const [vendasStatusFilter, setVendasStatusFilter] = useState<string>('todos');
+  const [comprasSearch, setComprasSearch] = useState<string>('');
+  const [comprasStatusFilter, setComprasStatusFilter] = useState<string>('todos');
 
   const loadErpReport = async (tipo: string, periodo: string) => {
     setReportLoading(true);
@@ -896,6 +902,42 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                   </button>
                 </div>
 
+                <div className="flex flex-col sm:flex-row gap-2.5 items-center justify-between pb-2 border-b border-slate-100">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
+                    <input
+                      type="text"
+                      value={vendasSearch}
+                      onChange={(e) => setVendasSearch(e.target.value)}
+                      placeholder="Filtrar por cliente, NUIT ou factura..."
+                      className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-emerald-600 font-medium"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                    {['todos', 'Cobrado', 'Pendente', 'Anulado'].map(st => (
+                      <button
+                        key={st}
+                        onClick={() => setVendasStatusFilter(st)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                          vendasStatusFilter === st 
+                            ? 'bg-emerald-800 text-white shadow-xs' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {st === 'todos' ? 'Todos os Estados' : st}
+                      </button>
+                    ))}
+                    {(vendasSearch || vendasStatusFilter !== 'todos') && (
+                      <button
+                        onClick={() => { setVendasSearch(''); setVendasStatusFilter('todos'); }}
+                        className="text-[10px] text-slate-400 hover:text-slate-700 underline px-1 cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto border border-slate-100 rounded-xl">
                   <table className="w-full text-left text-xs">
                     <thead>
@@ -912,7 +954,21 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {vendas.map(v => (
+                      {vendas
+                        .filter(v => {
+                          if (vendasStatusFilter !== 'todos' && v.estado !== vendasStatusFilter) return false;
+                          if (vendasSearch) {
+                            const q = vendasSearch.toLowerCase();
+                            return (
+                              v.cliente.toLowerCase().includes(q) ||
+                              v.numero_factura.toLowerCase().includes(q) ||
+                              (v.nuit_cliente && v.nuit_cliente.toLowerCase().includes(q)) ||
+                              v.descricao.toLowerCase().includes(q)
+                            );
+                          }
+                          return true;
+                        })
+                        .map(v => (
                         <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="p-3 font-mono font-bold text-slate-800">{v.numero_factura}</td>
                           <td className="p-3">
@@ -1016,6 +1072,42 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                   </button>
                 </div>
 
+                <div className="flex flex-col sm:flex-row gap-2.5 items-center justify-between pb-2 border-b border-slate-100">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
+                    <input
+                      type="text"
+                      value={comprasSearch}
+                      onChange={(e) => setComprasSearch(e.target.value)}
+                      placeholder="Filtrar por fornecedor, NUIT ou factura..."
+                      className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-blue-900 font-medium"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                    {['todos', 'Pago', 'Pendente', 'Cancelado'].map(st => (
+                      <button
+                        key={st}
+                        onClick={() => setComprasStatusFilter(st)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                          comprasStatusFilter === st 
+                            ? 'bg-blue-900 text-white shadow-xs' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {st === 'todos' ? 'Todos os Estados' : st}
+                      </button>
+                    ))}
+                    {(comprasSearch || comprasStatusFilter !== 'todos') && (
+                      <button
+                        onClick={() => { setComprasSearch(''); setComprasStatusFilter('todos'); }}
+                        className="text-[10px] text-slate-400 hover:text-slate-700 underline px-1 cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto border border-slate-100 rounded-xl">
                   <table className="w-full text-left text-xs">
                     <thead>
@@ -1032,7 +1124,21 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {compras.map(c => (
+                      {compras
+                        .filter(c => {
+                          if (comprasStatusFilter !== 'todos' && c.estado !== comprasStatusFilter) return false;
+                          if (comprasSearch) {
+                            const q = comprasSearch.toLowerCase();
+                            return (
+                              c.fornecedor.toLowerCase().includes(q) ||
+                              c.numero_factura.toLowerCase().includes(q) ||
+                              (c.nuit_fornecedor && c.nuit_fornecedor.toLowerCase().includes(q)) ||
+                              c.descricao.toLowerCase().includes(q)
+                            );
+                          }
+                          return true;
+                        })
+                        .map(c => (
                         <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="p-3 font-mono font-bold text-slate-800">{c.numero_factura}</td>
                           <td className="p-3">

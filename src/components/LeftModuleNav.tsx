@@ -33,6 +33,8 @@ export interface LeftModuleNavProps {
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   onLogout: () => void;
+  onResetDb?: () => void;
+  onResetCosts?: () => void;
 }
 
 export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
@@ -46,7 +48,9 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   onSelectTab,
   isOpenMobile,
   onCloseMobile,
-  onLogout
+  onLogout,
+  onResetDb,
+  onResetCosts
 }) => {
   const isClient = userRole === 'CLIENTE_EMPRESA';
 
@@ -601,6 +605,33 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
           }`} />
         </button>
 
+      </div>
+
+      {/* Opções de Limpeza de Dados e Reset de Cálculos */}
+      <div className="pt-2 border-t border-slate-200 space-y-1.5">
+        <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block px-1">
+          Gestão de Dados & Cálculos
+        </span>
+        {onResetCosts && (
+          <button
+            onClick={onResetCosts}
+            className="w-full py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg text-[10px] font-extrabold flex items-center justify-between transition-colors cursor-pointer"
+            title="Zerar cálculos fiscais, compras, vendas e caixa"
+          >
+            <span>🔄 Zerar Cálculos Fiscais</span>
+            <span className="text-[9px] bg-amber-200 px-1 rounded">0.00 MT</span>
+          </button>
+        )}
+        {onResetDb && (
+          <button
+            onClick={onResetDb}
+            className="w-full py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-[10px] font-extrabold flex items-center justify-between transition-colors cursor-pointer"
+            title="Limpar todos os dados e começar do zero"
+          >
+            <span>🧹 Limpar Todos os Dados</span>
+            <span className="text-[9px] bg-slate-300 px-1 rounded">Reset</span>
+          </button>
+        )}
       </div>
 
       {/* Isolated Red Logout Window / Container (Compact & High Contrast) */}

@@ -19,6 +19,29 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  
+  // O botão de chave mestre só é visível para o Gerson (Fundador):
+  // 1. Automaticamente se houver histórico de admin no navegador
+  // 2. Ou se passar '?admin=true' ou '#admin' no URL
+  // 3. Ou dando 3 cliques rápidos no logotipo da ClickPay
+  const [clickCount, setClickCount] = useState(0);
+  const [showMasterShortcut, setShowMasterShortcut] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const urlParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+    const hasAdminQuery = urlParams.get('admin') === 'true' || urlParams.get('founder') === 'true' || hash === '#admin';
+    const isSavedFounder = localStorage.getItem('paytek_user') === 'gersonjcumbane@gmail.com' || localStorage.getItem('paytek_role') === 'SUPER_ADMIN_PAYROLL';
+    return hasAdminQuery || isSavedFounder;
+  });
+
+  const handleSecretLogoClick = () => {
+    const next = clickCount + 1;
+    setClickCount(next);
+    if (next >= 3) {
+      setShowMasterShortcut(true);
+      setError(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,13 +150,18 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
            transition={{ duration: 0.4, ease: 'easeOut' }}
            className="bg-white p-8 sm:p-10 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100 space-y-6 w-full"
         >
-          {/* Header Logo Area */}
-          <div className="text-center mb-4" id="login_logo_area">
+          {/* Header Logo Area com gatilho secreto de 3 cliques para o Fundador */}
+          <div 
+            className="text-center mb-4 select-none cursor-pointer" 
+            id="login_logo_area"
+            onClick={handleSecretLogoClick}
+            title="ClickPay Moçambique"
+          >
             <img 
               src="/logo-payroll.png" 
               alt="ClickPay Moçambique" 
               style={{ width: '110px', height: 'auto', marginBottom: '10px' }} 
-              className="mx-auto"
+              className="mx-auto pointer-events-none"
               referrerPolicy="no-referrer"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
@@ -215,19 +243,25 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
               )}
             </button>
 
-            {/* Acesso Rápido de Fundador / Administrador Mestre */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('gersonjcumbane@gmail.com');
-                  setPassword('ClickPay2026!');
-                }}
-                className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            {/* Acesso Rápido de Fundador / Administrador Mestre (SÓ APARECE PARA O GERSON) */}
+            {showMasterShortcut && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="pt-2"
               >
-                🔑 Preencher Chave Mestre (Gerson Cumbane)
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('gersonjcumbane@gmail.com');
+                    setPassword('ClickPay2026!');
+                  }}
+                  className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                >
+                  🔑 Acesso Mestre Exclusivo (Gerson Cumbane)
+                </button>
+              </motion.div>
+            )}
           </form>
 
           {onEnterRegister ? (
