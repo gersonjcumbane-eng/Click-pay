@@ -1,0 +1,32 @@
+name: Deploy to Vercel Production
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy_to_vercel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Puxar configurações do ambiente da Vercel
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Compilar artefatos de produção
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Publicar para Vercel Produção (clickpay.co.mz)
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

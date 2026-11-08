@@ -28,6 +28,8 @@ import {
   resetDbTotal,
   seedDemoData,
   baseDadosClientes,
+  getCurrentPeriod,
+  getDefaultNextBillingDate,
   selecionarClienteEmpresa,
   adicionarClienteEmpresa,
   getCompras,
@@ -610,7 +612,7 @@ async function startServer() {
             nome_empresa: clienteErp.nome,
             subscription_status: clienteErp.subscription_status || 'ativo',
             subscription_plan: clienteErp.subscription_plan || 'Bronze',
-            next_billing_date: clienteErp.next_billing_date || '2026-07-28'
+            next_billing_date: clienteErp.next_billing_date || getDefaultNextBillingDate()
           }
         });
       }
@@ -1027,7 +1029,7 @@ async function startServer() {
         password: password || 'senha123',
         subscription_status: subscription_status || 'ativo',
         subscription_plan: subscription_plan || 'Bronze',
-        next_billing_date: next_billing_date || '2026-07-28'
+        next_billing_date: next_billing_date || getDefaultNextBillingDate()
       });
 
       enviarEmailAlertaAssinatura(novoCliente);
@@ -1435,7 +1437,7 @@ async function startServer() {
   app.post('/api/payroll/bulk-process-and-pay', async (req: Request, res: Response) => {
     try {
       const { items, periodo } = req.body; // items: Array of { id, diasFaltas }
-      const activePeriod = periodo || 'Julho 2026';
+      const activePeriod = periodo || getCurrentPeriod();
       
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Nenhum funcionário fornecido para pagamento em lote.' });
@@ -1498,7 +1500,7 @@ async function startServer() {
   app.post('/api/payroll/process-and-pay', async (req: Request, res: Response) => {
     try {
       const { dadosEmpresa, dadosFuncionario, diasFaltas, periodo } = req.body;
-      const activePeriod = periodo || 'Julho 2026';
+      const activePeriod = periodo || getCurrentPeriod();
 
       if (!dadosFuncionario) {
         return res.status(400).json({ erro: 'Informações de funcionário em falta.' });
@@ -1741,7 +1743,7 @@ async function startServer() {
   // 4. Financial Statistics Resumo Dashboard (Computed dynamically based on all current workers)
   app.get('/api/dashboard/resumo-financeiro', (req: Request, res: Response) => {
     try {
-      const periodo = (req.query.periodo as string) || 'Julho 2026';
+      const periodo = (req.query.periodo as string) || getCurrentPeriod();
 
       // We calculate totals dynamically based on all employees currently saved in database
       let totalSalariosBrutos = 0;
@@ -2036,7 +2038,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5. SISSMO (INSS Portal) CSV Layout Export
   app.get('/api/payroll/exportar-sissmo', (req: Request, res: Response) => {
     try {
-      const activePeriod = (req.query.periodo as string) || 'Julho_2026';
+      const activePeriod = (req.query.periodo as string) || getCurrentPeriod().replace(/\s+/g, '_');
       
       // We generate CSV from the actual list of registered employees
       let conteudoLayout = "N_INSS;NUIT_FUNCIONARIO;NOME_TRABALHADOR;SALARIO_BRUTO;DIAS_FALTAS\n";
@@ -2074,7 +2076,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5.1 Exportação de Mapa de Salários em PDF
   app.get('/api/exportar/mapa-pdf', async (req: Request, res: Response) => {
     try {
-      const activePeriod = (req.query.periodo as string) || 'Julho 2026';
+      const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
       
       const listaCalculos = employees.map(emp => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
@@ -2115,7 +2117,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5.1.1 Exportação de Guia de Recolhimento INSS em PDF (SISSMO Moçambique)
   app.get('/api/exportar/guia-inss-pdf', async (req: Request, res: Response) => {
     try {
-      const activePeriod = (req.query.periodo as string) || 'Julho 2026';
+      const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
       const jurosMora = Number(req.query.juros) || 0;
       const multas = Number(req.query.multas) || 0;
 
@@ -2206,7 +2208,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5.1.2 Exportação de Guia de Recolhimento IRPS M/19 em PDF (DGI Moçambique)
   app.get('/api/exportar/guia-irps-pdf', async (req: Request, res: Response) => {
     try {
-      const activePeriod = (req.query.periodo as string) || 'Julho 2026';
+      const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
       const jurosCompensatorios = Number(req.query.juros) || 0;
 
       let valorTrabalhoDependente = 0;
@@ -3092,7 +3094,7 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
   // 5.2 Exportação de Mapa de Salários em Excel (CSV formatado)
   app.get('/api/exportar/mapa-excel', (req: Request, res: Response) => {
     try {
-      const activePeriod = (req.query.periodo as string) || 'Julho 2026';
+      const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
       
       // UTF-8 BOM for Portuguese Excel
       let csvContent = "\uFEFF";
@@ -3581,9 +3583,9 @@ Host: https://clickpay.co.mz
 
       // 4. Gravar operação no histórico para que apareça de forma 100% dinâmica na Análise de Períodos
       try {
-        const activePeriod = req.body.periodo || 'Julho 2026';
+        const activePeriod = req.body.periodo || getCurrentPeriod();
         const parts = activePeriod.split(' ');
-        const mesNome = parts[0] || 'Julho';
+        const mesNome = parts[0] || 'Atual';
         const anoNum = Number(parts[1]) || 2026;
 
         let totalIRPS = 0;
@@ -3665,7 +3667,7 @@ Host: https://clickpay.co.mz
   app.post('/api/fintech/autopilot/executar', async (req: Request, res: Response) => {
     try {
       const { periodo, bancoOrigem, autoRecharge } = req.body;
-      const activePeriod = periodo || 'Julho 2026';
+      const activePeriod = periodo || getCurrentPeriod();
       const parts = activePeriod.split(' ');
       const mesNome = parts[0] || 'Julho';
       const anoNum = Number(parts[1]) || 2026;
@@ -4793,7 +4795,7 @@ Host: https://clickpay.co.mz
   app.post('/api/alerts/trigger-manual', (req: Request, res: Response) => {
     try {
       const { dataSimulada } = req.body;
-      const dataRef = dataSimulada ? new Date(dataSimulada) : new Date('2026-06-26');
+      const dataRef = dataSimulada ? new Date(dataSimulada) : new Date();
       const novasNotificacoes: any[] = [];
 
       // 1. Verificar prazos de contratos e períodos de experiência

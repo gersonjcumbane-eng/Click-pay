@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <script>
-      // Defesa contra erros de extensões externas de navegador (ex: Chrome Extensions timeout)
+      // Defesa contra erros de extensões externas e WebSocket do Vite HMR
       (function() {
-        function isExtensionError(err, source) {
+        function isIgnorableError(err, source) {
           if (!err && !source) return false;
           var str = (source || '') + ' ' + (err && (err.message || err.stack || String(err)) || '');
           return (
@@ -13,19 +13,22 @@
             str.includes('moz-extension://') ||
             str.includes('chrome: call method') ||
             str.includes('Extension context invalidated') ||
-            str.includes('ResizeObserver loop completed with undelivered notifications')
+            str.includes('ResizeObserver loop completed with undelivered notifications') ||
+            str.includes('WebSocket closed without opened') ||
+            str.includes('@vite/client') ||
+            str.includes('failed to connect to websocket')
           );
         }
 
         window.addEventListener('unhandledrejection', function(event) {
-          if (isExtensionError(event.reason, '')) {
+          if (isIgnorableError(event.reason, '')) {
             event.preventDefault();
             event.stopImmediatePropagation();
           }
         }, true);
 
         window.addEventListener('error', function(event) {
-          if (isExtensionError(event.error, event.filename || event.message)) {
+          if (isIgnorableError(event.error, event.filename || event.message)) {
             event.preventDefault();
             event.stopImmediatePropagation();
             return true;

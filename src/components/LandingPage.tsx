@@ -20,7 +20,11 @@ import {
   Mail,
   MapPin,
   X,
-  FileText
+  FileText,
+  Compass,
+  Eye,
+  Award,
+  RefreshCw
 } from 'lucide-react';
 import { calcularFolhaSalario } from '../db_tax';
 import { db, doc, setDoc } from '../lib/firebase';
@@ -32,8 +36,9 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlanDemo }: LandingPageProps) {
-  const [salarioBase, setSalarioBase] = useState<number>(35000);
-  const [dependentes, setDependentes] = useState<number>(1);
+  // Simulador inicial começa com 0 para simulação limpa
+  const [salarioBase, setSalarioBase] = useState<number>(0);
+  const [dependentes, setDependentes] = useState<number>(0);
   const [showContactModal, setShowContactModal] = useState<boolean>(false);
   const [selectedPlanForContact, setSelectedPlanForContact] = useState<string>('Starter');
   const [activeTab, setActiveTab] = useState<'salarios' | 'faturacao' | 'fintech' | 'crm'>('salarios');
@@ -46,7 +51,31 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
   const [reqSubmitting, setReqSubmitting] = useState<boolean>(false);
   const [reqSuccess, setReqSuccess] = useState<boolean>(false);
 
-  // Live calculation
+  // Acesso exclusivo do Fundador (Gerson Cumbane) para zerar cálculos da Landing Page
+  const [isFounder, setIsFounder] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasAdminParam = urlParams.get('admin') === 'true' || window.location.hash === '#admin';
+    const isSavedFounder = localStorage.getItem('paytek_user') === 'gersonjcumbane@gmail.com' || localStorage.getItem('paytek_role') === 'SUPER_ADMIN_PAYROLL';
+    return hasAdminParam || isSavedFounder;
+  });
+
+  const [founderClicks, setFounderClicks] = useState<number>(0);
+  const handleSecretFounderTrigger = () => {
+    const next = founderClicks + 1;
+    setFounderClicks(next);
+    if (next >= 3) {
+      setIsFounder(true);
+      alert('Modo Fundador Ativado: Controles de reset e gestão de cálculos liberados!');
+    }
+  };
+
+  const handleZerarCalculosLanding = () => {
+    setSalarioBase(0);
+    setDependentes(0);
+  };
+
+  // Cálculo ao vivo oficial
   const res = calcularFolhaSalario(salarioBase, 0, dependentes);
   const encargoPatronalInss = salarioBase * 0.04;
   const custoTotalEmpresa = salarioBase + encargoPatronalInss;
@@ -87,34 +116,27 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800 antialiased selection:bg-blue-900 selection:text-white">
-      {/* Top Banner Oficial */}
-      <div className="bg-slate-900 text-white text-[11px] font-medium py-2 px-4 text-center border-b border-slate-800 flex items-center justify-center gap-3">
-        <span className="font-bold text-emerald-400">🇲🇿 Moçambique</span>
-        <span>•</span>
-        <span>ClickPay ERP em Nuvem · Faturação Eletrónica com QR Code AT, IRPS 2026 e SISSMO</span>
-      </div>
-
       {/* Navbar Minimalista e Limpa */}
       <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+          <div 
+            className="flex items-center gap-2.5 cursor-pointer select-none" 
+            onClick={handleSecretFounderTrigger}
+            title="ClickPay"
+          >
             <img 
               src="/logo-payroll.png" 
               alt="ClickPay" 
-              className="h-8 w-auto object-contain" 
+              className="h-8 w-auto object-contain pointer-events-none" 
               onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
             />
-            <div>
-              <span className="text-lg font-black text-slate-950 tracking-tight">ClickPay</span>
-              <span className="text-[10px] ml-1 bg-blue-900 text-white px-1.5 py-0.5 rounded font-extrabold uppercase tracking-wider">.CO.MZ</span>
-            </div>
+            <span className="text-xl font-black text-slate-950 tracking-tight">ClickPay</span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-6 text-xs font-bold text-slate-600">
+          <nav className="hidden md:flex items-center gap-8 text-xs font-bold text-slate-600">
+            <a href="#institucional" className="hover:text-blue-900 transition-colors">Quem somos</a>
             <a href="#modulos" className="hover:text-blue-900 transition-colors">Funcionalidades</a>
-            <a href="#simulador" className="hover:text-blue-900 transition-colors">Simulador IRPS</a>
             <a href="#planos" className="hover:text-blue-900 transition-colors">Planos & Preços</a>
-            <a href="#contacto" className="hover:text-blue-900 transition-colors">Contacto</a>
           </nav>
 
           <div className="flex items-center gap-3">
@@ -142,7 +164,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
           <div className="lg:col-span-7 space-y-6 text-left">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-900 rounded-full text-xs font-bold border border-blue-100">
               <ShieldCheck size={14} className="text-blue-700" />
-              Conforme a Autoridade Tributária & INSS Moçambique
+              Conforme a Autoridade Tributária & INSS Moçambique · Padrão Primavera V10
             </span>
 
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-[1.15]">
@@ -150,7 +172,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
             </h1>
 
             <p className="text-sm sm:text-base text-slate-600 leading-relaxed font-normal max-w-xl">
-              Elimine o papel e as folhas de cálculo. O <b>ClickPay</b> automatiza o processamento salarial com a nova tabela de <b>IRPS 2026</b>, gera guias do <b>SISSMO</b>, emite facturas com <b>IVA ou ISPC (3%)</b> e liquida pagamentos em lote via <b>M-Pesa e e-Mola</b>.
+              Elimine o papel e as folhas de cálculo. O <b>ClickPay</b> automatiza o processamento salarial com a nova tabela de <b>IRPS 2026</b>, gera guias do <b>SISSMO</b>, emite facturas certificadas no padrão <b>Primavera ERP V10</b> com IVA ou ISPC (3%) e liquida pagamentos em lote via <b>M-Pesa e e-Mola</b>.
             </p>
 
             <div className="flex flex-wrap gap-3 pt-2">
@@ -196,7 +218,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
                   <span className="text-xs font-bold tracking-wider text-slate-300">clickpay.co.mz</span>
                 </div>
-                <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono font-bold">Seguro SSL</span>
+                <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono font-bold">Primavera V10 Compliant</span>
               </div>
 
               <div className="space-y-3">
@@ -234,12 +256,63 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
         </div>
       </section>
 
-      {/* Módulos do Sistema */}
+      {/* SEÇÃO INSTITUCIONAL: MISSÃO, VISÃO & VALORES PROFISSIONAIS */}
+      <section id="institucional" className="py-16 bg-slate-50 border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="text-center max-w-2xl mx-auto space-y-2 mb-12">
+            <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Identidade Corporativa</span>
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">Compromisso com o Futuro de Moçambique</h2>
+            <p className="text-xs sm:text-sm text-slate-600 font-normal">
+              Construímos tecnologia financeira e de gestão desenhada especificamente para capacitar as empresas moçambicanas.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Missão */}
+            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-900 flex items-center justify-center font-bold">
+                <Compass size={20} />
+              </div>
+              <h3 className="text-base font-bold text-slate-950">Nossa Missão</h3>
+              <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                Desmistificar e automatizar a gestão financeira, salarial e fiscal para micro, pequenas e médias empresas em Moçambique, eliminando a burocracia do papel e promovendo a inclusão digital e financeira de trabalhadores e empreendedores.
+              </p>
+            </div>
+
+            {/* Visão */}
+            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
+                <Eye size={20} />
+              </div>
+              <h3 className="text-base font-bold text-slate-950">Nossa Visão</h3>
+              <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                Ser o ecossistema ERP e Fintech de referência em Moçambique e nos PALOP, reconhecido pela excelência em conformidade fiscal, inovação em pagamentos móveis e confiabilidade rigorosa no padrão de auditoria internacional.
+              </p>
+            </div>
+
+            {/* Valores */}
+            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-900 flex items-center justify-center font-bold">
+                <Award size={20} />
+              </div>
+              <h3 className="text-base font-bold text-slate-950">Nossos Valores</h3>
+              <ul className="text-xs text-slate-600 space-y-1.5 font-normal">
+                <li>• <b>Rigor e Conformidade:</b> Respeito estrito às leis fiscais e laborais nacionais.</li>
+                <li>• <b>Segurança e Integridade:</b> Proteção absoluta dos dados e salários das empresas.</li>
+                <li>• <b>Inovação Prática:</b> Tecnologia útil adaptada às carteiras M-Pesa e e-Mola.</li>
+                <li>• <b>Transparência Total:</b> Preços em Meticais e sem encargos ocultos.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Módulos do Sistema Padrão Primavera V10 */}
       <section id="modulos" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 w-full">
         <div className="text-center max-w-2xl mx-auto space-y-2 mb-10">
-          <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Módulos Essenciais</span>
-          <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">Tudo o que a sua Empresa Precisa</h2>
-          <p className="text-xs sm:text-sm text-slate-600 font-normal">Uma solução integrada sem jargões desnecessários.</p>
+          <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Módulos Integrados</span>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">Arquitetura ERP Conforme Primavera V10 & PGC-NIRF</h2>
+          <p className="text-xs sm:text-sm text-slate-600 font-normal">Todos os documentos gerados seguem o layout oficial das grandes referências de mercado.</p>
         </div>
 
         {/* Tab Buttons */}
@@ -275,16 +348,16 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                 <span className="text-[10px] font-bold text-blue-900 uppercase">Recursos Humanos</span>
                 <h3 className="text-lg font-bold text-slate-900">Processamento Salarial sem Erros</h3>
                 <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                  Cálculo automático de INSS (3% trabalhador e 4% patronal), escalões progressivos de IRPS por número de dependentes e geração do ficheiro oficial para carregar diretamente no portal do SISSMO.
+                  Cálculo automático de INSS (3% trabalhador e 4% patronal), escalões progressivos de IRPS por dependentes familiares e geração do ficheiro oficial para carregamento no portal SISSMO.
                 </p>
                 <ul className="space-y-2 text-xs text-slate-700">
-                  <li className="flex items-center gap-2">✓ Recibos de vencimento em PDF com código QR</li>
+                  <li className="flex items-center gap-2">✓ Recibos de vencimento em layout padrão Primavera ERP V10</li>
                   <li className="flex items-center gap-2">✓ Auditoria de contratos e avisos prévios (Lei 13/2023)</li>
                   <li className="flex items-center gap-2">✓ Controlo de faltas e adiantamentos (vales)</li>
                 </ul>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-                <span className="font-bold text-slate-800 block">Recibo de Vencimento Digital</span>
+                <span className="font-bold text-slate-800 block">Layout Recibo Primavera V10</span>
                 <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1 font-mono text-[11px]">
                   <div className="flex justify-between"><span>Salário Base:</span><span>35.000,00 MT</span></div>
                   <div className="flex justify-between text-rose-600"><span>INSS (3%):</span><span>-1.050,00 MT</span></div>
@@ -292,6 +365,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                   <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-700">
                     <span>Líquido a Transferir:</span><span>32.675,00 MT</span>
                   </div>
+                  <div className="text-[9px] text-slate-400 pt-1">Software de Facturação Certificado nº 01/AT/2026</div>
                 </div>
               </div>
             </div>
@@ -307,12 +381,12 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
                 </p>
                 <ul className="space-y-2 text-xs text-slate-700">
                   <li className="flex items-center gap-2">✓ QR Code oficial da Autoridade Tributária</li>
+                  <li className="flex items-center gap-2">✓ Layout corporativo idêntico a Primavera V10</li>
                   <li className="flex items-center gap-2">✓ Envio por WhatsApp e E-mail em 1 clique</li>
-                  <li className="flex items-center gap-2">✓ Controlo de pagamentos pendentes e recibos</li>
                 </ul>
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-                <span className="font-bold text-slate-800 block">Factura Eletrónica Oficial</span>
+                <span className="font-bold text-slate-800 block">Factura Oficial Certificada</span>
                 <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 text-[11px]">
                   <div className="flex justify-between font-bold text-slate-900">
                     <span>FACTURA FT 2026/089</span>
@@ -386,24 +460,40 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
         </div>
       </section>
 
-      {/* Simulador de Salário IRPS 2026 */}
+      {/* Simulador de Salário IRPS 2026 com opção de Zerar Cálculos (Exclusivo Fundador) */}
       <section id="simulador" className="py-16 bg-white border-t border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-4 sm:px-6">
           <div className="text-center space-y-2 mb-8">
             <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Simulador Interativo</span>
-            <h2 className="text-2xl font-black text-slate-950">Simulador de Salário & Impostos Moçambique</h2>
+            <div className="flex items-center justify-center gap-2">
+              <h2 className="text-2xl font-black text-slate-950">Simulador de Salário & Impostos Moçambique</h2>
+              {/* Botão de Zerar Cálculos Exclusivo para Gerson Cumbane */}
+              {isFounder && (
+                <button
+                  onClick={handleZerarCalculosLanding}
+                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
+                  title="Opção exclusiva do Fundador: Zerar valores do simulador"
+                >
+                  <RefreshCw size={11} />
+                  <span>Zerar Cálculos (Fundador)</span>
+                </button>
+              )}
+            </div>
             <p className="text-xs text-slate-600">Teste o cálculo do IRPS 2026 e INSS em tempo real:</p>
           </div>
 
           <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Salário Base Mensal: <span className="font-mono text-blue-900 font-bold">{salarioBase.toLocaleString()} MT</span>
-                </label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs font-bold text-slate-700">
+                    Salário Base Mensal:
+                  </label>
+                  <span className="font-mono text-blue-900 font-bold text-xs">{salarioBase.toLocaleString()} MT</span>
+                </div>
                 <input 
                   type="range" 
-                  min="5000" 
+                  min="0" 
                   max="150000" 
                   step="1000" 
                   value={salarioBase} 
@@ -576,7 +666,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
       <footer className="bg-slate-950 text-slate-400 py-8 border-t border-slate-800 text-xs text-center">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p>© 2026 ClickPay Moçambique · clickpay.co.mz. Todos os direitos reservados.</p>
-          <p className="text-[11px] text-slate-500">Conforme o Código do IRPS, Lei do Trabalho 13/2023 e Regulamento SISSMO.</p>
+          <p className="text-[11px] text-slate-500">Conforme o Código do IRPS, Lei do Trabalho 13/2023, Regulamento SISSMO e Padrão Primavera V10.</p>
         </div>
       </footer>
 

@@ -45,7 +45,6 @@ import ClientManagement from './components/ClientManagement';
 import FinancialManagement from './components/FinancialManagement';
 import { CRMVendas } from './components/CRMVendas';
 import OnboardingWizard from './components/OnboardingWizard';
-import { QuickIRPSWidget } from './components/QuickIRPSWidget';
 import { LeftModuleNav } from './components/LeftModuleNav';
 import { ClickPayBrain } from './components/ClickPayBrain';
 import { 
@@ -59,7 +58,8 @@ import {
   baseDadosClientes, 
   selecionarClienteEmpresa,
   resetDbTotal,
-  zerarCalculosEResetFinanceiro
+  zerarCalculosEResetFinanceiro,
+  getCurrentPeriod
 } from './db_tax';
 import { useToast } from './context/ToastContext';
 
@@ -184,16 +184,24 @@ export default function App() {
     await loadCompanies();
   };
   const [configFiscal, setConfigFiscal] = useState<ConfigFiscal>({ taxa_inss_trabalhador: 3, taxa_inss_entidade: 4, valor_ipa_mensal: 0 });
-  const [summary, setSummary] = useState<PayrollSummary>({
-    periodoAtual: 'Julho 2026',
+  const [selectedPeriod, setSelectedPeriod] = useState<string>(() => getCurrentPeriod());
+  const [summary, setSummary] = useState<PayrollSummary>(() => ({
+    periodoAtual: getCurrentPeriod(),
     kpis: { custoEmpresaTotal: 0, totalPagoAosFuncionarios: 0, retencaoEstadoTotal: 0 },
     dadosParaGraficoPizza: { labels: [], valoresEmMeticais: [] }
-  });
+  }));
   const [logs, setLogs] = useState<PaymentLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedPeriod = "Julho 2026";
+  // Mantém as datas e o período fiscal em dia e sincronizados em tempo real
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const periodoEmDia = getCurrentPeriod();
+      setSelectedPeriod(prev => prev || periodoEmDia);
+    }, 30000); // Valida a cada 30 segundos
+    return () => clearInterval(timer);
+  }, []);
 
   const loadData = async () => {
     try {
@@ -777,11 +785,8 @@ export default function App() {
 
       {/* Simple Professional Footer */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-[11px] text-slate-700 font-medium">
-        <p>© 2026 Payroll Tech Mz. Todos os direitos reservados. Regulado pela Autoridade Tributária de Moçambique.</p>
+        <p>© 2026 ClickPay ERP. Todos os direitos reservados. Regulado pela Autoridade Tributária de Moçambique.</p>
       </footer>
-
-      {/* Widget Flutuante de Simulação Rápida IRPS */}
-      <QuickIRPSWidget />
     </div>
   );
 }

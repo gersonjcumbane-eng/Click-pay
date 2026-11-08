@@ -98,8 +98,8 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
               localStorage.setItem('paytek_role', data.usuario.funcao);
             }
             localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
-            localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || 'Bronze');
-            localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || '2026-07-28');
+            const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || defaultExp);
             localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || '');
           }
           onLoginSuccess();
@@ -152,32 +152,24 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
         >
           {/* Header Logo Area com gatilho secreto de 3 cliques para o Fundador */}
           <div 
-            className="text-center mb-4 select-none cursor-pointer" 
+            className="text-center mb-5 select-none cursor-pointer" 
             id="login_logo_area"
             onClick={handleSecretLogoClick}
-            title="ClickPay Moçambique"
+            title="ClickPay"
           >
             <img 
               src="/logo-payroll.png" 
-              alt="ClickPay Moçambique" 
-              style={{ width: '110px', height: 'auto', marginBottom: '10px' }} 
+              alt="ClickPay" 
+              style={{ width: '90px', height: 'auto', marginBottom: '8px' }} 
               className="mx-auto pointer-events-none"
               referrerPolicy="no-referrer"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
               }}
             />
-            <div className="flex items-center justify-center gap-1.5">
-              <h2 className="text-xl font-black text-slate-950 tracking-tight">
-                ClickPay
-              </h2>
-              <span className="text-[10px] bg-blue-900 text-white font-extrabold px-1.5 py-0.5 rounded uppercase tracking-widest">
-                .CO.MZ
-              </span>
-            </div>
-            <p className="text-emerald-700 font-bold mt-1 text-[11px] uppercase tracking-wider">
-              Acesso Seguro ao Painel ERP
-            </p>
+            <h2 className="text-2xl font-black text-slate-950 tracking-tight">
+              ClickPay
+            </h2>
           </div>
 
           {error && (

@@ -20,6 +20,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { CompanyData } from '../types';
+import { getFormattedCurrentDateLong } from '../db_tax';
 
 export interface LeftModuleNavProps {
   activeTab: string;
@@ -59,35 +60,31 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   const isM3Active = ['employees', 'sissmo', 'simulator', 'fintech', 'contracts'].includes(activeTab);
   const isM4Active = activeTab === 'financial' && ['caixa', 'iva', 'relatorios', 'conformidade', 'plano_contas'].includes(financialSubTab);
 
-  const formattedDate = (() => {
-    const date = new Date();
-    const day = date.getDate();
-    const parts = selectedPeriod ? selectedPeriod.split(' ') : [];
-    const activeMonth = parts[0] || 'Julho';
-    const activeYear = parts[1] || '2026';
-    return `${day} de ${activeMonth} de ${activeYear}`;
-  })();
+  const [liveFormattedDate, setLiveFormattedDate] = React.useState<string>(() => getFormattedCurrentDateLong());
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setLiveFormattedDate(getFormattedCurrentDateLong());
+    }, 10000); // atualiza a cada 10 segundos
+    return () => clearInterval(timer);
+  }, []);
+
+  const formattedDate = liveFormattedDate;
 
   const navContent = (
     <div className="flex flex-col gap-2.5">
-      {/* Brand & System Title (Compact & Crisp) */}
+      {/* Brand & System Title (ClickPay Logo) */}
       <div className="flex items-center gap-2 px-1 pb-2 border-b border-slate-200">
         <img 
           src="/logo-payroll.png" 
           alt="ClickPay" 
-          className="h-8 w-auto object-contain shrink-0" 
+          className="h-7 w-auto object-contain shrink-0" 
           referrerPolicy="no-referrer"
           onError={(e) => {
             (e.target as HTMLElement).style.display = 'none';
           }}
         />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-black text-black tracking-tight truncate">ClickPay</span>
-            <span className="text-[8px] bg-blue-50 text-blue-950 border border-blue-200 font-extrabold px-1 py-0.2 rounded">ERP</span>
-          </div>
-          <p className="text-[9px] text-slate-800 font-bold truncate">Payroll Tech MZ · Moçambique</p>
-        </div>
+        <span className="text-sm font-black text-slate-950 tracking-tight truncate">ClickPay</span>
       </div>
 
       {/* Empresa Ativa & Status Box (Compressed Layout) */}

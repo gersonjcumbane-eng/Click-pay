@@ -222,8 +222,8 @@ export default function OnboardingWizard({ onCancel, onSuccess }: OnboardingWiza
         if (data.usuario) {
           localStorage.setItem('paytek_role', data.usuario.funcao || 'CLIENTE_EMPRESA');
           localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
-          localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || 'Growth');
-          localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || '2026-08-28');
+          const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || defaultExp);
           localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || nomeEmpresa);
         }
         onSuccess(data.usuario);

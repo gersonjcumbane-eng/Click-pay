@@ -80,7 +80,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
   const [savingConfig, setSavingConfig] = useState(false);
   const [runningScheduler, setRunningScheduler] = useState(false);
   const [showConfigSuccess, setShowConfigSuccess] = useState(false);
-  const [simulatedDate, setSimulatedDate] = useState("2026-06-26");
+  const [simulatedDate, setSimulatedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
   const [activeHistoryTab, setActiveHistoryTab] = useState<'all' | 'contratos' | 'fiscal'>('all');
   const [notificationPermission, setNotificationPermission] = useState(getNotificationPermissionState());
@@ -611,24 +611,32 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
                 <div className="grid grid-cols-3 gap-1.5 pt-1.5">
                   <button 
                     type="button"
-                    onClick={() => setSimulatedDate("2026-06-09")}
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(9);
+                      setSimulatedDate(d.toISOString().split('T')[0]);
+                    }}
                     className="text-[9px] bg-slate-800 hover:bg-slate-700 py-1 rounded text-slate-300 transition-colors"
                   >
                     Dia 9 (INSS)
                   </button>
                   <button 
                     type="button"
-                    onClick={() => setSimulatedDate("2026-06-19")}
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(19);
+                      setSimulatedDate(d.toISOString().split('T')[0]);
+                    }}
                     className="text-[9px] bg-slate-800 hover:bg-slate-700 py-1 rounded text-slate-300 transition-colors"
                   >
                     Dia 19 (IRPS)
                   </button>
                   <button 
                     type="button"
-                    onClick={() => setSimulatedDate("2026-06-26")}
+                    onClick={() => setSimulatedDate(new Date().toISOString().split('T')[0])}
                     className="text-[9px] bg-slate-800 hover:bg-slate-700 py-1 rounded text-slate-300 transition-colors"
                   >
-                    Dia 26 (Contratos)
+                    Hoje (Atual)
                   </button>
                 </div>
               </div>

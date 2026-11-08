@@ -6,6 +6,60 @@
 import { Employee, ConfigFiscal, EscalaoIRPS, PayrollCalculation, CompanyData, PaymentLog, EscalaoFiscalMoz, CompraItem, VendaItem, LivroCaixaItem, ApuramentoIVA, LeadItem, PropostaItem, ContratoComercialItem } from './types';
 import { validarEClassificarLancamentoPGC } from './pgc_mozambique';
 
+// Dynamic Real-Time Date & Period Helpers
+export const MESES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
+export function getCurrentDateFormatted(): string {
+  const d = new Date();
+  return d.toISOString().split('T')[0];
+}
+
+export function getCurrentPeriod(): string {
+  const d = new Date();
+  return `${MESES_PT[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+export function getFormattedCurrentDateLong(): string {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${day} de ${MESES_PT[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+export function getDefaultNextBillingDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return d.toISOString().split('T')[0];
+}
+
+export function getAvailablePeriods(): { value: string; label: string }[] {
+  const d = new Date();
+  const options: { value: string; label: string }[] = [];
+  
+  // Mês atual em tempo real
+  const currentPeriod = `${MESES_PT[d.getMonth()]} ${d.getFullYear()}`;
+  options.push({ value: currentPeriod, label: `${currentPeriod} (Atual)` });
+
+  // 5 meses anteriores
+  for (let i = 1; i <= 5; i++) {
+    const prev = new Date(d.getFullYear(), d.getMonth() - i, 1);
+    const pStr = `${MESES_PT[prev.getMonth()]} ${prev.getFullYear()}`;
+    options.push({ value: pStr, label: pStr });
+  }
+
+  // 2 meses seguintes
+  for (let i = 1; i <= 2; i++) {
+    const next = new Date(d.getFullYear(), d.getMonth() + i, 1);
+    const pStr = `${MESES_PT[next.getMonth()]} ${next.getFullYear()}`;
+    options.push({ value: pStr, label: pStr });
+  }
+
+  options.push({ value: 'todos', label: `Todo o Exercício ${d.getFullYear()}` });
+  return options;
+}
+
 // In-Memory Financial Data Stores
 export let comprasStore: CompraItem[] = [];
 
@@ -294,7 +348,7 @@ export function addProposta(item: Omit<PropostaItem, 'id' | 'numero_proposta'>):
     subtotal,
     valor_iva: valorIva,
     total_geral,
-    periodo: item.periodo || 'Julho 2026'
+    periodo: item.periodo || getCurrentPeriod()
   };
 
   propostasStore.unshift(nova);
@@ -340,7 +394,7 @@ export function converterPropostaEmVenda(propostaId: string): VendaItem | null {
     total_com_iva: totalComIva,
     estado: 'Cobrado',
     metodo_recebimento: 'Transferencia_Bancaria',
-    periodo: prop.periodo || 'Julho 2026'
+    periodo: prop.periodo || getCurrentPeriod()
   });
 
   // Atualizar estado da proposta
@@ -1142,7 +1196,7 @@ export async function processarSalarioOficial(
     totalDescontos: Number(totalDescontos.toFixed(2)),
     salarioLiquido: Number(salarioLiquido.toFixed(2)),
     ipaDesconto: 0,
-    periodo: "Julho 2026"
+    periodo: getCurrentPeriod()
   };
 }
 
@@ -1200,7 +1254,7 @@ export function calcularFolhaSalario(
     totalDescontos,
     salarioLiquido,
     ipaDesconto: 0,
-    periodo: "Julho 2026"
+    periodo: getCurrentPeriod()
   };
 }
 
@@ -1336,8 +1390,8 @@ export let baseDadosContratosGerais: Contract[] = [
 ];
 
 export function auditarContratoLei132023(contrato: Contract) {
-  // Current time reference: 2026-06-26
-  const hoje = new Date('2026-06-26');
+  // Real-time current date
+  const hoje = new Date();
   const inicio = new Date(contrato.data_inicio);
 
   // 1. Calcular limite de experiência em dias

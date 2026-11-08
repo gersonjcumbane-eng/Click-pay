@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
+import { getDefaultNextBillingDate } from '../db_tax';
 
 interface ClientCompany {
   id: string;
@@ -152,7 +153,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const [newPassword, setNewPassword] = useState('');
   const [subStatus, setSubStatus] = useState<'ativo' | 'suspenso' | 'pendente'>('ativo');
   const [subPlan, setSubPlan] = useState<'Bronze' | 'Silver' | 'Gold' | 'Platinum'>('Bronze');
-  const [nextBillingDate, setNextBillingDate] = useState('2026-07-28');
+  const [nextBillingDate, setNextBillingDate] = useState(() => getDefaultNextBillingDate());
 
   // Selected client for generating a services invoice & subscription dashboard
   const [selectedInvoiceClient, setSelectedInvoiceClient] = useState<ClientCompany | null>(null);
@@ -163,7 +164,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const [editPlan, setEditPlan] = useState<'Bronze' | 'Silver' | 'Gold' | 'Platinum'>('Bronze');
   const [editFeeBase, setEditFeeBase] = useState('3000');
   const [editFeePorSlip, setEditFeePorSlip] = useState('150');
-  const [editNextBillingDate, setEditNextBillingDate] = useState('2026-07-28');
+  const [editNextBillingDate, setEditNextBillingDate] = useState(() => getDefaultNextBillingDate());
   const [editPassword, setEditPassword] = useState('');
   const [updatingSubscription, setUpdatingSubscription] = useState(false);
 
@@ -190,7 +191,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     setEditPlan(client.subscription_plan || 'Bronze');
     setEditFeeBase(client.fee_base.toString());
     setEditFeePorSlip(client.fee_por_slip.toString());
-    setEditNextBillingDate(client.next_billing_date || '2026-07-28');
+    setEditNextBillingDate(client.next_billing_date || getDefaultNextBillingDate());
     setEditPassword('');
   };
 
@@ -509,7 +510,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       setNewPassword('');
       setSubStatus('ativo');
       setSubPlan('Bronze');
-      setNextBillingDate('2026-07-28');
+      setNextBillingDate(getDefaultNextBillingDate());
 
       fetchClients();
     } catch (err: any) {
@@ -984,7 +985,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
                           {!isFoundersCo && (
                             <>
                               <span className="text-slate-400 font-semibold">| Expira:</span>
-                              <span className="text-slate-600 font-bold">{client.next_billing_date || '2026-07-28'}</span>
+                              <span className="text-slate-600 font-bold">{client.next_billing_date || getDefaultNextBillingDate()}</span>
                             </>
                           )}
                         </div>

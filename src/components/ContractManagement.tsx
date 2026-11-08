@@ -58,8 +58,12 @@ export default function ContractManagement({ company, employees, onReload }: Con
   const [novoFuncionario, setNovoFuncionario] = useState('');
   const [novoCargo, setNovoCargo] = useState('');
   const [novoTipo, setNovoTipo] = useState<'Prazo Certo' | 'Indeterminado' | 'Prazo Incerto'>('Prazo Certo');
-  const [novoInicio, setNovoInicio] = useState('2026-06-01');
-  const [novoFim, setNovoFim] = useState('2026-12-31');
+  const [novoInicio, setNovoInicio] = useState(() => new Date().toISOString().split('T')[0]);
+  const [novoFim, setNovoFim] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString().split('T')[0];
+  });
   const [novoSalario, setNovoSalario] = useState('20000');
   const [novoCargoComplexo, setNovoCargoComplexo] = useState(false);
 
@@ -94,8 +98,8 @@ export default function ContractManagement({ company, employees, onReload }: Con
   const emitirAvisoPrevio = async (contrato: Contract) => {
     setDownloadingPdf(contrato.id);
     try {
-      // Data de hoje formatada em português para o PDF
-      const dataHoje = new Date('2026-06-26');
+      // Data de hoje formatada em tempo real para o documento oficial
+      const dataHoje = new Date();
       const meses = [
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
