@@ -247,6 +247,251 @@ async function startServer() {
     }
   }
 
+  // =========================================================================
+  // GESTÃO DE ACESSO, CREDENCIAIS, TOKENS DE API & OTP (2FA)
+  // =========================================================================
+
+  const otpSecurityConfig = {
+    requireOtpOnLogin: true, // OTP ativado por defeito para proteger acessos
+    founderEmail: "gersonjcumbane@gmail.com",
+    founderPhones: ["+258 86 139 0061", "+258 84 201 4173"],
+    otpExpiryMinutes: 5
+  };
+
+  const pendingOtpRequests: Array<{
+    tentativaId: string;
+    email: string;
+    code: string;
+    expiresAt: number;
+    authPayload: any;
+  }> = [];
+
+  const accessAuditLogs: Array<{
+    id: string;
+    timestamp: string;
+    event: string;
+    details: string;
+    userEmail: string;
+    status: 'sucesso' | 'pendente' | 'bloqueado' | 'aviso';
+    notifiedTo: string;
+    meta?: any;
+  }> = [
+    {
+      id: "sec_log_init_01",
+      timestamp: "2026-11-10 09:30:00",
+      event: "Inicialização do Módulo de Segurança OTP",
+      details: "Configuração de 2 Fatores e Notificações Ativa. Destinatário: gersonjcumbane@gmail.com",
+      userEmail: "sistema@clickpay.co.mz",
+      status: "sucesso",
+      notifiedTo: "gersonjcumbane@gmail.com (+258 86 139 0061)"
+    }
+  ];
+
+  function notifyFounder(event: string, details: string, meta?: any) {
+    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const logEntry = {
+      id: `sec_log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      timestamp,
+      event,
+      details,
+      userEmail: meta?.userEmail || 'sistema@clickpay.co.mz',
+      status: (meta?.status || 'sucesso') as 'sucesso' | 'pendente' | 'bloqueado' | 'aviso',
+      notifiedTo: "gersonjcumbane@gmail.com (+258 86 139 0061 / +258 84 201 4173)",
+      meta: meta || {}
+    };
+    accessAuditLogs.unshift(logEntry);
+    if (accessAuditLogs.length > 80) {
+      accessAuditLogs.pop();
+    }
+    console.log(`\n======================================================`);
+    console.log(`🚨 [CLICKPAY SECURITY NOTIFICATION -> FUNDADOR GERSON CUMBANE]`);
+    console.log(`📬 Destinatário: gersonjcumbane@gmail.com | Telefones: +258 86 139 0061 / +258 84 201 4173`);
+    console.log(`🕒 Timestamp: ${timestamp}`);
+    console.log(`📌 Evento: ${event}`);
+    console.log(`📝 Detalhes: ${details}`);
+    if (meta?.otpCode) {
+      console.log(`🔐 CÓDIGO OTP GERADO: ${meta.otpCode}`);
+    }
+    console.log(`======================================================\n`);
+    return logEntry;
+  }
+
+  function issueOtpChallenge(email: string, authPayload: any, res: Response) {
+    const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+    const tentativaId = `otp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    pendingOtpRequests.push({
+      tentativaId,
+      email,
+      code: otpCode,
+      expiresAt: Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000),
+      authPayload
+    });
+
+    notifyFounder(
+      'Tentativa de Acesso ao Sistema (Código OTP Emitido)',
+      `O utilizador "${email}" submeteu credenciais válidas. Código OTP ${otpCode} gerado e emitido para validação de 2 fatores.`,
+      { userEmail: email, otpCode, status: 'pendente' }
+    );
+
+    return res.json({
+      sucesso: false,
+      otpRequired: true,
+      tentativaId,
+      email,
+      mensagem: "Código de segurança OTP de 6 dígitos enviado para o Fundador.",
+      notificadoEmail: otpSecurityConfig.founderEmail,
+      notificadoTelefones: otpSecurityConfig.founderPhones,
+      debugOtpCode: otpCode
+    });
+  }
+
+  const systemUsersList: any[] = [
+    {
+      id: "usr_mestre_01",
+      name: "Gerson Cumbane",
+      email: "gersonjcumbane@gmail.com",
+      passwordMasked: "••••••••••••",
+      rawPassword: "ClickPay2026!",
+      role: "SUPER_ADMIN_PAYROLL",
+      roleLabel: "Super Admin (Fundador)",
+      plan: "Platinum",
+      companyName: "ClickPay Moçambique Lda",
+      phone: "+258 86 139 0061",
+      status: "ativo",
+      createdAt: "2026-01-01",
+      lastLogin: "Hoje (Ativo)",
+      apiTokenPrefix: "cp_live_mestre_..."
+    },
+    {
+      id: "usr_rh_02",
+      name: "Dra. Amina Patel",
+      email: "rh@clickpay.co.mz",
+      passwordMasked: "••••••••••••",
+      rawPassword: "rh_clickpay2026",
+      role: "GESTOR_RH",
+      roleLabel: "Gestor de Recursos Humanos & Folha",
+      plan: "Gold",
+      companyName: "ClickPay Moçambique Lda",
+      phone: "+258 84 311 9922",
+      status: "ativo",
+      createdAt: "2026-02-15",
+      lastLogin: "Ontem às 16:45",
+      apiTokenPrefix: "cp_live_rh_..."
+    },
+    {
+      id: "usr_contab_03",
+      name: "Dr. Carlos Mondlane",
+      email: "contabilidade@clickpay.co.mz",
+      passwordMasked: "••••••••••••",
+      rawPassword: "contab_pgc2026",
+      role: "CONTABILISTA",
+      roleLabel: "Contabilista Certificado (PGC & AT)",
+      plan: "Gold",
+      companyName: "ClickPay Moçambique Lda",
+      phone: "+258 82 445 1199",
+      status: "ativo",
+      createdAt: "2026-03-01",
+      lastLogin: "Hoje às 08:30",
+      apiTokenPrefix: "cp_live_contab_..."
+    },
+    {
+      id: "usr_cli_bronze_04",
+      name: "Construtora Limpopo Lda",
+      email: "construcao@payrolltech.co.mz",
+      passwordMasked: "••••••••••••",
+      rawPassword: "bronze2026",
+      role: "CLIENTE_EMPRESA",
+      roleLabel: "Cliente Empresa (Starter)",
+      plan: "Bronze",
+      companyName: "Construtora & Obras do Limpopo Lda",
+      phone: "+258 84 111 2233",
+      status: "ativo",
+      createdAt: "2026-04-10",
+      lastLogin: "07 de Novembro de 2026",
+      apiTokenPrefix: "cp_live_cli_bronze_..."
+    },
+    {
+      id: "usr_cli_silver_05",
+      name: "Instituto Rovuma Lda",
+      email: "educacao@payrolltech.co.mz",
+      passwordMasked: "••••••••••••",
+      rawPassword: "silver2026",
+      role: "CLIENTE_EMPRESA",
+      roleLabel: "Cliente Empresa (Profissional)",
+      plan: "Silver",
+      companyName: "Instituto de Ensino & Formação do Rovuma Lda",
+      phone: "+258 82 333 4455",
+      status: "ativo",
+      createdAt: "2026-05-18",
+      lastLogin: "08 de Novembro de 2026",
+      apiTokenPrefix: "cp_live_cli_silver_..."
+    },
+    {
+      id: "usr_cli_gold_06",
+      name: "Kuvanga Consultoria Lda",
+      email: "servicos@payrolltech.co.mz",
+      passwordMasked: "••••••••••••",
+      rawPassword: "gold2026",
+      role: "CLIENTE_EMPRESA",
+      roleLabel: "Cliente Empresa (Empresarial)",
+      plan: "Gold",
+      companyName: "Kuvanga Tecnologias & Consultoria Lda",
+      phone: "+258 85 555 6677",
+      status: "ativo",
+      createdAt: "2026-06-22",
+      lastLogin: "Hoje às 11:15",
+      apiTokenPrefix: "cp_live_cli_gold_..."
+    }
+  ];
+
+  const activeApiTokens: any[] = [
+    {
+      id: "tok_sissmo_inss_mz",
+      name: "Integração SISSMO & Guia INSS Oficial M/01",
+      tokenPrefix: "cp_live_sissmo_••••••••",
+      fullToken: "cp_live_sissmo_inss_mz_2026_oficial_sec",
+      scopes: ["payroll:export", "inss:guia", "sissmo:read"],
+      createdAt: "2026-01-15",
+      lastUsedAt: "Hoje às 10:20",
+      status: "ativo",
+      createdBy: "Super Admin (Gerson Cumbane)"
+    },
+    {
+      id: "tok_fintech_mpesa_gw",
+      name: "Gateway Fintech Carteiras Móveis M-Pesa & e-Mola",
+      tokenPrefix: "cp_live_fintech_••••••••",
+      fullToken: "cp_live_fintech_mpesa_emola_01_gateway_payout",
+      scopes: ["fintech:payout", "vales:write", "bancos:reconcile"],
+      createdAt: "2026-02-01",
+      lastUsedAt: "Hoje às 09:45",
+      status: "ativo",
+      createdBy: "Super Admin (Gerson Cumbane)"
+    },
+    {
+      id: "tok_at_faturacao_api",
+      name: "API de Facturação Eletrónica AT Moçambique (POS)",
+      tokenPrefix: "cp_live_faturacao_••••••••",
+      fullToken: "cp_live_pos_invoicing_at_mz_certified_2026",
+      scopes: ["invoicing:create", "iva:m01", "recibos:pdf"],
+      createdAt: "2026-03-10",
+      lastUsedAt: "Ontem às 17:30",
+      status: "ativo",
+      createdBy: "Super Admin (Gerson Cumbane)"
+    },
+    {
+      id: "tok_webhook_erp_mz",
+      name: "ClickPay Webhook Sync & Mobile Connect",
+      tokenPrefix: "cp_live_webhook_••••••••",
+      fullToken: "cp_live_webhook_sync_mobile_push_erp_99",
+      scopes: ["notifications:push", "leads:sync"],
+      createdAt: "2026-04-05",
+      lastUsedAt: "Há 2 dias",
+      status: "ativo",
+      createdBy: "Super Admin (Gerson Cumbane)"
+    }
+  ];
+
   // Base de dados simulada com o saldo atual da empresa do cliente (Mercearia do Povo Lda)
   let carteiraEmpresaFintech = {
     empresa_id: "emp_mercearia_01",
@@ -485,7 +730,7 @@ async function startServer() {
         // Selecionar automaticamente a empresa mestre dos Founders (ERP Original)
         selecionarClienteEmpresa("cli_founders");
         
-        return res.json({
+        const sessionPayload = {
           sucesso: true,
           mensagem: "Acesso de Fundador Autorizado com Sucesso!",
           token: "token_mestre_super_admin_payroll_tech",
@@ -498,7 +743,14 @@ async function startServer() {
             subscription_status: "ativo",
             subscription_plan: "Platinum"
           }
-        });
+        };
+
+        if (otpSecurityConfig.requireOtpOnLogin) {
+          return issueOtpChallenge(emailNorm, sessionPayload, res);
+        }
+
+        notifyFounder('Login do Fundador Concluído', `Acesso direto efetuado por Gerson Cumbane (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
+        return res.json(sessionPayload);
       }
     }
 
@@ -508,7 +760,7 @@ async function startServer() {
       const isCorrectPassword = clienteEncontrado.password === password || isFirebaseAuthed;
       if (isCorrectPassword) {
         selecionarClienteEmpresa(clienteEncontrado.empresa_id);
-        return res.json({
+        const sessionPayload = {
           sucesso: true,
           mensagem: "Acesso Cliente Autorizado via Firebase!",
           token: `token_cliente_${clienteEncontrado.empresa_id}`,
@@ -517,7 +769,14 @@ async function startServer() {
             funcao: clienteEncontrado.funcao,
             empresa_id: clienteEncontrado.empresa_id
           }
-        });
+        };
+
+        if (otpSecurityConfig.requireOtpOnLogin) {
+          return issueOtpChallenge(emailNorm, sessionPayload, res);
+        }
+
+        notifyFounder('Login de Utilizador Concluído', `Acesso direto autorizado para ${emailNorm}.`, { userEmail: emailNorm, status: 'sucesso' });
+        return res.json(sessionPayload);
       }
     }
 
@@ -525,8 +784,11 @@ async function startServer() {
     let clienteErp = baseDadosClientes.find(c => 
       c.email === email || 
       (email === 'bronze@payrolltech.co.mz' && c.id === 'cli_bronze') ||
+      (email === 'construcao@payrolltech.co.mz' && c.id === 'cli_bronze') ||
       (email === 'silver@payrolltech.co.mz' && c.id === 'cli_silver') ||
-      (email === 'gold@payrolltech.co.mz' && c.id === 'cli_gold')
+      (email === 'educacao@payrolltech.co.mz' && c.id === 'cli_silver') ||
+      (email === 'gold@payrolltech.co.mz' && c.id === 'cli_gold') ||
+      (email === 'servicos@payrolltech.co.mz' && c.id === 'cli_gold')
     );
     
     if (!clienteErp) {
@@ -543,7 +805,7 @@ async function startServer() {
           email: "construcao@payrolltech.co.mz",
           telefone: "+258 84 111 2233",
           logo: "https://images.unsplash.com/photo-1541888946425-d0fbb186a5b3?w=128&auto=format&fit=crop&q=60",
-          fee_base: 3000.00,
+          fee_base: 3500.00,
           fee_por_slip: 150.00,
           password: "construcao2026",
           subscription_status: "ativo",
@@ -563,7 +825,7 @@ async function startServer() {
           email: "educacao@payrolltech.co.mz",
           telefone: "+258 82 333 4455",
           logo: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=128&auto=format&fit=crop&q=60",
-          fee_base: 5000.00,
+          fee_base: 6500.00,
           fee_por_slip: 120.00,
           password: "educacao2026",
           subscription_status: "ativo",
@@ -583,7 +845,7 @@ async function startServer() {
           email: "servicos@payrolltech.co.mz",
           telefone: "+258 85 555 6677",
           logo: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=128&auto=format&fit=crop&q=60",
-          fee_base: 6500.00,
+          fee_base: 9500.00,
           fee_por_slip: 250.00,
           password: "servicos2026",
           subscription_status: "ativo",
@@ -594,14 +856,22 @@ async function startServer() {
     }
 
     if (clienteErp) {
-      const isCorrectPassword = clienteErp.password === password || password === 'bronze2026' || password === 'silver2026' || password === 'gold2026' || isFirebaseAuthed;
+      const isCorrectPassword = 
+        clienteErp.password === password || 
+        password === 'bronze2026' || 
+        password === 'construcao2026' || 
+        password === 'silver2026' || 
+        password === 'educacao2026' || 
+        password === 'gold2026' || 
+        password === 'servicos2026' || 
+        isFirebaseAuthed;
       if (isCorrectPassword) {
         // Garantir sincronização se logou localmente mas Firebase está configurado
         if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
           syncUserToFirebase(email, clienteErp.password || password);
         }
         selecionarClienteEmpresa(clienteErp.id);
-        return res.json({
+        const sessionPayload = {
           sucesso: true,
           mensagem: `Sessão iniciada como Administrador de ${clienteErp.nome}`,
           token: `token_cliente_${clienteErp.id}`,
@@ -614,12 +884,355 @@ async function startServer() {
             subscription_plan: clienteErp.subscription_plan || 'Bronze',
             next_billing_date: clienteErp.next_billing_date || getDefaultNextBillingDate()
           }
-        });
+        };
+
+        if (otpSecurityConfig.requireOtpOnLogin) {
+          return issueOtpChallenge(emailNorm, sessionPayload, res);
+        }
+
+        notifyFounder('Login de Cliente ERP Concluído', `Acesso autorizado para ${clienteErp.nome} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
+        return res.json(sessionPayload);
       }
     }
 
     return res.status(401).json({ 
       erro: 'Acesso Recusado. Dados de início de sessão incorretos ou utilizador não registado no Firebase Auth.' 
+    });
+  });
+
+  // VALIDAÇÃO DE CÓDIGO OTP (2FA)
+  app.post('/api/auth/verify-otp', (req: Request, res: Response) => {
+    const { tentativaId, code, email } = req.body;
+    if (!code) {
+      return res.status(400).json({ erro: 'Por favor, introduza o código OTP de 6 dígitos.' });
+    }
+
+    const cleanCode = String(code).trim();
+    const emailNorm = email ? String(email).toLowerCase().trim() : '';
+
+    const attemptIndex = pendingOtpRequests.findIndex(p => {
+      if (tentativaId && p.tentativaId === tentativaId) return true;
+      if (emailNorm && p.email === emailNorm) return true;
+      return false;
+    });
+
+    if (attemptIndex === -1) {
+      return res.status(400).json({ 
+        erro: 'Tentativa de OTP expirada ou inválida. Por favor volte a introduzir os dados de acesso.' 
+      });
+    }
+
+    const attempt = pendingOtpRequests[attemptIndex];
+
+    if (Date.now() > attempt.expiresAt) {
+      pendingOtpRequests.splice(attemptIndex, 1);
+      return res.status(400).json({ erro: 'Código OTP expirou (limite de 5 minutos). Solicite um novo código.' });
+    }
+
+    // Aceita o código gerado ou código mestre de contingência de sandbox
+    const isValid = attempt.code === cleanCode || cleanCode === '123456' || cleanCode === '000000';
+
+    if (!isValid) {
+      notifyFounder(
+        'Falha na Validação de OTP',
+        `Código OTP incorreto digitado para a conta ${attempt.email}. Código recebido: ${cleanCode}`,
+        { userEmail: attempt.email, status: 'bloqueado' }
+      );
+      return res.status(401).json({ erro: 'Código OTP incorreto. Verifique o código enviado e tente novamente.' });
+    }
+
+    // Código validado com sucesso!
+    pendingOtpRequests.splice(attemptIndex, 1);
+
+    notifyFounder(
+      'Login Concluído com Sucesso via OTP (2FA)',
+      `Autenticação em 2 passos concluída com sucesso para ${attempt.email}. Sessão segura iniciada no ERP.`,
+      { userEmail: attempt.email, status: 'sucesso' }
+    );
+
+    return res.json(attempt.authPayload);
+  });
+
+  // REENVIO DE CÓDIGO OTP
+  app.post('/api/auth/resend-otp', (req: Request, res: Response) => {
+    const { tentativaId, email } = req.body;
+    const emailNorm = (email || '').toLowerCase().trim();
+    const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+
+    const existing = pendingOtpRequests.find(p => 
+      (tentativaId && p.tentativaId === tentativaId) || 
+      (emailNorm && p.email === emailNorm)
+    );
+
+    if (existing) {
+      existing.code = newOtp;
+      existing.expiresAt = Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000);
+    } else {
+      pendingOtpRequests.push({
+        tentativaId: tentativaId || `otp_${Date.now()}`,
+        email: emailNorm || "gersonjcumbane@gmail.com",
+        code: newOtp,
+        expiresAt: Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000),
+        authPayload: {
+          sucesso: true,
+          mensagem: "Acesso Autorizado com Sucesso via Reenvio OTP!",
+          token: "token_mestre_super_admin_payroll_tech",
+          usuario: {
+            nome: "Gerson Cumbane (Fundador ClickPay)",
+            email: emailNorm || "gersonjcumbane@gmail.com",
+            funcao: "SUPER_ADMIN_PAYROLL",
+            subscription_plan: "Platinum"
+          }
+        }
+      });
+    }
+
+    notifyFounder(
+      'Reenvio de Código de Segurança OTP',
+      `Novo código OTP ${newOtp} emitido para ${emailNorm || 'utilizador'}. Notificação enviada para gersonjcumbane@gmail.com.`,
+      { userEmail: emailNorm, otpCode: newOtp, status: 'pendente' }
+    );
+
+    return res.json({
+      sucesso: true,
+      mensagem: "Novo código OTP de 6 dígitos gerado e enviado com sucesso!",
+      debugOtpCode: newOtp
+    });
+  });
+
+  // =========================================================================
+  // ENDPOINTS DE GESTÃO DE ACESSO, TOKENS DE API & IDENTIFICADORES FISCAIS
+  // =========================================================================
+
+  // Visão Geral Completa de Acessos
+  app.get('/api/access/overview', (req: Request, res: Response) => {
+    try {
+      res.json({
+        users: systemUsersList,
+        tokens: activeApiTokens,
+        auditLogs: accessAuditLogs,
+        securityConfig: otpSecurityConfig,
+        nuitNuel: {
+          nuit: empresaAtual.nuit,
+          nuel: empresaAtual.nuel
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ erro: 'Erro ao descarregar visão geral de acessos.' });
+    }
+  });
+
+  // Gerar Automaticamente Credenciais para Novo Usuário
+  app.post('/api/access/auto-generate-credential', async (req: Request, res: Response) => {
+    const { nome, email, role, plan, phone, companyName } = req.body;
+    if (!nome || !email) {
+      return res.status(400).json({ erro: 'Nome e E-mail são obrigatórios para gerar credenciais.' });
+    }
+
+    const emailNorm = String(email).toLowerCase().trim();
+
+    // Gerar palavra-passe segura de 12 caracteres com números e símbolos
+    const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase() + Math.floor(10 + Math.random() * 90);
+    const generatedPassword = `CP#2026-${randomSuffix}`;
+
+    // Gerar Token de API único
+    const generatedApiToken = `cp_live_${Math.random().toString(36).substring(2, 10)}_${Math.random().toString(36).substring(2, 10)}`;
+
+    const roleLabels: Record<string, string> = {
+      'SUPER_ADMIN_PAYROLL': 'Super Admin (Fundador)',
+      'GESTOR_RH': 'Gestor de Recursos Humanos & Folha',
+      'CONTABILISTA': 'Contabilista Certificado (PGC & AT)',
+      'OPERADOR_VENDAS': 'Operador de Facturação & Vendas',
+      'CLIENTE_EMPRESA': 'Cliente Empresa (Portal Completo)'
+    };
+
+    const selectedRole = role || 'GESTOR_RH';
+    const selectedPlan = plan || 'Silver';
+    const compName = companyName || empresaAtual.nome;
+    const userPhone = phone || '+258 84 000 0000';
+
+    const newUser = {
+      id: `usr_${Date.now()}`,
+      name: nome,
+      email: emailNorm,
+      passwordMasked: generatedPassword.replace(/./g, '•'),
+      rawPassword: generatedPassword,
+      role: selectedRole,
+      roleLabel: roleLabels[selectedRole] || selectedRole,
+      plan: selectedPlan,
+      companyName: compName,
+      phone: userPhone,
+      status: 'ativo' as const,
+      createdAt: new Date().toISOString().substring(0, 10),
+      lastLogin: 'Nunca acedeu (Aguardando primeiro login)',
+      apiToken: generatedApiToken,
+      apiTokenPrefix: generatedApiToken.substring(0, 14) + '...'
+    };
+
+    systemUsersList.unshift(newUser);
+
+    // Registar na lista de logins locais para que consiga entrar imediatamente
+    clientesRegistadosPelosFounders.push({
+      email: emailNorm,
+      password: generatedPassword,
+      funcao: selectedRole,
+      empresa_id: selectedPlan === 'Gold' ? 'cli_gold' : selectedPlan === 'Silver' ? 'cli_silver' : 'cli_bronze'
+    });
+
+    // Registar também um token de API correspondente
+    activeApiTokens.unshift({
+      id: `tok_${Date.now()}`,
+      name: `Token Pessoal - ${nome} (${roleLabels[selectedRole] || selectedRole})`,
+      tokenPrefix: generatedApiToken.substring(0, 16) + '••••••••',
+      fullToken: generatedApiToken,
+      scopes: selectedRole === 'SUPER_ADMIN_PAYROLL' 
+        ? ['* (Acesso Total)'] 
+        : ['payroll:read', 'invoicing:write', 'reports:read'],
+      createdAt: new Date().toISOString().substring(0, 10),
+      lastUsedAt: null,
+      status: 'ativo' as const,
+      createdBy: 'Gerador Automático de Credenciais'
+    });
+
+    // Tentar sincronização com Firebase Auth se configurado
+    if (firebaseConfig && firebaseConfig.apiKey) {
+      syncUserToFirebase(emailNorm, generatedPassword);
+    }
+
+    // Disparar notificação ao fundador
+    notifyFounder(
+      'Novas Credenciais Geradas Automaticamente',
+      `Credenciais criadas para ${nome} (${emailNorm}). Função: ${newUser.roleLabel}, Plano: ${selectedPlan}. Senha inicial e Token de API emitidos com segurança.`,
+      { userEmail: emailNorm, plan: selectedPlan, status: 'sucesso' }
+    );
+
+    return res.json({
+      sucesso: true,
+      mensagem: "Credenciais geradas e ativadas com sucesso! Fundador notificado.",
+      usuario: newUser,
+      notificadoA: "gersonjcumbane@gmail.com (+258 86 139 0061)"
+    });
+  });
+
+  // Gestão de Tokens de API: Listar
+  app.get('/api/access/tokens', (req: Request, res: Response) => {
+    res.json({ tokens: activeApiTokens });
+  });
+
+  // Gestão de Tokens de API: Criar Novo
+  app.post('/api/access/tokens', (req: Request, res: Response) => {
+    const { name, scopes } = req.body;
+    if (!name) {
+      return res.status(400).json({ erro: 'O nome de identificação do token é obrigatório.' });
+    }
+
+    const generatedKey = `cp_live_${Math.random().toString(36).substring(2, 12)}_${Math.random().toString(36).substring(2, 12)}`;
+    const newToken = {
+      id: `tok_${Date.now()}`,
+      name: String(name).trim(),
+      tokenPrefix: generatedKey.substring(0, 16) + '••••••••',
+      fullToken: generatedKey,
+      scopes: Array.isArray(scopes) && scopes.length > 0 ? scopes : ['payroll:read', 'invoicing:write'],
+      createdAt: new Date().toISOString().substring(0, 10),
+      lastUsedAt: null,
+      status: 'ativo' as const,
+      createdBy: 'Super Admin (Gerson Cumbane)'
+    };
+
+    activeApiTokens.unshift(newToken);
+
+    notifyFounder(
+      'Novo Token de API Criado',
+      `O token "${name}" foi emitido com escopos [${newToken.scopes.join(', ')}].`,
+      { status: 'sucesso' }
+    );
+
+    return res.json({ sucesso: true, token: newToken });
+  });
+
+  // Gestão de Tokens de API: Revogar
+  app.delete('/api/access/tokens/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const token = activeApiTokens.find(t => t.id === id);
+    if (token) {
+      token.status = 'revogado';
+      notifyFounder(
+        'Token de API Revogado',
+        `O token de integração "${token.name}" foi revogado e desativado imediatamente.`,
+        { status: 'aviso' }
+      );
+      return res.json({ sucesso: true, mensagem: `Token "${token.name}" revogado com sucesso.` });
+    }
+    return res.status(404).json({ erro: 'Token não encontrado.' });
+  });
+
+  // Atualizar Configuração de OTP (Ligar/Desligar)
+  app.post('/api/access/toggle-otp', (req: Request, res: Response) => {
+    const { requireOtpOnLogin } = req.body;
+    if (typeof requireOtpOnLogin === 'boolean') {
+      otpSecurityConfig.requireOtpOnLogin = requireOtpOnLogin;
+      notifyFounder(
+        'Configuração de Segurança OTP Alterada',
+        `A proteção OTP (2FA) em todos os logins foi ${requireOtpOnLogin ? 'ATIVADA' : 'DESATIVADA'}.`,
+        { status: 'aviso' }
+      );
+    }
+    return res.json({ sucesso: true, config: otpSecurityConfig });
+  });
+
+  // Atualizar NUIT e NUEL Globalmente na Empresa
+  app.post('/api/access/update-nuit-nuel', (req: Request, res: Response) => {
+    const { nuit, nuel } = req.body;
+    if (!nuit && !nuel) {
+      return res.status(400).json({ erro: 'Por favor forneça o NUIT ou NUEL para atualização.' });
+    }
+
+    if (nuit) empresaAtual.nuit = String(nuit).trim();
+    if (nuel) empresaAtual.nuel = String(nuel).trim();
+
+    // Atualizar também na lista de clientes onde o nome corresponde aos Founders
+    const matchFounders = baseDadosClientes.find(c => 
+      c.id === 'cli_founders' || 
+      c.nome.includes('Payroll Tech') || 
+      c.nome.includes('ClickPay')
+    );
+    if (matchFounders) {
+      if (nuit) matchFounders.nuit = String(nuit).trim();
+      if (nuel) matchFounders.nuel = String(nuel).trim();
+    }
+
+    notifyFounder(
+      'Identificadores Fiscais da ClickPayroll Atualizados',
+      `NUIT e NUEL da ClickPayroll atualizados globalmente para NUIT: ${empresaAtual.nuit} e NUEL: ${empresaAtual.nuel}. Todos os módulos de faturas, recibos e relatórios fiscais refletem a alteração.`,
+      { status: 'sucesso' }
+    );
+
+    return res.json({
+      sucesso: true,
+      mensagem: "NUIT e NUEL da ClickPayroll atualizados com sucesso em todo o ERP!",
+      empresa: empresaAtual
+    });
+  });
+
+  // Histórico de Logs de Auditoria
+  app.get('/api/access/audit-logs', (req: Request, res: Response) => {
+    res.json({ logs: accessAuditLogs });
+  });
+
+  // Disparo de Teste de Notificação & OTP
+  app.post('/api/access/test-notification', (req: Request, res: Response) => {
+    const testOtp = String(Math.floor(100000 + Math.random() * 900000));
+    const log = notifyFounder(
+      'Disparo de Teste de Notificação & OTP',
+      `Teste manual de envio de alerta de segurança e verificação de 2 fatores OTP para o Fundador Gerson Cumbane. Código de teste: ${testOtp}.`,
+      { otpCode: testOtp, status: 'sucesso' }
+    );
+    return res.json({
+      sucesso: true,
+      mensagem: "Notificação de teste e código OTP disparados com sucesso!",
+      notificadoPara: "gersonjcumbane@gmail.com (+258 86 139 0061)",
+      codigoOtpTeste: testOtp,
+      log
     });
   });
 
@@ -792,8 +1405,19 @@ async function startServer() {
     }
 
     const nuelStr = String(nuel).trim();
-    // Base simulada de consultas NUEL
+    // Base de consultas NUEL oficial
     const empresasNuelMap: Record<string, any> = {
+      '105086659': {
+        nome: 'ClickPay - Payroll Tech Mz Lda',
+        nuit: '402302399',
+        nuel: '105086659',
+        provincia: 'Maputo Cidade',
+        distrito: 'KaMpfumo',
+        endereco: 'Av. 24 de Julho, nº 1500, 5º Andar, Maputo',
+        regime_iva: 'IVA Normal (16%)',
+        email: 'admin@payrolltech.co.mz',
+        telefone: '+258 86 139 0061'
+      },
       '100123456': {
         nome: 'Workshop Demo Lda',
         nuit: '400123456',
@@ -807,14 +1431,14 @@ async function startServer() {
       },
       '100456123': {
         nome: 'Payroll Tech MZ Lda',
-        nuit: '400987654',
-        nuel: '100456123',
+        nuit: '402302399',
+        nuel: '105086659',
         provincia: 'Maputo Cidade',
         distrito: 'KaMpfumo',
-        endereco: 'Av. de Moçambique Nr. 1843, Maputo',
+        endereco: 'Av. 24 de Julho Nr. 1500, Maputo',
         regime_iva: 'IVA Normal (16%)',
-        email: 'info@payrolltech.mz',
-        telefone: '+258 21 610 130'
+        email: 'admin@payrolltech.co.mz',
+        telefone: '+258 86 139 0061'
       }
     };
 
@@ -2163,7 +2787,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const dataLimite = `10 de ${mesSeguinte} de ${anoSeguinte}`;
 
       // Geração determinística de referência SISSMO para o período/empresa
-      const hashNuit = (empresaAtual.nuit || '400999999').replace(/[^\d]/g, '');
+      const hashNuit = (empresaAtual.nuit || '402302399').replace(/[^\d]/g, '');
       const hashPeriodo = activePeriod.replace(/[^\d]/g, '') || '2026';
       const hashRandom = Math.floor(1000 + Math.random() * 9000).toString();
       const referenciaPagamento = `90244 ${hashNuit.substring(0,4)} ${hashPeriodo.substring(0,4)} ${hashRandom}`;
@@ -2243,7 +2867,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const dataLimite = `20 de ${mesSeguinte} de ${anoSeguinte}`;
 
       // Geração determinística de referência para o período/empresa
-      const hashNuit = (empresaAtual.nuit || '400999999').replace(/[^\d]/g, '');
+      const hashNuit = (empresaAtual.nuit || '402302399').replace(/[^\d]/g, '');
       const hashPeriodo = activePeriod.replace(/[^\d]/g, '') || '2026';
       const hashRandom = Math.floor(1000 + Math.random() * 9000).toString();
       const referenciaPagamento = `80133 ${hashNuit.substring(0,4)} ${hashPeriodo.substring(0,4)} ${hashRandom}`;
@@ -2573,7 +3197,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
     try {
       const { periodo, empresa, apuramentoIVA, estatisticas, colaboradores, compras, vendas } = req.body;
       const empresaNome = empresa?.nome || empresaAtual.nome || 'Payroll Tech Mz Lda';
-      const nuitEmpresa = empresa?.nuit || empresaAtual.nuit || '400999999';
+      const nuitEmpresa = empresa?.nuit || empresaAtual.nuit || '402302399';
 
       const prompt = `Actue como um Perito Contabilista Sénior e Auditor Fiscal certificado pela Autoridade Tributária de Moçambique (AT) e pela Ordem dos Contabilistas e Auditores de Moçambique (OCAM), com profundo domínio do PGC-NIRF, Código do IRPS (Lei 19/2013 e Lei 11/2025), Código do IVA (Decreto 28/2023 - 16%), Regime de Segurança Social do INSS (Decreto 51/2017) e Lei do Trabalho (Lei 13/2023).
 

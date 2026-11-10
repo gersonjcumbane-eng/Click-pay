@@ -9,15 +9,16 @@ import {
   BookOpen, 
   Bell, 
   Settings, 
-  Layers, 
   X, 
   ChevronRight, 
   LogOut,
-  Building2,
-  Calendar,
-  CheckCircle2,
   Brain,
-  Sparkles
+  RotateCcw,
+  Trash2,
+  Lock,
+  Building,
+  ShieldCheck,
+  KeyRound
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { getFormattedCurrentDateLong } from '../db_tax';
@@ -45,7 +46,6 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   company,
   availableCompanies,
   onSwitchCompany,
-  selectedPeriod,
   onSelectTab,
   isOpenMobile,
   onCloseMobile,
@@ -54,6 +54,9 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   onResetCosts
 }) => {
   const isClient = userRole === 'CLIENTE_EMPRESA';
+  const subPlan = company?.subscription_plan || 'Bronze';
+  const isBronze = subPlan === 'Bronze';
+  const isSilver = subPlan === 'Silver';
 
   const isM1Active = (activeTab === 'financial' && financialSubTab === 'vendas') || activeTab === 'clients';
   const isM2Active = activeTab === 'financial' && financialSubTab === 'compras';
@@ -65,49 +68,54 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   React.useEffect(() => {
     const timer = setInterval(() => {
       setLiveFormattedDate(getFormattedCurrentDateLong());
-    }, 10000); // atualiza a cada 10 segundos
+    }, 10000);
     return () => clearInterval(timer);
   }, []);
 
-  const formattedDate = liveFormattedDate;
-
   const navContent = (
-    <div className="flex flex-col gap-2.5">
-      {/* Brand & System Title (ClickPay Logo) */}
-      <div className="flex items-center gap-2 px-1 pb-2 border-b border-slate-200">
+    <div className="flex flex-col gap-3">
+      {/* Brand & System Title (Clean & Executive) */}
+      <div className="flex items-center gap-2.5 px-1 pb-3 border-b border-slate-200">
         <img 
           src="/logo-payroll.png" 
           alt="ClickPay" 
-          className="h-7 w-auto object-contain shrink-0" 
+          className="h-8 w-auto object-contain shrink-0" 
           referrerPolicy="no-referrer"
           onError={(e) => {
             (e.target as HTMLElement).style.display = 'none';
           }}
         />
-        <span className="text-sm font-black text-slate-950 tracking-tight truncate">ClickPay</span>
+        <div className="min-w-0">
+          <span className="text-base font-black text-slate-950 tracking-tight block leading-none">
+            ClickPay
+          </span>
+          <span className="text-[10px] text-slate-500 font-medium tracking-normal block mt-0.5">
+            ERP de Gestão Empresarial
+          </span>
+        </div>
       </div>
 
-      {/* Empresa Ativa & Status Box (Compressed Layout) */}
+      {/* Empresa Ativa Card */}
       {company && (
-        <div className="p-2 bg-white border border-slate-200 rounded-xl flex flex-col gap-1.5 shadow-2xs">
+        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-[8px] font-black text-slate-700 uppercase tracking-wider">Empresa Ativa</span>
-            <span className="text-[8px] bg-blue-900 text-white font-extrabold px-1.5 py-0.2 rounded">
-              {company.regime_fiscal_pme?.includes('ISPC') ? 'ISPC 3%' : company.regime_fiscal_pme?.includes('Artigo 9º') ? 'Isento Art.9' : 'IVA 16%'}
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Empresa Ativa</span>
+            <span className="text-[9px] bg-slate-200/80 text-slate-800 font-bold px-1.5 py-0.5 rounded">
+              {company.regime_fiscal_pme?.includes('ISPC') ? 'ISPC 3%' : company.regime_fiscal_pme?.includes('Artigo 9º') ? 'Isento Art. 9' : 'IVA 16%'}
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {company.logo ? (
               <img 
                 src={company.logo} 
                 alt={company.nome} 
-                className="w-5 h-5 rounded object-cover border border-slate-200 shrink-0" 
+                className="w-6 h-6 rounded object-cover border border-slate-200 shrink-0" 
                 referrerPolicy="no-referrer" 
               />
             ) : (
-              <div className="w-5 h-5 rounded bg-blue-100 text-blue-950 flex items-center justify-center font-black text-[8px] shrink-0">
-                {company.nome ? company.nome.substring(0, 2).toUpperCase() : 'EM'}
+              <div className="w-6 h-6 rounded bg-blue-900 text-white flex items-center justify-center font-black text-[9px] shrink-0">
+                {company.nome ? company.nome.substring(0, 2).toUpperCase() : 'CP'}
               </div>
             )}
             <div className="min-w-0 flex-1">
@@ -115,41 +123,40 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
                 <select
                   value={availableCompanies.find(c => c.isActive)?.id || ''}
                   onChange={(e) => onSwitchCompany(e.target.value)}
-                  className="text-[11px] font-black text-black bg-transparent border-0 p-0 m-0 leading-tight focus:ring-0 focus:outline-none cursor-pointer truncate max-w-[140px] hover:text-blue-900"
+                  className="w-full text-xs font-bold text-slate-900 bg-transparent border-0 p-0 m-0 leading-tight focus:ring-0 focus:outline-none cursor-pointer truncate hover:text-blue-900"
                 >
                   {availableCompanies.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-white text-black font-semibold">
+                    <option key={c.id} value={c.id} className="bg-white text-slate-900 font-semibold">
                       {c.nome}
                     </option>
                   ))}
                 </select>
               ) : (
-                <p className="text-[11px] font-black text-black truncate" title={company.nome}>
+                <p className="text-xs font-bold text-slate-900 truncate" title={company.nome}>
                   {company.nome}
                 </p>
               )}
             </div>
           </div>
 
-          {/* Sector & Server Line */}
-          <div className="pt-1 border-t border-slate-150 flex items-center justify-between text-[9px]">
-            <span className="text-black font-bold truncate max-w-[110px]" title={company.sector_negocio || 'Geral'}>
-              {company.sector_negocio || 'Serviços & Comércio'}
+          {/* NUIT & Status Info */}
+          <div className="pt-1.5 border-t border-slate-200/70 flex items-center justify-between text-[10px]">
+            <span className="text-slate-600 font-mono font-medium">
+              NUIT: {company.nuit || '402302399'}
             </span>
-            <div className="flex items-center gap-1 text-emerald-800 font-black">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-              <span className="text-[8px]">PayTek Activo</span>
+            <div className="flex items-center gap-1 text-emerald-700 font-semibold text-[9px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Online</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Module Navigation List - Compressed & High Visual Quality */}
+      {/* Navegação ERP */}
       <div className="flex flex-col gap-1">
-        <div className="px-1 pb-0.5 flex items-center justify-between">
-          <span className="text-[9px] font-black text-black uppercase tracking-wider">Módulos ERP</span>
-          <span className="text-[8px] text-slate-800 font-extrabold">8 Áreas</span>
-        </div>
+        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider px-1 pb-1">
+          Navegação ERP
+        </span>
 
         {/* 1. Visão Geral */}
         <button
@@ -157,65 +164,42 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
             onSelectTab('dashboard');
             onCloseMobile();
           }}
-          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
             activeTab === 'dashboard'
-              ? 'bg-blue-900 text-white shadow-xs'
-              : 'bg-white hover:bg-slate-50 text-black border border-slate-200 hover:border-slate-300'
+              ? 'bg-blue-900 text-white font-bold shadow-xs'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-              activeTab === 'dashboard' ? 'bg-white/20 text-white' : 'bg-slate-100 text-black group-hover:bg-blue-50 group-hover:text-blue-900'
-            }`}>
-              <BarChart3 size={14} strokeWidth={2.2} />
-            </div>
-            <div className="min-w-0">
-              <span className={`text-[11px] font-black block truncate leading-tight ${
-                activeTab === 'dashboard' ? 'text-white' : 'text-black'
-              }`}>
-                Visão Geral
-              </span>
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <BarChart3 size={16} strokeWidth={2.2} className="shrink-0" />
+            <span className="text-xs truncate">Visão Geral</span>
           </div>
-          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
-            activeTab === 'dashboard' ? 'text-white' : 'text-slate-500 group-hover:text-black'
-          }`} />
+          <ChevronRight size={14} className={`shrink-0 ${activeTab === 'dashboard' ? 'text-white' : 'text-slate-400'}`} />
         </button>
 
-        {/* 2. BRAIN IA · 4 Assistentes Financeiros (Inspirado Bujeti) */}
+        {/* 2. BRAIN IA */}
         <button
           onClick={() => {
             onSelectTab('brain');
             onCloseMobile();
           }}
-          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
             activeTab === 'brain'
-              ? 'bg-blue-950 text-white shadow-xs border border-blue-800'
-              : 'bg-gradient-to-r from-blue-50/70 to-indigo-50/70 hover:from-blue-100 hover:to-indigo-100 text-black border border-blue-200 hover:border-blue-400'
+              ? 'bg-blue-950 text-white font-bold shadow-xs border border-blue-800'
+              : 'text-slate-700 hover:text-blue-950 hover:bg-blue-50/70 font-medium'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-              activeTab === 'brain' ? 'bg-blue-500/30 text-blue-300' : 'bg-blue-700 text-white shadow-2xs'
-            }`}>
-              <Brain size={14} strokeWidth={2.4} />
-            </div>
-            <div className="min-w-0 flex items-center gap-1.5">
-              <span className={`text-[11px] font-black truncate leading-tight ${
-                activeTab === 'brain' ? 'text-white' : 'text-blue-950'
-              }`}>
-                BRAIN IA
-              </span>
-              <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase flex items-center gap-0.5 ${
-                activeTab === 'brain' ? 'bg-blue-500/30 text-blue-200' : 'bg-blue-900 text-white font-extrabold'
-              }`}>
-                <Sparkles size={8} /> 4 AGENTES
-              </span>
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Brain size={16} strokeWidth={2.2} className={activeTab === 'brain' ? 'text-blue-300 shrink-0' : 'text-blue-800 shrink-0'} />
+            <span className="text-xs truncate">BRAIN IA</span>
           </div>
-          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
-            activeTab === 'brain' ? 'text-white' : 'text-blue-900 group-hover:text-black'
-          }`} />
+          {(isBronze || isSilver) ? (
+            <span title="Requer Plano Empresarial (Gold)" className="shrink-0 flex items-center">
+              <Lock size={12} className="text-amber-500" />
+            </span>
+          ) : (
+            <ChevronRight size={14} className={`shrink-0 ${activeTab === 'brain' ? 'text-white' : 'text-slate-400'}`} />
+          )}
         </button>
 
         {/* 3. CRM & Vendas */}
@@ -224,84 +208,59 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
             onSelectTab('crm');
             onCloseMobile();
           }}
-          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
             activeTab === 'crm'
-              ? 'bg-blue-900 text-white shadow-xs'
-              : 'bg-white hover:bg-indigo-50/40 text-black border border-slate-200 hover:border-indigo-200'
+              ? 'bg-blue-900 text-white font-bold shadow-xs'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-              activeTab === 'crm' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-900 group-hover:bg-indigo-100'
-            }`}>
-              <Briefcase size={14} strokeWidth={2.2} />
-            </div>
-            <div className="min-w-0 flex items-center gap-1.5">
-              <span className={`text-[11px] font-black truncate leading-tight ${
-                activeTab === 'crm' ? 'text-white' : 'text-black'
-              }`}>
-                CRM & Vendas
-              </span>
-              <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase ${
-                activeTab === 'crm' ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-950 font-extrabold'
-              }`}>CRM</span>
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Briefcase size={16} strokeWidth={2.2} className="shrink-0" />
+            <span className="text-xs truncate">CRM & Vendas</span>
           </div>
-          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
-            activeTab === 'crm' ? 'text-white' : 'text-slate-500 group-hover:text-black'
-          }`} />
+          {isBronze ? (
+            <span title="Requer Plano Profissional (Silver)" className="shrink-0 flex items-center">
+              <Lock size={12} className="text-amber-500" />
+            </span>
+          ) : (
+            <ChevronRight size={14} className={`shrink-0 ${activeTab === 'crm' ? 'text-white' : 'text-slate-400'}`} />
+          )}
         </button>
 
-        {/* 3. M1 · Facturação & Vendas */}
+        {/* 4. Facturação & Vendas */}
         <div className="flex flex-col gap-0.5">
           <button
             onClick={() => {
               onSelectTab('financial', 'vendas');
               onCloseMobile();
             }}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
               isM1Active
-                ? 'bg-blue-900 text-white shadow-xs'
-                : 'bg-white hover:bg-blue-50/40 text-black border border-slate-200 hover:border-blue-200'
+                ? 'bg-blue-900 text-white font-bold shadow-xs'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
             }`}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-                isM1Active ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-900 group-hover:bg-blue-100'
-              }`}>
-                <Tag size={14} strokeWidth={2.2} />
-              </div>
-              <div className="min-w-0 flex items-center gap-1.5">
-                <span className={`text-[11px] font-black truncate leading-tight ${
-                  isM1Active ? 'text-white' : 'text-black'
-                }`}>
-                  Facturação
-                </span>
-                <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase ${
-                  isM1Active ? 'bg-white/25 text-white' : 'bg-blue-100 text-blue-950 font-extrabold'
-                }`}>M1</span>
-              </div>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Tag size={16} strokeWidth={2.2} className="shrink-0" />
+              <span className="text-xs truncate">Facturação & Vendas</span>
             </div>
-            <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 transition-transform ${
-              isM1Active ? 'text-white rotate-90' : 'text-slate-500 group-hover:text-black'
-            }`} />
+            <ChevronRight size={14} className={`shrink-0 transition-transform ${isM1Active ? 'text-white rotate-90' : 'text-slate-400'}`} />
           </button>
 
-          {/* Sub-items for M1 (Tight & Readable) */}
           {isM1Active && (
-            <div className="ml-3 pl-2.5 border-l-2 border-blue-400 flex flex-col gap-0.5 py-0.5">
+            <div className="ml-4 pl-2.5 border-l-2 border-blue-500/30 flex flex-col gap-0.5 py-1">
               <button
                 onClick={() => {
                   onSelectTab('financial', 'vendas');
                   onCloseMobile();
                 }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
                   activeTab === 'financial' && financialSubTab === 'vendas'
-                    ? 'bg-blue-100 text-blue-950 font-black'
-                    : 'text-black hover:bg-slate-100'
+                    ? 'bg-blue-100 text-blue-950 font-bold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Vendas & Facturação</span>
+                <span>Vendas & Facturação</span>
                 {activeTab === 'financial' && financialSubTab === 'vendas' && (
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>
                 )}
@@ -313,13 +272,13 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
                     onSelectTab('clients');
                     onCloseMobile();
                   }}
-                  className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
+                  className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
                     activeTab === 'clients'
-                      ? 'bg-blue-100 text-blue-950 font-black'
-                      : 'text-black hover:bg-slate-100'
+                      ? 'bg-blue-100 text-blue-950 font-bold'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                   }`}
                 >
-                  <span>• Gestão de Clientes</span>
+                  <span>Gestão de Clientes</span>
                   {activeTab === 'clients' && (
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>
                   )}
@@ -329,345 +288,314 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
           )}
         </div>
 
-        {/* 4. M2 · Compras & Stocks */}
+        {/* 5. Compras & Stocks */}
         <button
           onClick={() => {
             onSelectTab('financial', 'compras');
             onCloseMobile();
           }}
-          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
             isM2Active
-              ? 'bg-blue-900 text-white shadow-xs'
-              : 'bg-white hover:bg-amber-50/40 text-black border border-slate-200 hover:border-amber-200'
+              ? 'bg-blue-900 text-white font-bold shadow-xs'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-              isM2Active ? 'bg-white/20 text-white' : 'bg-amber-50 text-amber-900 group-hover:bg-amber-100'
-            }`}>
-              <ShoppingCart size={14} strokeWidth={2.2} />
-            </div>
-            <div className="min-w-0 flex items-center gap-1.5">
-              <span className={`text-[11px] font-black truncate leading-tight ${
-                isM2Active ? 'text-white' : 'text-black'
-              }`}>
-                Compras & Stocks
-              </span>
-              <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase ${
-                isM2Active ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-950 font-extrabold'
-              }`}>M2</span>
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <ShoppingCart size={16} strokeWidth={2.2} className="shrink-0" />
+            <span className="text-xs truncate">Compras & Stocks</span>
           </div>
-          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
-            isM2Active ? 'text-white' : 'text-slate-500 group-hover:text-black'
-          }`} />
+          {isBronze ? (
+            <span title="Requer Plano Profissional (Silver)" className="shrink-0 flex items-center">
+              <Lock size={12} className="text-amber-500" />
+            </span>
+          ) : (
+            <ChevronRight size={14} className={`shrink-0 ${isM2Active ? 'text-white' : 'text-slate-400'}`} />
+          )}
         </button>
 
-        {/* 5. M3 · Salários & RH */}
+        {/* 6. Salários & RH */}
         <div className="flex flex-col gap-0.5">
           <button
             onClick={() => {
               onSelectTab('employees');
               onCloseMobile();
             }}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
               isM3Active
-                ? 'bg-blue-900 text-white shadow-xs'
-                : 'bg-white hover:bg-emerald-50/40 text-black border border-slate-200 hover:border-emerald-200'
+                ? 'bg-blue-900 text-white font-bold shadow-xs'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
             }`}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-                isM3Active ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-900 group-hover:bg-emerald-100'
-              }`}>
-                <Users size={14} strokeWidth={2.2} />
-              </div>
-              <div className="min-w-0 flex items-center gap-1.5">
-                <span className={`text-[11px] font-black truncate leading-tight ${
-                  isM3Active ? 'text-white' : 'text-black'
-                }`}>
-                  Salários & RH
-                </span>
-                <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase ${
-                  isM3Active ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-950 font-extrabold'
-                }`}>M3</span>
-              </div>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Users size={16} strokeWidth={2.2} className="shrink-0" />
+              <span className="text-xs truncate">Salários & RH</span>
             </div>
-            <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 transition-transform ${
-              isM3Active ? 'text-white rotate-90' : 'text-slate-500 group-hover:text-black'
-            }`} />
+            <ChevronRight size={14} className={`shrink-0 transition-transform ${isM3Active ? 'text-white rotate-90' : 'text-slate-400'}`} />
           </button>
 
-          {/* Sub-items for M3 (Compressed) */}
           {isM3Active && (
-            <div className="ml-3 pl-2.5 border-l-2 border-emerald-500 flex flex-col gap-0.5 py-0.5">
+            <div className="ml-4 pl-2.5 border-l-2 border-blue-500/30 flex flex-col gap-0.5 py-1">
               <button
                 onClick={() => { onSelectTab('employees'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  activeTab === 'employees' ? 'bg-emerald-100 text-emerald-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  activeTab === 'employees' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Colaboradores & Folha</span>
-                {activeTab === 'employees' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-700"></span>}
+                <span>Colaboradores & Folha</span>
+                {activeTab === 'employees' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('sissmo'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  activeTab === 'sissmo' ? 'bg-emerald-100 text-emerald-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  activeTab === 'sissmo' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• SISSMO & Guias INSS</span>
-                {activeTab === 'sissmo' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-700"></span>}
+                <span className="flex items-center gap-1.5">
+                  SISSMO & Guias INSS
+                  {isBronze && <Lock size={10} className="text-amber-500" />}
+                </span>
+                {activeTab === 'sissmo' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('simulator'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  activeTab === 'simulator' ? 'bg-emerald-100 text-emerald-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  activeTab === 'simulator' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Simulador IRPS/INSS</span>
-                {activeTab === 'simulator' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-700"></span>}
+                <span>Simulador IRPS/INSS</span>
+                {activeTab === 'simulator' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('fintech'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  activeTab === 'fintech' ? 'bg-emerald-100 text-emerald-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  activeTab === 'fintech' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Vales & Fintech</span>
-                {activeTab === 'fintech' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-700"></span>}
+                <span className="flex items-center gap-1.5">
+                  Vales & Fintech
+                  {isBronze && <Lock size={10} className="text-amber-500" />}
+                </span>
+                {activeTab === 'fintech' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('contracts'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  activeTab === 'contracts' ? 'bg-emerald-100 text-emerald-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  activeTab === 'contracts' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Contratos de Trabalho</span>
-                {activeTab === 'contracts' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-700"></span>}
+                <span className="flex items-center gap-1.5">
+                  Contratos de Trabalho
+                  {isBronze && <Lock size={10} className="text-amber-500" />}
+                </span>
+                {activeTab === 'contracts' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
             </div>
           )}
         </div>
 
-        {/* 6. M4 · Tesouraria & Contabilidade */}
+        {/* 7. Tesouraria & Contabilidade PGC */}
         <div className="flex flex-col gap-0.5">
           <button
             onClick={() => {
               onSelectTab('financial', 'caixa');
               onCloseMobile();
             }}
-            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
               isM4Active
-                ? 'bg-blue-900 text-white shadow-xs'
-                : 'bg-white hover:bg-indigo-50/40 text-black border border-slate-200 hover:border-indigo-200'
+                ? 'bg-blue-900 text-white font-bold shadow-xs'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
             }`}
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-                isM4Active ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-900 group-hover:bg-indigo-100'
-              }`}>
-                <BookOpen size={14} strokeWidth={2.2} />
-              </div>
-              <div className="min-w-0 flex items-center gap-1.5">
-                <span className={`text-[11px] font-black truncate leading-tight ${
-                  isM4Active ? 'text-white' : 'text-black'
-                }`}>
-                  Tesouraria & PGC
-                </span>
-                <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase ${
-                  isM4Active ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-950 font-extrabold'
-                }`}>M4</span>
-              </div>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <BookOpen size={16} strokeWidth={2.2} className="shrink-0" />
+              <span className="text-xs truncate">Tesouraria & PGC</span>
             </div>
-            <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 transition-transform ${
-              isM4Active ? 'text-white rotate-90' : 'text-slate-500 group-hover:text-black'
-            }`} />
+            {isBronze ? (
+              <span title="Requer Plano Profissional ou Empresarial" className="shrink-0 flex items-center">
+                <Lock size={12} className="text-amber-500" />
+              </span>
+            ) : (
+              <ChevronRight size={14} className={`shrink-0 transition-transform ${isM4Active ? 'text-white rotate-90' : 'text-slate-400'}`} />
+            )}
           </button>
 
-          {/* Sub-items for M4 (Compressed) */}
           {isM4Active && (
-            <div className="ml-3 pl-2.5 border-l-2 border-indigo-400 flex flex-col gap-0.5 py-0.5">
+            <div className="ml-4 pl-2.5 border-l-2 border-blue-500/30 flex flex-col gap-0.5 py-1">
               <button
                 onClick={() => { onSelectTab('financial', 'caixa'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  financialSubTab === 'caixa' ? 'bg-indigo-100 text-indigo-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  financialSubTab === 'caixa' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Livro de Caixa & Bancos</span>
-                {financialSubTab === 'caixa' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-700"></span>}
+                <span>Livro de Caixa & Bancos</span>
+                {financialSubTab === 'caixa' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('financial', 'iva'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  financialSubTab === 'iva' ? 'bg-indigo-100 text-indigo-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  financialSubTab === 'iva' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Apuramento IVA (M/01)</span>
-                {financialSubTab === 'iva' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-700"></span>}
+                <span>Apuramento IVA (M/01)</span>
+                {financialSubTab === 'iva' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('financial', 'relatorios'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  financialSubTab === 'relatorios' ? 'bg-indigo-100 text-indigo-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  financialSubTab === 'relatorios' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Relatórios ERP & DRE</span>
-                {financialSubTab === 'relatorios' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-700"></span>}
+                <span>Relatórios ERP & DRE</span>
+                {financialSubTab === 'relatorios' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('financial', 'plano_contas'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  financialSubTab === 'plano_contas' ? 'bg-indigo-100 text-indigo-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  financialSubTab === 'plano_contas' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Plano de Contas (PGC)</span>
-                {financialSubTab === 'plano_contas' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-700"></span>}
+                <span>Plano de Contas (PGC)</span>
+                {financialSubTab === 'plano_contas' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
               <button
                 onClick={() => { onSelectTab('financial', 'conformidade'); onCloseMobile(); }}
-                className={`text-[10px] font-black px-2 py-1 rounded text-left transition-all cursor-pointer flex items-center justify-between ${
-                  financialSubTab === 'conformidade' ? 'bg-indigo-100 text-indigo-950 font-black' : 'text-black hover:bg-slate-100'
+                className={`text-[11px] px-2.5 py-1 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between ${
+                  financialSubTab === 'conformidade' ? 'bg-blue-100 text-blue-950 font-bold' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                 }`}
               >
-                <span>• Guia & Conformidade AT</span>
-                {financialSubTab === 'conformidade' && <span className="w-1.5 h-1.5 rounded-full bg-indigo-700"></span>}
+                <span>Guia & Conformidade AT</span>
+                {financialSubTab === 'conformidade' && <span className="w-1.5 h-1.5 rounded-full bg-blue-900"></span>}
               </button>
             </div>
           )}
         </div>
 
-        {/* 7. M5 · Alertas Fiscais & IA */}
+        {/* 8. Alertas Fiscais */}
         <button
           onClick={() => {
             onSelectTab('alerts');
             onCloseMobile();
           }}
-          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
             activeTab === 'alerts'
-              ? 'bg-blue-900 text-white shadow-xs'
-              : 'bg-white hover:bg-rose-50/40 text-black border border-slate-200 hover:border-rose-200'
+              ? 'bg-blue-900 text-white font-bold shadow-xs'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-              activeTab === 'alerts' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-900 group-hover:bg-rose-100'
-            }`}>
-              <Bell size={14} strokeWidth={2.2} />
-            </div>
-            <div className="min-w-0 flex items-center gap-1.5">
-              <span className={`text-[11px] font-black truncate leading-tight ${
-                activeTab === 'alerts' ? 'text-white' : 'text-black'
-              }`}>
-                Alertas Fiscais
-              </span>
-              <span className={`text-[7px] font-black px-1 py-0.2 rounded uppercase ${
-                activeTab === 'alerts' ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-950 font-extrabold'
-              }`}>M5</span>
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Bell size={16} strokeWidth={2.2} className="shrink-0" />
+            <span className="text-xs truncate">Alertas Fiscais</span>
           </div>
-          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
-            activeTab === 'alerts' ? 'text-white' : 'text-slate-500 group-hover:text-black'
-          }`} />
+          {isBronze ? (
+            <span title="Requer Plano Profissional (Silver)" className="shrink-0 flex items-center">
+              <Lock size={12} className="text-amber-500" />
+            </span>
+          ) : (
+            <ChevronRight size={14} className={`shrink-0 ${activeTab === 'alerts' ? 'text-white' : 'text-slate-400'}`} />
+          )}
         </button>
 
-        {/* 8. Configurações */}
+        {/* 9. Configurações */}
         <button
           onClick={() => {
             onSelectTab('settings');
             onCloseMobile();
           }}
-          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-all cursor-pointer group ${
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
             activeTab === 'settings'
-              ? 'bg-blue-900 text-white shadow-xs'
-              : 'bg-white hover:bg-slate-50 text-black border border-slate-200 hover:border-slate-300'
+              ? 'bg-blue-900 text-white font-bold shadow-xs'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 transition-colors ${
-              activeTab === 'settings' ? 'bg-white/20 text-white' : 'bg-slate-100 text-black group-hover:bg-slate-200'
-            }`}>
-              <Settings size={14} strokeWidth={2.2} />
-            </div>
-            <div className="min-w-0">
-              <span className={`text-[11px] font-black block truncate leading-tight ${
-                activeTab === 'settings' ? 'text-white' : 'text-black'
-              }`}>
-                Configurações
-              </span>
-            </div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Settings size={16} strokeWidth={2.2} className="shrink-0" />
+            <span className="text-xs truncate">Configurações</span>
           </div>
-          <ChevronRight size={13} strokeWidth={2.5} className={`shrink-0 ${
-            activeTab === 'settings' ? 'text-white' : 'text-slate-500 group-hover:text-black'
-          }`} />
+          <ChevronRight size={14} className={`shrink-0 ${activeTab === 'settings' ? 'text-white' : 'text-slate-400'}`} />
         </button>
 
-      </div>
-
-      {/* Opções de Limpeza de Dados e Reset de Cálculos */}
-      <div className="pt-2 border-t border-slate-200 space-y-1.5">
-        <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block px-1">
-          Gestão de Dados & Cálculos
-        </span>
-        {onResetCosts && (
-          <button
-            onClick={onResetCosts}
-            className="w-full py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg text-[10px] font-extrabold flex items-center justify-between transition-colors cursor-pointer"
-            title="Zerar cálculos fiscais, compras, vendas e caixa"
-          >
-            <span>🔄 Zerar Cálculos Fiscais</span>
-            <span className="text-[9px] bg-amber-200 px-1 rounded">0.00 MT</span>
-          </button>
-        )}
-        {onResetDb && (
-          <button
-            onClick={onResetDb}
-            className="w-full py-1.5 px-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-[10px] font-extrabold flex items-center justify-between transition-colors cursor-pointer"
-            title="Limpar todos os dados e começar do zero"
-          >
-            <span>🧹 Limpar Todos os Dados</span>
-            <span className="text-[9px] bg-slate-300 px-1 rounded">Reset</span>
-          </button>
-        )}
-      </div>
-
-      {/* Isolated Red Logout Window / Container (Compact & High Contrast) */}
-      <div className="mt-1 p-2.5 bg-red-50/95 border border-red-300 rounded-xl shadow-xs" id="logout-isolated-red-window">
-        <div className="flex items-center justify-between mb-1.5">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-red-600 animate-ping" />
-            <span className="text-[9px] font-black text-red-950 uppercase tracking-wider">Sessão Segura</span>
+        {/* 10. Acesso & Credenciais */}
+        <button
+          onClick={() => {
+            onSelectTab('credentials');
+            onCloseMobile();
+          }}
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-all cursor-pointer ${
+            activeTab === 'credentials'
+              ? 'bg-blue-900 text-white font-bold shadow-xs'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
+          }`}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <KeyRound size={16} strokeWidth={2.2} className="shrink-0 text-blue-900" />
+            <span className="text-xs truncate font-semibold">Acesso & Credenciais</span>
           </div>
-          <span className="text-[8px] font-mono text-red-950 font-bold bg-red-100 border border-red-200 px-1 py-0.2 rounded">
-            {formattedDate}
+          <ChevronRight size={14} className={`shrink-0 ${activeTab === 'credentials' ? 'text-white' : 'text-slate-400'}`} />
+        </button>
+      </div>
+
+      {/* Gestão de Dados (Clean Utility Section) */}
+      {(onResetCosts || onResetDb) && (
+        <div className="pt-2 border-t border-slate-200 space-y-1.5">
+          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block px-1">
+            Gestão de Dados
+          </span>
+          {onResetCosts && (
+            <button
+              onClick={onResetCosts}
+              className="w-full py-1.5 px-2.5 bg-amber-50/70 hover:bg-amber-100/80 text-amber-900 border border-amber-200/80 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+              title="Zerar cálculos fiscais, compras, vendas e caixa"
+            >
+              <RotateCcw size={13} className="shrink-0 text-amber-700" />
+              <span className="truncate">Zerar Cálculos Fiscais</span>
+            </button>
+          )}
+          {onResetDb && (
+            <button
+              onClick={onResetDb}
+              className="w-full py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer"
+              title="Limpar todos os dados e começar do zero"
+            >
+              <Trash2 size={13} className="shrink-0 text-slate-500" />
+              <span className="truncate">Reiniciar Base de Dados</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Sessão Segura / Logout (Clean & Executive) */}
+      <div className="mt-1 p-3 bg-red-50/60 border border-red-200 rounded-xl" id="logout-isolated-red-window">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping shrink-0" />
+            <span className="text-[10px] font-bold text-red-950 uppercase tracking-wider">Sessão Segura</span>
+          </div>
+          <span className="text-[9px] font-mono text-red-900 font-semibold bg-white/80 border border-red-200 px-1.5 py-0.5 rounded">
+            {liveFormattedDate}
           </span>
         </div>
-        <p className="text-[9px] text-red-950 font-bold mb-2 leading-tight">
-          Terminar sessão com segurança?
-        </p>
         <button
           onClick={onLogout}
-          className="w-full py-1.5 px-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-black text-[11px] rounded-lg flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer hover:scale-[1.01]"
+          className="w-full py-2 px-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
           id="btn-sair-vermelho"
         >
-          <LogOut size={13} strokeWidth={2.5} />
+          <LogOut size={14} strokeWidth={2.4} />
           <span>Sair do Sistema</span>
         </button>
       </div>
-
     </div>
   );
 
   return (
     <>
-      {/* Desktop Sticky Left Sidebar with compressed width & spacing */}
+      {/* Desktop Sticky Left Sidebar */}
       <aside className="hidden lg:block w-64 xl:w-72 shrink-0 sticky top-3">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-2.5">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3">
           {navContent}
         </div>
       </aside>
 
-      {/* Mobile Drawer / Slide-Over from Left */}
+      {/* Mobile Drawer / Slide-Over */}
       <AnimatePresence>
         {isOpenMobile && (
           <div className="fixed inset-0 z-50 lg:hidden">
@@ -686,16 +614,16 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 280 }}
-              className="absolute top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-white shadow-2xl p-3 overflow-y-auto flex flex-col justify-between"
+              className="absolute top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-white shadow-2xl p-4 overflow-y-auto flex flex-col justify-between"
             >
               <div>
-                <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200">
-                  <span className="text-xs font-black text-black uppercase tracking-wider">Menu ERP</span>
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200">
+                  <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">Menu ERP</span>
                   <button
                     onClick={onCloseMobile}
-                    className="p-1 text-black hover:text-red-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+                    className="p-1.5 text-slate-500 hover:text-red-600 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
                   >
-                    <X size={16} strokeWidth={2.5} />
+                    <X size={18} strokeWidth={2.2} />
                   </button>
                 </div>
                 {navContent}

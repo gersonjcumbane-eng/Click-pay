@@ -556,17 +556,18 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
           {/* Starter */}
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-5">
             <div className="space-y-3">
-              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Starter</span>
+              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Starter (Bronze)</span>
               <h3 className="text-lg font-bold text-slate-900">Microempresa</h3>
-              <p className="text-xs text-slate-500 font-normal">Ideal para pequenos negócios e comércio local.</p>
+              <p className="text-xs text-slate-500 font-normal">Ideal para pequenos negócios, startups e prestadores de serviços.</p>
               <div className="pt-2">
-                <span className="text-2xl font-black text-slate-950 font-mono">3.000,00 MT</span>
+                <span className="text-2xl font-black text-slate-950 font-mono">3.500,00 MT</span>
                 <span className="text-[10px] text-slate-400 block">/mês</span>
               </div>
               <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                <li className="flex items-center gap-2">✓ Até 5 Funcionários</li>
-                <li className="flex items-center gap-2">✓ Facturação ISPC (3%) ou IVA</li>
-                <li className="flex items-center gap-2">✓ Recibos de Salário & SISSMO</li>
+                <li className="flex items-center gap-2">✓ Até 5 Colaboradores</li>
+                <li className="flex items-center gap-2">✓ Facturação & Vendas (M1)</li>
+                <li className="flex items-center gap-2">✓ Recibos de Salário Padrão Primavera V10</li>
+                <li className="flex items-center gap-2">✓ Simulador IRPS (Lei 11/2025) & INSS</li>
                 <li className="flex items-center gap-2">✓ Suporte via WhatsApp</li>
               </ul>
             </div>
@@ -584,19 +585,20 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
               Mais Popular
             </span>
             <div className="space-y-3">
-              <span className="text-[10px] bg-blue-50 text-blue-900 font-bold px-2 py-0.5 rounded uppercase">Profissional</span>
+              <span className="text-[10px] bg-blue-50 text-blue-900 font-bold px-2 py-0.5 rounded uppercase">Profissional (Silver)</span>
               <h3 className="text-lg font-bold text-slate-900">Pequena Empresa</h3>
-              <p className="text-xs text-slate-500 font-normal">Para empresas com equipa em crescimento e mais movimento.</p>
+              <p className="text-xs text-slate-500 font-normal">Para empresas com equipa ativa, gestão de compras e obrigações com o INSS.</p>
               <div className="pt-2">
-                <span className="text-2xl font-black text-blue-900 font-mono">5.000,00 MT</span>
+                <span className="text-2xl font-black text-blue-900 font-mono">6.500,00 MT</span>
                 <span className="text-[10px] text-slate-400 block">/mês</span>
               </div>
               <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                <li className="flex items-center gap-2">✓ Até 15 Funcionários</li>
-                <li className="flex items-center gap-2">✓ Piloto Automático M-Pesa / e-Mola</li>
-                <li className="flex items-center gap-2">✓ CRM de Vendas & Propostas</li>
-                <li className="flex items-center gap-2">✓ Gestão de Compras e Despesas</li>
-                <li className="flex items-center gap-2">✓ Apoio prioritário</li>
+                <li className="flex items-center gap-2">✓ Até 15 Colaboradores</li>
+                <li className="flex items-center gap-2">✓ SISSMO & Guias INSS com Ficheiro Oficial</li>
+                <li className="flex items-center gap-2">✓ Contratos de Trabalho (Lei 13/2023)</li>
+                <li className="flex items-center gap-2">✓ Compras & Stocks (M2)</li>
+                <li className="flex items-center gap-2">✓ Alertas Fiscais & Prazos da AT (M5)</li>
+                <li className="flex items-center gap-2">✓ Vales & Fintech M-Pesa / e-Mola</li>
               </ul>
             </div>
             <button
@@ -610,19 +612,19 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
           {/* Business / Gold */}
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-5">
             <div className="space-y-3">
-              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Empresarial</span>
+              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Empresarial (Gold)</span>
               <h3 className="text-lg font-bold text-slate-900">Média Empresa</h3>
-              <p className="text-xs text-slate-500 font-normal">Solução avançada com relatórios PGC-NIRF completos.</p>
+              <p className="text-xs text-slate-500 font-normal">Plataforma integral com IA Financeira e contabilidade PGC-NIRF completa.</p>
               <div className="pt-2">
-                <span className="text-2xl font-black text-slate-950 font-mono">6.500,00 MT</span>
+                <span className="text-2xl font-black text-slate-950 font-mono">9.500,00 MT</span>
                 <span className="text-[10px] text-slate-400 block">/mês</span>
               </div>
               <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                <li className="flex items-center gap-2">✓ Até 25 Funcionários</li>
-                <li className="flex items-center gap-2">✓ Multi-Armazém de Stock</li>
-                <li className="flex items-center gap-2">✓ Demonstração de Resultados (DRE)</li>
-                <li className="flex items-center gap-2">✓ Assistente IA Financeiro</li>
-                <li className="flex items-center gap-2">✓ Gestor de conta dedicado</li>
+                <li className="flex items-center gap-2">✓ Até 30 Colaboradores</li>
+                <li className="flex items-center gap-2">✓ BRAIN IA (4 Agentes Autónomos)</li>
+                <li className="flex items-center gap-2">✓ Contabilidade PGC: DRE, Balanço e Caixa</li>
+                <li className="flex items-center gap-2">✓ Multi-Armazém & Gestão Avançada de Stocks</li>
+                <li className="flex items-center gap-2">✓ Suporte Executivo Prioritário</li>
               </ul>
             </div>
             <button
@@ -665,8 +667,8 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
       {/* Footer */}
       <footer className="bg-slate-950 text-slate-400 py-8 border-t border-slate-800 text-xs text-center">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 ClickPay Moçambique · clickpay.co.mz. Todos os direitos reservados.</p>
-          <p className="text-[11px] text-slate-500">Conforme o Código do IRPS, Lei do Trabalho 13/2023, Regulamento SISSMO e Padrão Primavera V10.</p>
+          <p>© 2026 ClickPay Moçambique · NUIT: 402302399 | NUEL: 105086659. Todos os direitos reservados.</p>
+          <p className="text-[11px] text-slate-500">Conforme o Código do IRPS (Lei 11/2025), Lei do Trabalho 13/2023, Regulamento SISSMO e Padrão Primavera V10.</p>
         </div>
       </footer>
 

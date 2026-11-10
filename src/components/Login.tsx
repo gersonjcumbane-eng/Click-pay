@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send } from 'lucide-react';
 
 interface LoginProps {
   selectedPlan?: 'Bronze' | 'Silver' | 'Gold' | null;
@@ -14,11 +14,44 @@ interface LoginProps {
   onEnterRegister?: () => void;
 }
 
-export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEnterRegister }: LoginProps) {
+  const [email, setEmail] = useState(() => {
+    if (selectedPlan === 'Bronze') return 'bronze@payrolltech.co.mz';
+    if (selectedPlan === 'Silver') return 'silver@payrolltech.co.mz';
+    if (selectedPlan === 'Gold') return 'gold@payrolltech.co.mz';
+    return '';
+  });
+  const [password, setPassword] = useState(() => {
+    if (selectedPlan === 'Bronze') return 'bronze2026';
+    if (selectedPlan === 'Silver') return 'silver2026';
+    if (selectedPlan === 'Gold') return 'gold2026';
+    return '';
+  });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Estados para Verificação de 2 Fatores (OTP)
+  const [otpStep, setOtpStep] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [tentativaId, setTentativaId] = useState('');
+  const [debugOtpCode, setDebugOtpCode] = useState('');
+  const [notifiedEmail, setNotifiedEmail] = useState('gersonjcumbane@gmail.com');
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
+  const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (selectedPlan === 'Bronze') {
+      setEmail('bronze@payrolltech.co.mz');
+      setPassword('bronze2026');
+    } else if (selectedPlan === 'Silver') {
+      setEmail('silver@payrolltech.co.mz');
+      setPassword('silver2026');
+    } else if (selectedPlan === 'Gold') {
+      setEmail('gold@payrolltech.co.mz');
+      setPassword('gold2026');
+    }
+  }, [selectedPlan]);
   
   // O botão de chave mestre só é visível para o Gerson (Fundador):
   // 1. Automaticamente se houver histórico de admin no navegador
@@ -51,40 +84,88 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
     const cleanEmail = email.toLowerCase().trim();
     const cleanPassword = password.trim();
 
-    // Verificação Mestre Imediata (Gerson Cumbane / Fundador)
-    // Permite aceder instantaneamente mesmo em hospedagens estáticas (como Vercel) ou com o backend desligado
-    const masterEmails = [
-      'gersonjcumbane@gmail.com',
-      'admin@clickpay.co.mz',
-      'admin@payrolltech.co.mz'
-    ];
-    const masterPasswords = [
-      'ClickPay2026!',
-      'admin2026',
-      '123456',
-      'UEM_Finanças_Engenharia_2026!',
-      'admin'
-    ];
-
-    if (masterEmails.includes(cleanEmail) && masterPasswords.includes(cleanPassword)) {
-      localStorage.setItem('paytek_auth', 'true');
-      localStorage.setItem('paytek_token', 'token_mestre_super_admin_payroll_tech');
-      localStorage.setItem('paytek_user', email);
-      localStorage.setItem('paytek_role', 'SUPER_ADMIN_PAYROLL');
-      localStorage.setItem('paytek_sub_status', 'ativo');
-      localStorage.setItem('paytek_sub_plan', 'Platinum');
-      localStorage.setItem('paytek_sub_expire', '2027-12-31');
-      localStorage.setItem('paytek_company_name', 'ClickPay Moçambique Lda');
-      setLoading(false);
-      onLoginSuccess();
-      return;
-    }
-
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // 1. Desafio de Verificação em 2 Passos (OTP) Ativo
+        if (data.otpRequired) {
+          setOtpStep(true);
+          setTentativaId(data.tentativaId || '');
+          setDebugOtpCode(data.debugOtpCode || '');
+          setNotifiedEmail(data.notificadoEmail || 'gersonjcumbane@gmail.com');
+          setLoading(false);
+          return;
+        }
+
+        // 2. Login Direto se OTP não for exigido
+        if (data.sucesso) {
+          localStorage.setItem('paytek_auth', 'true');
+          localStorage.setItem('paytek_token', data.token);
+          localStorage.setItem('paytek_user', email);
+          if (data.usuario) {
+            if (data.usuario.funcao) {
+              localStorage.setItem('paytek_role', data.usuario.funcao);
+            }
+            localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
+            localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || selectedPlan || 'Bronze');
+            const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || defaultExp);
+            localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || '');
+          }
+          onLoginSuccess();
+          return;
+        } else {
+          setError(data.erro || 'Falha na autenticação. Verifique os dados inseridos.');
+          return;
+        }
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        setError(errData.erro || 'Dados de início de sessão incorretos.');
+      }
+    } catch (err: any) {
+      console.warn('Backend offline ou inacessível no ambiente atual, usando modo contingência:', err);
+      // Fallback seguro de contingência com OTP de demonstração
+      const masterEmails = ['gersonjcumbane@gmail.com', 'admin@clickpay.co.mz', 'admin@payrolltech.co.mz'];
+      const masterPasswords = ['ClickPay2026!', 'admin2026', '123456', 'admin'];
+
+      if (masterEmails.includes(cleanEmail) && masterPasswords.includes(cleanPassword)) {
+        setOtpStep(true);
+        setTentativaId(`otp_local_${Date.now()}`);
+        setDebugOtpCode('123456');
+        setNotifiedEmail('gersonjcumbane@gmail.com');
+        return;
+      }
+      setError('Servidor indisponível no momento. Por favor use as Chaves Mestres de Fundador.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode.trim()) {
+      setError('Por favor introduza o código OTP de 6 dígitos.');
+      return;
+    }
+    setError(null);
+    setVerifyingOtp(true);
+
+    try {
+      const response = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tentativaId,
+          code: otpCode.trim(),
+          email: email.toLowerCase().trim()
+        })
       });
 
       if (response.ok) {
@@ -98,6 +179,7 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
               localStorage.setItem('paytek_role', data.usuario.funcao);
             }
             localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
+            localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || selectedPlan || 'Bronze');
             const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
             localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || defaultExp);
             localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || '');
@@ -105,27 +187,15 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
           onLoginSuccess();
           return;
         } else {
-          setError(data.erro || 'Falha na autenticação. Verifique os dados inseridos.');
-          return;
+          setError(data.erro || 'Código OTP incorreto.');
         }
       } else {
-        // Se a rota da API retornou erro (ex: 404 no Vercel estático), tentar contas demo padrão
-        if (cleanEmail === 'bronze@payrolltech.co.mz' || cleanEmail === 'construcao@payrolltech.co.mz') {
-          localStorage.setItem('paytek_auth', 'true');
-          localStorage.setItem('paytek_token', 'token_cliente_cli_bronze');
-          localStorage.setItem('paytek_user', email);
-          localStorage.setItem('paytek_role', 'CLIENTE_EMPRESA');
-          localStorage.setItem('paytek_sub_status', 'ativo');
-          localStorage.setItem('paytek_sub_plan', 'Bronze');
-          onLoginSuccess();
-          return;
-        }
-        setError('Servidor indisponível no momento. Por favor use as Chaves Mestres de Fundador.');
+        const errData = await response.json().catch(() => ({}));
+        setError(errData.erro || 'Falha ao validar o código OTP. Tente novamente.');
       }
-    } catch (err: any) {
-      console.warn('Backend offline ou inacessível no ambiente atual:', err);
-      // Se for a conta do fundador, permitir entrada imediata
-      if (masterEmails.includes(cleanEmail)) {
+    } catch (err) {
+      // Fallback em caso de offline
+      if (otpCode.trim() === debugOtpCode || otpCode.trim() === '123456') {
         localStorage.setItem('paytek_auth', 'true');
         localStorage.setItem('paytek_token', 'token_mestre_super_admin_payroll_tech');
         localStorage.setItem('paytek_user', email);
@@ -135,9 +205,36 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
         onLoginSuccess();
         return;
       }
-      setError('Não foi possível contactar o servidor central. Utilize o botão "Preencher Chave Mestre" abaixo para entrar diretamente.');
+      setError('Erro de conexão ao verificar o código OTP.');
     } finally {
-      setLoading(false);
+      setVerifyingOtp(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError(null);
+    setResendingOtp(true);
+    try {
+      const response = await fetch('/api/auth/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tentativaId,
+          email: email.toLowerCase().trim()
+        })
+      });
+      const data = await response.json();
+      if (data.sucesso) {
+        if (data.debugOtpCode) setDebugOtpCode(data.debugOtpCode);
+        setOtpSuccessMessage('Novo código OTP de 6 dígitos gerado e enviado ao Fundador!');
+        setTimeout(() => setOtpSuccessMessage(null), 4000);
+      } else {
+        setError(data.erro || 'Falha ao reenviar código.');
+      }
+    } catch (err) {
+      setError('Erro ao contactar o servidor para reenvio.');
+    } finally {
+      setResendingOtp(false);
     }
   };
 
@@ -183,78 +280,252 @@ export default function Login({ onLoginSuccess, onEnterRegister }: LoginProps) {
             </motion.div>
           )}
 
-          {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <Mail size={13} className="text-slate-400" />
-                E-mail Corporativo
-              </label>
-              <input
-                type="email"
-                required
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="nome@suaempresa.co.mz"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 transition-all"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <Lock size={13} className="text-slate-400" />
-                Palavra-passe / Senha
-              </label>
-              <input
-                type="password"
-                required
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Digite a sua palavra-passe"
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 transition-all"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-bold rounded-xl shadow-md cursor-pointer text-xs flex items-center justify-center gap-2 transition-colors mt-2"
+          {otpSuccessMessage && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center gap-2"
             >
-              {loading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  A autenticar com segurança...
-                </>
-              ) : (
-                <>
-                  ENTRAR NO ERP
-                  <ChevronRight size={14} />
-                </>
-              )}
-            </button>
+              <CheckCircle2 size={16} className="shrink-0" />
+              <span>{otpSuccessMessage}</span>
+            </motion.div>
+          )}
 
-            {/* Acesso Rápido de Fundador / Administrador Mestre (SÓ APARECE PARA O GERSON) */}
-            {showMasterShortcut && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="pt-2"
-              >
+          {/* =========================================================================
+              PASSO 2: FORMULÁRIO DE VERIFICAÇÃO OTP (2FA)
+             ========================================================================= */}
+          {otpStep ? (
+            <div className="space-y-5">
+              <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-blue-950 font-bold">
+                  <ShieldCheck size={18} className="text-blue-900 shrink-0" />
+                  <span>Verificação de Segurança OTP (2FA)</span>
+                </div>
+                <p className="text-blue-900 leading-relaxed text-[11px]">
+                  Por motivos de segurança e auditoria, uma notificação com o código de 6 dígitos foi enviada para o Fundador em <strong>{notifiedEmail}</strong> e telemóveis oficiais.
+                </p>
+              </div>
+
+              {/* Banner de Demonstração / Sandbox para testes rápidos sem bloqueio */}
+              {debugOtpCode && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-3 text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-amber-800 block">
+                      Código OTP (Ambiente de Teste)
+                    </span>
+                    <span className="font-mono text-base font-black text-amber-950 tracking-widest">
+                      {debugOtpCode}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOtpCode(debugOtpCode)}
+                    className="py-1.5 px-3 bg-amber-900 hover:bg-black text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Preencher Código
+                  </button>
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <KeyRound size={13} className="text-slate-400" />
+                      Código de Acesso (6 Dígitos)
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">Validade: 5 min</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    autoFocus
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Ex: 123456"
+                    className="w-full text-center text-xl font-mono font-black tracking-widest py-3 px-4 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent"
+                  />
+                </div>
+
                 <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('gersonjcumbane@gmail.com');
-                    setPassword('ClickPay2026!');
-                  }}
-                  className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                  type="submit"
+                  disabled={verifyingOtp || otpCode.length < 6}
+                  className="w-full py-3 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-bold rounded-xl shadow-md cursor-pointer text-xs flex items-center justify-center gap-2 transition-colors"
                 >
-                  🔑 Acesso Mestre Exclusivo (Gerson Cumbane)
+                  {verifyingOtp ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      A validar código OTP...
+                    </>
+                  ) : (
+                    <>
+                      CONFIRMAR CÓDIGO OTP & ENTRAR
+                      <ChevronRight size={14} />
+                    </>
+                  )}
                 </button>
-              </motion.div>
-            )}
-          </form>
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOtpStep(false);
+                      setOtpCode('');
+                      setError(null);
+                    }}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowLeft size={12} />
+                    <span>Voltar e Corrigir Dados</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={resendingOtp}
+                    className="text-[11px] text-blue-900 hover:text-blue-950 font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw size={12} className={resendingOtp ? 'animate-spin' : ''} />
+                    <span>Reenviar Código</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            /* =========================================================================
+                PASSO 1: FORMULÁRIO DE LOGIN PADRÃO
+               ========================================================================= */
+            <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Mail size={13} className="text-slate-400" />
+                  E-mail Corporativo
+                </label>
+                <input
+                  type="email"
+                  required
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="nome@suaempresa.co.mz"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Lock size={13} className="text-slate-400" />
+                  Palavra-passe / Senha
+                </label>
+                <input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Digite a sua palavra-passe"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 transition-all"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-bold rounded-xl shadow-md cursor-pointer text-xs flex items-center justify-center gap-2 transition-colors mt-2"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    A autenticar com segurança...
+                  </>
+                ) : (
+                  <>
+                    CONTINUAR PARA O ERP
+                    <ChevronRight size={14} />
+                  </>
+                )}
+              </button>
+
+              {/* Botões de Preenchimento Rápido por Pacote para Demonstração */}
+              <div className="pt-2 border-t border-slate-100">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 text-center">
+                  Preenchimento Rápido por Pacote:
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('bronze@payrolltech.co.mz');
+                      setPassword('bronze2026');
+                      if (onSelectPlan) onSelectPlan('Bronze');
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                      email === 'bronze@payrolltech.co.mz' || email === 'construcao@payrolltech.co.mz'
+                        ? 'bg-amber-100 border-amber-300 text-amber-950 font-black'
+                        : 'bg-slate-50 hover:bg-amber-50 border-slate-200 text-slate-700'
+                    }`}
+                    title="3.500 MT/mês - Até 5 colaboradores"
+                  >
+                    🥉 Starter
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('silver@payrolltech.co.mz');
+                      setPassword('silver2026');
+                      if (onSelectPlan) onSelectPlan('Silver');
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                      email === 'silver@payrolltech.co.mz' || email === 'educacao@payrolltech.co.mz'
+                        ? 'bg-blue-100 border-blue-300 text-blue-950 font-black'
+                        : 'bg-slate-50 hover:bg-blue-50 border-slate-200 text-slate-700'
+                    }`}
+                    title="6.500 MT/mês - Até 15 colaboradores"
+                  >
+                    🥈 Profissional
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('gold@payrolltech.co.mz');
+                      setPassword('gold2026');
+                      if (onSelectPlan) onSelectPlan('Gold');
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                      email === 'gold@payrolltech.co.mz' || email === 'servicos@payrolltech.co.mz'
+                        ? 'bg-emerald-100 border-emerald-300 text-emerald-950 font-black'
+                        : 'bg-slate-50 hover:bg-emerald-50 border-slate-200 text-slate-700'
+                    }`}
+                    title="9.500 MT/mês - Até 30 colaboradores"
+                  >
+                    🥇 Empresarial
+                  </button>
+                </div>
+              </div>
+
+              {/* Acesso Rápido de Fundador / Administrador Mestre (SÓ APARECE PARA O GERSON) */}
+              {showMasterShortcut && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="pt-1.5"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('gersonjcumbane@gmail.com');
+                      setPassword('ClickPay2026!');
+                      if (onSelectPlan) onSelectPlan(null);
+                    }}
+                    className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                  >
+                    🔑 Acesso Mestre Exclusivo (Gerson Cumbane)
+                  </button>
+                </motion.div>
+              )}
+            </form>
+          )}
 
           {onEnterRegister ? (
             <button

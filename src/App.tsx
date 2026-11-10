@@ -47,6 +47,7 @@ import { CRMVendas } from './components/CRMVendas';
 import OnboardingWizard from './components/OnboardingWizard';
 import { LeftModuleNav } from './components/LeftModuleNav';
 import { ClickPayBrain } from './components/ClickPayBrain';
+import AccessCredentialManagement from './components/AccessCredentialManagement';
 import { 
   updateConfiguracaoFiscal, 
   updateEmpresa, 
@@ -111,7 +112,7 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
 
 export default function App() {
   const { showSuccess, showError, showInfo } = useToast();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'employees' | 'simulator' | 'sissmo' | 'settings' | 'fintech' | 'contracts' | 'alerts' | 'clients' | 'financial' | 'brain'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'employees' | 'simulator' | 'sissmo' | 'settings' | 'fintech' | 'contracts' | 'alerts' | 'clients' | 'financial' | 'brain' | 'credentials'>('dashboard');
   const [financialSubTab, setFinancialSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>('conformidade');
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [showLogin, setShowLogin] = useState<boolean>(false);
@@ -313,14 +314,15 @@ export default function App() {
     const currentCount = employees.length;
     let limit = 5;
     if (plan === 'Silver') limit = 15;
-    if (plan === 'Gold' || plan === 'Platinum') limit = 20;
+    if (plan === 'Gold') limit = 30;
+    if (plan === 'Platinum') limit = 999;
 
     if (currentCount >= limit) {
       alert(`Limite de colaboradores atingido! O seu plano atual (${
-        plan === 'Bronze' ? 'Base (Bronze)' :
+        plan === 'Bronze' ? 'Starter (Bronze)' :
         plan === 'Silver' ? 'Profissional (Silver)' :
-        plan === 'Gold' ? 'Empresarial (Gold)' : 'Base'
-      }) permite no máximo ${limit} colaboradores. Por favor, faça upgrade para adicionar mais.`);
+        plan === 'Gold' ? 'Empresarial (Gold)' : 'Starter'
+      }) permite no máximo ${limit} colaboradores. Por favor, faça upgrade para expandir a sua equipa.`);
       return;
     }
 
@@ -669,13 +671,21 @@ export default function App() {
                     />
                   )}
                   {activeTab === 'crm' && (
-                    <CRMVendas
-                      companyData={company}
-                      onNavigateToFinancial={() => {
-                        setActiveTab('financial');
-                        setFinancialSubTab('vendas');
-                      }}
-                    />
+                    company.subscription_plan === 'Bronze' ? (
+                      <LockedFeatureOverlay 
+                        featureName="CRM & Pipeline de Vendas" 
+                        requiredPlan="Profissional (Silver)" 
+                        description="O CRM integrado permite gerir clientes potenciais, acompanhar oportunidades comerciais e emitir propostas oficiais em PDF padrão Primavera V10 com um clique."
+                      />
+                    ) : (
+                      <CRMVendas
+                        companyData={company}
+                        onNavigateToFinancial={() => {
+                          setActiveTab('financial');
+                          setFinancialSubTab('vendas');
+                        }}
+                      />
+                    )
                   )}
                   {activeTab === 'employees' && (
                     <EmployeeDirectory
@@ -716,15 +726,31 @@ export default function App() {
                       userRole={userRole}
                       availableCompanies={availableCompanies}
                       onSwitchCompany={handleSwitchCompany}
+                      onNavigateTab={(tab) => setActiveTab(tab as any)}
+                    />
+                  )}
+                  {activeTab === 'credentials' && (
+                    <AccessCredentialManagement
+                      company={company}
+                      onUpdateCompany={(updated) => setCompany(updated)}
+                      userRole={userRole}
                     />
                   )}
                   {activeTab === 'fintech' && (
-                    <FintechPayments
-                      employees={employees}
-                      company={company}
-                      selectedPeriod={selectedPeriod}
-                      onReload={loadData}
-                    />
+                    company.subscription_plan === 'Bronze' ? (
+                      <LockedFeatureOverlay 
+                        featureName="Vales & Fintech M-Pesa / e-Mola" 
+                        requiredPlan="Profissional (Silver)" 
+                        description="O adiantamento de salários e integração Fintech permite pagamentos automáticos de folha via carteiras móveis (M-Pesa e e-Mola) e reconciliação bancária instantânea."
+                      />
+                    ) : (
+                      <FintechPayments
+                        employees={employees}
+                        company={company}
+                        selectedPeriod={selectedPeriod}
+                        onReload={loadData}
+                      />
+                    )
                   )}
                   {activeTab === 'contracts' && (
                     company.subscription_plan === 'Bronze' ? (
@@ -761,20 +787,48 @@ export default function App() {
                     />
                   )}
                   {activeTab === 'financial' && (
-                    <FinancialManagement
-                      company={company}
-                      selectedPeriod={selectedPeriod}
-                      initialSubTab={financialSubTab}
-                    />
+                    company.subscription_plan === 'Bronze' && financialSubTab === 'compras' ? (
+                      <LockedFeatureOverlay 
+                        featureName="Compras & Gestão de Stocks" 
+                        requiredPlan="Profissional (Silver)" 
+                        description="O módulo de compras permite registar facturas de fornecedores, deduzir IVA de acordo com o Art. 19 do Código do IVA, gerir inventário e emitir ordens de compra."
+                      />
+                    ) : company.subscription_plan === 'Bronze' && ['caixa', 'iva', 'relatorios', 'plano_contas'].includes(financialSubTab) ? (
+                      <LockedFeatureOverlay 
+                        featureName="Tesouraria & Contabilidade PGC-NIRF" 
+                        requiredPlan="Empresarial (Gold)" 
+                        description="A contabilidade PGC-NIRF completa com Livro de Caixa, Balanço Patrimonial, Demonstração de Resultados (DRE), Balancete e Apuramento IVA Modelo 01 está disponível no plano Empresarial."
+                      />
+                    ) : (company.subscription_plan === 'Silver' && ['relatorios', 'plano_contas'].includes(financialSubTab)) ? (
+                      <LockedFeatureOverlay 
+                        featureName="Relatórios Contabilísticos Avançados & PGC" 
+                        requiredPlan="Empresarial (Gold)" 
+                        description="O Balanço Patrimonial oficial e a Demonstração de Resultados do Exercício (DRE) sob o PGC-NIRF exigem o plano Empresarial."
+                      />
+                    ) : (
+                      <FinancialManagement
+                        company={company}
+                        selectedPeriod={selectedPeriod}
+                        initialSubTab={financialSubTab}
+                      />
+                    )
                   )}
                   {activeTab === 'brain' && (
-                    <ClickPayBrain
-                      company={company}
-                      onNavigateToTab={(tab, subTab) => {
-                        setActiveTab(tab as any);
-                        if (subTab) setFinancialSubTab(subTab as any);
-                      }}
-                    />
+                    (company.subscription_plan === 'Bronze' || company.subscription_plan === 'Silver') ? (
+                      <LockedFeatureOverlay 
+                        featureName="BRAIN IA · 4 Agentes Financeiros Autónomos" 
+                        requiredPlan="Empresarial (Gold)" 
+                        description="O BRAIN IA conta com 4 agentes de inteligência artificial autónomos treinados na legislação moçambicana (Consultor Tributário AT, Auditor Contabilístico PGC, Otimizador de Custos e Gestor de Folha)."
+                      />
+                    ) : (
+                      <ClickPayBrain
+                        company={company}
+                        onNavigateToTab={(tab, subTab) => {
+                          setActiveTab(tab as any);
+                          if (subTab) setFinancialSubTab(subTab as any);
+                        }}
+                      />
+                    )
                   )}
                 </motion.div>
               </AnimatePresence>

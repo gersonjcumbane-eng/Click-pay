@@ -166,7 +166,7 @@ export default function SISSMOExport({
   const dataLimiteIrps = `20 de ${mesSeguinte} de ${anoSeguinte}`;
 
   // Deterministic live SISSMO Payment Reference code
-  const hashNuit = (company.nuit || '400999999').replace(/[^\d]/g, '');
+  const hashNuit = (company.nuit || '402302399').replace(/[^\d]/g, '');
   const hashPeriodo = selectedPeriod.replace(/[^\d]/g, '') || '2026';
   const referenciaSISSMO = `90244 ${hashNuit.substring(0,4)} ${hashPeriodo.substring(0,4)} 8892`;
   const referenciaIRPS = `80133 ${hashNuit.substring(0,4)} ${hashPeriodo.substring(0,4)} 4511`;
@@ -539,11 +539,11 @@ export default function SISSMOExport({
                   </div>
                   <div>
                     <span className="text-slate-400 font-semibold block text-[10px] uppercase">NUEL (N.º INSS Empresa)</span>
-                    <span className="font-mono font-bold text-slate-800">{company.nuel || '10011122'}</span>
+                    <span className="font-mono font-bold text-slate-800">{company.nuel || '105086659'}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 font-semibold block text-[10px] uppercase">NUIT da Empresa</span>
-                    <span className="font-mono font-bold text-slate-800">{company.nuit || '400999999'}</span>
+                    <span className="font-mono font-bold text-slate-800">{company.nuit || '402302399'}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 font-semibold block text-[10px] uppercase">Mês de Referência</span>
@@ -696,7 +696,7 @@ export default function SISSMOExport({
                   </div>
                   <div>
                     <span className="text-amber-800/70 font-semibold block text-[10px] uppercase">NUIT do Sujeito Passivo</span>
-                    <span className="font-mono font-bold text-slate-800">{company.nuit || '400999999'}</span>
+                    <span className="font-mono font-bold text-slate-800">{company.nuit || '402302399'}</span>
                   </div>
                   <div>
                     <span className="text-amber-800/70 font-semibold block text-[10px] uppercase">Mês/Ano de Referência</span>

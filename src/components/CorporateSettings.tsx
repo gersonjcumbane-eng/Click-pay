@@ -27,7 +27,8 @@ import {
   Database,
   Trash2,
   AlertTriangle,
-  Lock
+  Lock,
+  KeyRound
 } from 'lucide-react';
 import { CompanyData, ConfigFiscal, EscalaoFiscalMoz } from '../types';
 import { matrizFiscaisMoçambique } from '../db_tax';
@@ -44,6 +45,7 @@ interface CorporateSettingsProps {
   userRole?: string | null;
   availableCompanies?: any[];
   onSwitchCompany?: (companyId: string) => Promise<void>;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export default function CorporateSettings({
@@ -54,7 +56,8 @@ export default function CorporateSettings({
   onResetCosts,
   userRole: propUserRole,
   availableCompanies,
-  onSwitchCompany
+  onSwitchCompany,
+  onNavigateTab
 }: CorporateSettingsProps) {
   const { showSuccess, showError, showInfo } = useToast();
   const localUserRole = localStorage.getItem('paytek_role');
@@ -533,6 +536,32 @@ export default function CorporateSettings({
 
       {/* ENVIRONMENT MASKING: Proteção de Chaves Mestras e Tokens de Pagamento */}
       <EnvironmentMasking userRole={userRole} containerId="settings_panel" />
+
+      {/* BANNER DE ACESSO, OTP & CREDENCIAIS */}
+      <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-blue-900 text-white rounded-xl shadow-xs shrink-0">
+            <KeyRound size={20} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-slate-950">
+              Gestão de Acesso, Níveis de Permissão, Tokens de API & OTP (2FA)
+            </h4>
+            <p className="text-xs text-slate-500">
+              Identificadores Oficiais ClickPayroll (NUIT: 402302399 | NUEL: 105086659), geração automática de credenciais e alertas ao Fundador.
+            </p>
+          </div>
+        </div>
+        {onNavigateTab && (
+          <button
+            type="button"
+            onClick={() => onNavigateTab('credentials')}
+            className="py-2 px-4 bg-blue-900 hover:bg-blue-950 active:bg-blue-900 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shrink-0 shadow-xs"
+          >
+            Abrir Gestão de Credenciais & OTP →
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Form Column: Perfil da Empresa (Exactly formatted as specified) */}

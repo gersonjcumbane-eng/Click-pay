@@ -938,7 +938,7 @@ export let configuracaoFiscal: ConfigFiscal = {
 
 export let empresaAtual: CompanyData = {
   nome: "Payroll Tech Mz Lda",
-  nuit: "400999999",
+  nuit: "402302399",
   endereco: "Av. 24 de Julho, nº 1500, 5º Andar, Maputo",
   pais: "Moçambique",
   provincia: "Maputo Cidade",
@@ -947,7 +947,7 @@ export let empresaAtual: CompanyData = {
   sector_negocio: "Prestação de Serviços & Tecnologia",
   tamanho_empresa: "Pequena Empresa (6-20 Colaboradores)",
   regime_fiscal_pme: "Regime Geral IVA (16%)",
-  nuel: "10011122",
+  nuel: "105086659",
   email: "admin@payrolltech.co.mz",
   telefone: "+258 86 139 0061",
   logo: "logo-payroll.png",
@@ -1496,12 +1496,12 @@ export function seedDemoData() {
   
   // Restaura os dados da empresa fundadora principal como empresa ativa por defeito
   empresaAtual.nome = "Payroll Tech Mz Lda";
-  empresaAtual.nuit = "400999999";
+  empresaAtual.nuit = "402302399";
   empresaAtual.endereco = "Av. 24 de Julho, nº 1500, 5º Andar, Maputo";
   empresaAtual.provincia = "Maputo Cidade";
   empresaAtual.distrito = "KaMpfumo";
   empresaAtual.regime_iva = "Geral (16%)";
-  empresaAtual.nuel = "10011122";
+  empresaAtual.nuel = "105086659";
   empresaAtual.email = "admin@payrolltech.co.mz";
   empresaAtual.telefone = "+258 86 139 0061";
   empresaAtual.logo = "logo-payroll.png";
@@ -1613,12 +1613,12 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
   {
     id: "cli_founders",
     nome: "Payroll Tech Mz Lda",
-    nuit: "400999999",
+    nuit: "402302399",
     endereco: "Av. 24 de Julho, nº 1500, 5º Andar, Maputo",
     provincia: "Maputo Cidade",
     distrito: "KaMpfumo",
     regime_iva: "Geral (16%)",
-    nuel: "10011122",
+    nuel: "105086659",
     email: "admin@payrolltech.co.mz",
     telefone: "+258 86 139 0061",
     logo: "logo-payroll.png",
@@ -1707,8 +1707,9 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     email: "construcao@payrolltech.co.mz",
     telefone: "+258 84 111 2233",
     logo: "https://images.unsplash.com/photo-1541888946425-d0fbb186a5b3?w=128&auto=format&fit=crop&q=60",
-    fee_base: 3000.00,
+    fee_base: 3500.00,
     fee_por_slip: 150.00,
+    password: "bronze2026",
     subscription_status: "ativo",
     subscription_plan: "Bronze",
     next_billing_date: "2026-08-30",
@@ -1792,8 +1793,9 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     email: "educacao@payrolltech.co.mz",
     telefone: "+258 82 333 4455",
     logo: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=128&auto=format&fit=crop&q=60",
-    fee_base: 5000.00,
+    fee_base: 6500.00,
     fee_por_slip: 120.00,
+    password: "silver2026",
     subscription_status: "ativo",
     subscription_plan: "Silver",
     next_billing_date: "2026-08-30",
@@ -1877,8 +1879,9 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     email: "servicos@payrolltech.co.mz",
     telefone: "+258 85 555 6677",
     logo: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=128&auto=format&fit=crop&q=60",
-    fee_base: 6500.00,
+    fee_base: 9500.00,
     fee_por_slip: 250.00,
+    password: "gold2026",
     subscription_status: "ativo",
     subscription_plan: "Gold",
     next_billing_date: "2026-08-30",

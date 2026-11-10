@@ -1597,7 +1597,7 @@ export function criarGuiaIrpsPDF(
       // Valores
       doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000');
       doc.text((dadosEmpresa.nome || 'Payroll Tech Mz Lda').toUpperCase(), startX + 4, s1Y + 16, { width: 340 });
-      doc.text(dadosEmpresa.nuit || '400999999', 389, s1Y + 16);
+      doc.text(dadosEmpresa.nuit || '402302399', 389, s1Y + 16);
 
       // --- SECÇÃO 3: Dísticos Comerciais ---
       const s3Y = 170;
@@ -1879,7 +1879,7 @@ export function criarRelatorioAgrupadoERPPDF(
       const nomeEmpresa = (dadosEmpresa.nome || 'Payroll Tech Mz Lda').toUpperCase();
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a').text(nomeEmpresa, textX, 35);
       doc.fontSize(8).font('Helvetica').fillColor('#475569');
-      doc.text(`NUIT: ${dadosEmpresa.nuit || '400999999'}  |  Moçambique  |  Período: ${periodo || 'Geral'}`, textX, 48);
+      doc.text(`NUIT: ${dadosEmpresa.nuit || '402302399'}  |  Moçambique  |  Período: ${periodo || 'Geral'}`, textX, 48);
 
       doc.moveTo(40, 65).lineTo(555, 65).stroke('#cbd5e1');
 

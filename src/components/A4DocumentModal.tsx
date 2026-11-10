@@ -178,7 +178,7 @@ export default function A4DocumentModal({
               <div className="text-xs text-slate-600 space-y-0.5 leading-relaxed font-medium">
                 <p>{empresa.endereco || 'Av. Julius Nyerere, Edifício Jat V'}, {empresa.cidade || 'Maputo Cidade'}, Moçambique</p>
                 <p>
-                  <b>NUIT:</b> {empresa.nuit || '400990887'} {empresa.nuel ? `| NUEL: ${empresa.nuel}` : ''}
+                  <b>NUIT:</b> {empresa.nuit || '402302399'} {empresa.nuel ? `| NUEL: ${empresa.nuel}` : '| NUEL: 105086659'}
                 </p>
                 <p>
                   <b>Tel:</b> {empresa.telefone || '+258 861390061'} | <b>E-mail:</b> {empresa.email || 'gersonjcumbane@gmail.com'}
