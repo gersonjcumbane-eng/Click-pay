@@ -62,7 +62,7 @@ import {
   zerarCalculosEResetFinanceiro,
   getCurrentPeriod
 } from './db_tax';
-import { useToast } from './context/ToastContext';
+import { useToast, useConfirm } from './context/ToastContext';
 
 interface LockedFeatureOverlayProps {
   featureName: string;
@@ -112,6 +112,7 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
 
 export default function App() {
   const { showSuccess, showError, showInfo } = useToast();
+  const confirmAction = useConfirm();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'employees' | 'simulator' | 'sissmo' | 'settings' | 'fintech' | 'contracts' | 'alerts' | 'clients' | 'financial' | 'brain' | 'credentials'>('dashboard');
   const [financialSubTab, setFinancialSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>('conformidade');
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
@@ -318,7 +319,7 @@ export default function App() {
     if (plan === 'Platinum') limit = 999;
 
     if (currentCount >= limit) {
-      alert(`Limite de colaboradores atingido! O seu plano atual (${
+      showError(`Limite de colaboradores atingido! O seu plano atual (${
         plan === 'Bronze' ? 'Starter (Bronze)' :
         plan === 'Silver' ? 'Profissional (Silver)' :
         plan === 'Gold' ? 'Empresarial (Gold)' : 'Starter'
@@ -335,7 +336,7 @@ export default function App() {
       if (!res.ok) throw new Error('Não foi possível adicionar o colaborador.');
       await loadData();
     } catch (err: any) {
-      alert(err.message);
+      showError(err.message || 'Não foi possível adicionar o colaborador.');
     }
   };
 
@@ -349,7 +350,7 @@ export default function App() {
       if (!res.ok) throw new Error('Não foi possível atualizar o colaborador.');
       await loadData();
     } catch (err: any) {
-      alert(err.message);
+      showError(err.message || 'Não foi possível atualizar o colaborador.');
     }
   };
 
@@ -361,7 +362,7 @@ export default function App() {
       if (!res.ok) throw new Error('Não foi possível remover o colaborador.');
       await loadData();
     } catch (err: any) {
-      alert(err.message);
+      showError(err.message || 'Não foi possível remover o colaborador.');
     }
   };
 
@@ -379,12 +380,18 @@ export default function App() {
       if (!res.ok) throw new Error('Erro ao salvar as configurações.');
       await loadData();
     } catch (err: any) {
-      alert(err.message);
+      showError(err.message || 'Erro ao salvar as configurações.');
     }
   };
 
   const handleResetDb = async () => {
-    if (confirm("Deseja apagar todos os colaboradores, logs de pagamento, vales e contratos para iniciar a simulação do zero? O ERP ficará totalmente limpo e pronto para novos registos.")) {
+    const confirmed = await confirmAction({
+      title: 'Reiniciar Base de Dados',
+      message: 'Deseja apagar todos os colaboradores, logs de pagamento, vales e contratos para iniciar a simulação do zero? O ERP ficará totalmente limpo e pronto para novos registos.',
+      confirmText: 'Apagar Tudo',
+      variant: 'danger'
+    });
+    if (confirmed) {
       try {
         await fetch('/api/mvp/reset-total', { method: 'POST' }).catch(() => null);
       } catch (err) {
@@ -397,7 +404,13 @@ export default function App() {
   };
 
   const handleResetCosts = async () => {
-    if (confirm("Deseja zerar e limpar todos os cálculos fiscais, compras, vendas e histórico financeiro? A estrutura cadastral das empresas será preservada.")) {
+    const confirmed = await confirmAction({
+      title: 'Zerar Cálculos Fiscais',
+      message: 'Deseja zerar e limpar todos os cálculos fiscais, compras, vendas e histórico financeiro? A estrutura cadastral das empresas será preservada.',
+      confirmText: 'Zerar Cálculos',
+      variant: 'danger'
+    });
+    if (confirmed) {
       try {
         await fetch('/api/mvp/reset-costs', { method: 'POST' }).catch(() => null);
       } catch (err) {
@@ -410,7 +423,13 @@ export default function App() {
   };
 
   const handleSeedDemo = async () => {
-    if (confirm("Deseja carregar os dados de demonstração (colaboradores pré-registados, contratos laborais e histórico de teste) para apresentar as funcionalidades do sistema instantaneamente?")) {
+    const confirmed = await confirmAction({
+      title: 'Carregar Dados de Demonstração',
+      message: 'Deseja carregar os dados de demonstração (colaboradores pré-registados, contratos laborais e histórico de teste) para apresentar as funcionalidades do sistema instantaneamente?',
+      confirmText: 'Carregar Demo',
+      variant: 'info'
+    });
+    if (confirmed) {
       try {
         const res = await fetch('/api/mvp/seed-demo', { method: 'POST' });
         const data = await res.json();

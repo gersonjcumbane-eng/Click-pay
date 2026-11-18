@@ -33,7 +33,7 @@ import {
   CheckSquare,
   Info
 } from 'lucide-react';
-import { useToast } from '../context/ToastContext';
+import { useToast, useConfirm } from '../context/ToastContext';
 import { Employee, CompanyData } from '../types';
 import { calcularFolhaSalario } from '../db_tax';
 
@@ -166,6 +166,7 @@ export default function EmployeeDirectory({
   onSeed
 }: EmployeeDirectoryProps) {
   const { showSuccess, showError, showInfo } = useToast();
+  const confirmAction = useConfirm();
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
@@ -539,11 +540,11 @@ export default function EmployeeDirectory({
         setCalcResult(data);
         onReload(); // reload dashboard stats & history logs
       } else {
-        alert(data.error || 'Erro ao liquidar salário.');
+        showError(data.error || 'Erro ao liquidar salário.');
       }
     } catch (err) {
       console.error(err);
-      alert('Erro ao processar transferência com o Gateway de Moçambique.');
+      showError('Erro ao processar transferência com o Gateway de Moçambique.');
     } finally {
       setLoadingPay(false);
     }
@@ -604,7 +605,7 @@ export default function EmployeeDirectory({
   const handleSaveJustificationModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!justificationEmpId) {
-      alert("Por favor selecione um colaborador.");
+      showError("Por favor selecione um colaborador.");
       return;
     }
 
@@ -648,7 +649,7 @@ export default function EmployeeDirectory({
       onReload();
     } catch (err) {
       console.error("Erro ao guardar justificação:", err);
-      alert("Erro ao guardar justificação de falta.");
+      showError("Erro ao guardar justificação de falta.");
     } finally {
       setIsSavingJustification(false);
     }
@@ -1647,8 +1648,14 @@ export default function EmployeeDirectory({
                           <Edit3 size={15} />
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm(`Tem a certeza que deseja remover ${emp.nome}?`)) {
+                          onClick={async () => {
+                            const confirmed = await confirmAction({
+                              title: 'Remover Colaborador',
+                              message: `Tem a certeza que deseja remover ${emp.nome}?`,
+                              confirmText: 'Remover',
+                              variant: 'danger'
+                            });
+                            if (confirmed) {
                               onDelete(emp.id);
                             }
                           }}

@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { calcularFolhaSalario } from '../db_tax';
 import { db, doc, setDoc } from '../lib/firebase';
+import { useToast } from '../context/ToastContext';
 
 interface LandingPageProps {
   onEnterLogin: () => void;
@@ -36,6 +37,7 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlanDemo }: LandingPageProps) {
+  const { showSuccess } = useToast();
   // Simulador inicial começa com 0 para simulação limpa
   const [salarioBase, setSalarioBase] = useState<number>(0);
   const [dependentes, setDependentes] = useState<number>(0);
@@ -66,7 +68,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
     setFounderClicks(next);
     if (next >= 3) {
       setIsFounder(true);
-      alert('Modo Fundador Ativado: Controles de reset e gestão de cálculos liberados!');
+      showSuccess('Modo Fundador Ativado: Controles de reset e gestão de cálculos liberados!');
     }
   };
 
@@ -125,9 +127,10 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
             title="ClickPay"
           >
             <img 
-              src="/logo-payroll.png" 
+              src="/clickpay-logo.png" 
               alt="ClickPay" 
-              className="h-8 w-auto object-contain pointer-events-none" 
+              className="h-9 w-auto object-contain pointer-events-none" 
+              referrerPolicy="no-referrer"
               onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
             />
             <span className="text-xl font-black text-slate-950 tracking-tight">ClickPay</span>

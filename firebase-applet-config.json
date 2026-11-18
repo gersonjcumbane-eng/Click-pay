@@ -7,5 +7,6 @@
   "storageBucket": "future-charter-96ppv.firebasestorage.app",
   "messagingSenderId": "492655395269",
   "measurementId": "",
-  "oAuthClientId": "492655395269-uei4qr097d7fvbier7mqj2df9ini2v4r.apps.googleusercontent.com"
+  "oAuthClientId": "492655395269-uei4qr097d7fvbier7mqj2df9ini2v4r.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }

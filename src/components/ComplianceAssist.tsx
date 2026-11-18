@@ -25,6 +25,7 @@ import {
   Printer
 } from 'lucide-react';
 import { CompanyData, CompraItem, VendaItem, LivroCaixaItem } from '../types';
+import { useToast } from '../context/ToastContext';
 
 interface ComplianceAssistProps {
   company: CompanyData;
@@ -41,6 +42,7 @@ export const ComplianceAssist: React.FC<ComplianceAssistProps> = ({
   vendas,
   caixa
 }) => {
+  const { showError } = useToast();
   const [activeAccordion, setActiveAccordion] = useState<string | null>('checklist');
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [showWizardModal, setShowWizardModal] = useState<boolean>(false);
@@ -177,11 +179,11 @@ export const ComplianceAssist: React.FC<ComplianceAssistProps> = ({
       if (data.sucesso) {
         setAiReportData(data);
       } else {
-        alert(data.error || 'Erro ao gerar relatório com IA.');
+        showError(data.error || 'Erro ao gerar relatório com IA.');
       }
     } catch (err) {
       console.error(err);
-      alert('Falha de conexão com o serviço do Gemini IA.');
+      showError('Falha de conexão com o serviço do Gemini IA.');
     } finally {
       setLoadingAiReport(false);
     }

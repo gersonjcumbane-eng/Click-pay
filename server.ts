@@ -146,6 +146,7 @@ async function startServer() {
       aiClient = new GoogleGenAI({
         apiKey: key,
         httpOptions: {
+          timeout: 5500,
           headers: {
             'User-Agent': 'aistudio-build',
           }
@@ -153,6 +154,15 @@ async function startServer() {
       });
     }
     return aiClient;
+  }
+
+  function withAiTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini API timeout')), ms)
+      )
+    ]);
   }
 
   // Create absolute temp folder for holding PDFs
@@ -804,7 +814,7 @@ async function startServer() {
           nuel: "10045612",
           email: "construcao@payrolltech.co.mz",
           telefone: "+258 84 111 2233",
-          logo: "https://images.unsplash.com/photo-1541888946425-d0fbb186a5b3?w=128&auto=format&fit=crop&q=60",
+          logo: "/clickpay-logo.png",
           fee_base: 3500.00,
           fee_por_slip: 150.00,
           password: "construcao2026",
@@ -824,7 +834,7 @@ async function startServer() {
           nuel: "10077882",
           email: "educacao@payrolltech.co.mz",
           telefone: "+258 82 333 4455",
-          logo: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=128&auto=format&fit=crop&q=60",
+          logo: "/clickpay-logo.png",
           fee_base: 6500.00,
           fee_por_slip: 120.00,
           password: "educacao2026",
@@ -844,7 +854,7 @@ async function startServer() {
           nuel: "10099123",
           email: "servicos@payrolltech.co.mz",
           telefone: "+258 85 555 6677",
-          logo: "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?w=128&auto=format&fit=crop&q=60",
+          logo: "/clickpay-logo.png",
           fee_base: 9500.00,
           fee_por_slip: 250.00,
           password: "servicos2026",
@@ -1506,7 +1516,7 @@ async function startServer() {
         nuel: nuel || '100123456',
         email: email,
         telefone: contacto || '+258 84 000 0000',
-        logo: logo || 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=128&auto=format&fit=crop&q=60',
+        logo: logo || '/clickpay-logo.png',
         password: password,
         subscription_status: 'ativo',
         subscription_plan: plano || 'Growth',
@@ -1647,7 +1657,7 @@ async function startServer() {
         nuel: nuel || '',
         email: email || '',
         telefone: telefone || '',
-        logo: logo || 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=128&auto=format&fit=crop&q=60',
+        logo: logo || '/clickpay-logo.png',
         fee_base: Number(fee_base) || 3000.00,
         fee_por_slip: Number(fee_por_slip) || 150.00,
         password: password || 'senha123',
@@ -1765,9 +1775,9 @@ async function startServer() {
 
       const ai = getGeminiClient();
 
-      // Send to Gemini 3.5 Flash
+      // Send to Gemini Flash
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents: [
           {
             inlineData: {
@@ -2466,29 +2476,6 @@ async function startServer() {
   app.get('/api/auditoria/historico-remunera\u00E7oes', getAuditoriaRemuneracoes);
   app.get('/api/auditoria/historico-remuneracoes', getAuditoriaRemuneracoes);
 
-  // API: EMITIR AVISO PRÉVIO DE NÃO RENOVAÇÃO / CADUCIDADE DE CONTRATO (Lei nº 13/2023)
-  app.post('/api/contratos/emitir-aviso-previo', async (req: Request, res: Response) => {
-    try {
-      const { dadosEmpresa, dadosFuncionario, dadosContrato } = req.body;
-      
-      const inssClean = (dadosFuncionario.inss_numero || 'temp').replace(/\s+/g, '_');
-      const nomeFicheiro = `aviso_previo_${inssClean}.pdf`;
-      const caminhoDestino = path.join(tmpDir, nomeFicheiro);
-
-      // Chamar o novo gerador de PDF
-      await criarAvisoPrevioPDF(dadosEmpresa, dadosFuncionario, dadosContrato, caminhoDestino);
-
-      // Retornar o link do arquivo gerado
-      res.json({
-        sucesso: true,
-        linkFicheiro: `/download/${nomeFicheiro}`
-      });
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ erro: 'Erro ao gerar o PDF de Aviso Prévio.' });
-    }
-  });
-
   // API: COPILOTO REGULATÓRIO IA (MODO DEEP THINKING / HIGH COMPLEXITY)
   app.post('/api/copiloto/consultar', async (req: Request, res: Response) => {
     try {
@@ -2594,17 +2581,17 @@ Gere um relatório textual formal estruturado nas seguintes secções claras em 
 Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destacando números exatos em MT (Meticais) e apontando a conformidade legal do sistema.`;
 
       let reportText = '';
-      let modelUsed = 'gemini-3.6-flash';
+      let modelUsed = 'gemini-4-hydrogen';
 
       try {
         const client = getGeminiClient();
-        const aiResponse = await client.models.generateContent({
+        const aiResponse = await withAiTimeout<any>(client.models.generateContent({
           model: modelUsed,
           contents: promptSystem,
           config: {
             temperature: 0.3,
           }
-        });
+        }));
         reportText = aiResponse.text || '';
       } catch (geminiErr: any) {
         console.warn('Fallback Gemini offline ou sem chave:', geminiErr?.message);
@@ -3192,122 +3179,8 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
     }
   });
 
-  // 6.6 Relatório de Auditoria de Conformidade com Inteligência Artificial (Gemini)
-  app.post('/api/compliance/relatorio-ia', async (req: Request, res: Response) => {
-    try {
-      const { periodo, empresa, apuramentoIVA, estatisticas, colaboradores, compras, vendas } = req.body;
-      const empresaNome = empresa?.nome || empresaAtual.nome || 'Payroll Tech Mz Lda';
-      const nuitEmpresa = empresa?.nuit || empresaAtual.nuit || '402302399';
-
-      const prompt = `Actue como um Perito Contabilista Sénior e Auditor Fiscal certificado pela Autoridade Tributária de Moçambique (AT) e pela Ordem dos Contabilistas e Auditores de Moçambique (OCAM), com profundo domínio do PGC-NIRF, Código do IRPS (Lei 19/2013 e Lei 11/2025), Código do IVA (Decreto 28/2023 - 16%), Regime de Segurança Social do INSS (Decreto 51/2017) e Lei do Trabalho (Lei 13/2023).
-
-Analise os dados fiscais e contabilísticos do período "${periodo || 'Julho 2026'}" para a empresa "${empresaNome}" (NUIT: ${nuitEmpresa}):
-- Total Vendas: ${estatisticas?.vendas || 0} MT
-- Total Compras: ${estatisticas?.compras || 0} MT
-- Saldo IVA: ${apuramentoIVA?.saldoIVA || 0} MT (${apuramentoIVA?.saldoIVA >= 0 ? 'IVA a Pagar à AT' : 'Crédito de IVA'})
-- Total Colaboradores: ${colaboradores?.length || 0}
-- Total Compras Registadas: ${compras?.length || 0}
-- Total Vendas Registadas: ${vendas?.length || 0}
-
-Forneça um Parecer Técnico e Relatório de Conformidade Estruturado em formato Markdown profissional contendo:
-1. **Resumo Executivo do Período**: Avaliação geral da saúde fiscal e conformidade da empresa.
-2. **Auditoria Fiscal & Obrigações à Autoridade Tributária**:
-   - IVA (Declaração Modelo A/01, prazo dia último do mês, taxa 16%, dedutibilidade de faturas).
-   - IRPS Retenção na Fonte (Modelo 19, prazo dia 20 do mês seguinte, escalões actualizados).
-   - Limite de Pagamentos em Numerário (Lei 14/2023 - Máx 250.000 MT por transacção).
-3. **Auditoria Previdenciária (INSS & SISSMO)**:
-   - Folha de remunerações e prazos (dia 10 do mês subsequente).
-   - Taxas aplicáveis: 3% beneficiário + 4% entidade empregadora.
-4. **Auditoria Contabilística (PGC-NIRF)**:
-   - Classificação e consistência das contas (Classe 2, 3, 4, 6, 7).
-   - Balancete e Demonstrações Financeiras.
-5. **Recomendações e Plano de Ação Imediato**:
-   - Pontos de melhoria e boas práticas de governação fiscal para mitigar riscos de autos de notícia ou coimas.
-
-Escreva com rigor técnico, formatação limpa e tom profissional moçambicano.`;
-
-      let relatorioMarkdown = "";
-
-      if (process.env.GEMINI_API_KEY) {
-        try {
-          const ai = getGeminiClient();
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: prompt,
-          });
-          relatorioMarkdown = response.text || "";
-        } catch (geminiError: any) {
-          console.warn('Falha na chamada ao Gemini API, gerando parecer analítico regulamentar...', geminiError.message);
-        }
-      }
-
-      if (!relatorioMarkdown) {
-        const saldoIva = apuramentoIVA?.saldoIVA || 0;
-        const totalVendas = estatisticas?.vendas || 0;
-        const totalCompras = estatisticas?.compras || 0;
-        const totalCols = colaboradores?.length || 0;
-
-        relatorioMarkdown = `### 📋 Parecer Técnico de Auditoria & Conformidade Fiscal Moçambique
-**Empresa:** ${empresaNome} | **NUIT:** ${nuitEmpresa} | **Período de Referência:** ${periodo || 'Julho 2026'}
-**Enquadramento:** PGC-NIRF, Código do IVA (Decreto 28/2023), Lei do IRPS (Lei 11/2025), SISSMO/INSS (Decreto 51/2017) e Lei do Trabalho (Lei 13/2023).
-
----
-
-#### 1. Resumo Executivo da Posição Fiscal
-No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou um volume bruto de vendas de **${totalVendas.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT** e registou aquisições/compras no montante de **${totalCompras.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT**, com um efectivo de **${totalCols} colaboradores** activos no processamento salarial.
-
-- **Status Geral de Conformidade:** 🟢 **100% CONFORME** (Sem inconformidades materiais detectadas nos lançamentos auditados).
-- **Apuramento do IVA:** ${saldoIva >= 0 ? `Apurado imposto a entregar ao Estado de **${saldoIva.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT** (IVA Liquidado superior ao IVA Dedutível).` : `Apurado crédito fiscal de IVA a transportar de **${Math.abs(saldoIva).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT**.`}
-
----
-
-#### 2. Auditoria às Obrigações Fiscais (Autoridade Tributária - DGI)
-1. **Imposto sobre o Valor Acrescentado (IVA - Taxa 16%):**
-   - Todas as transacções encontram-se parametrizadas sob a taxa normal de **16%** em vigor (conforme Decreto n.º 28/2023).
-   - O prazo para entrega da **Declaração Periódica Modelo A/01** e liquidação da respectiva guia termina no **último dia útil do mês subsequente**.
-   - As facturas de fornecedores cumprem com os requisitos do Artigo 28.º do Código do IVA (NUIT, numeração sequencial e discriminação de taxas).
-
-2. **Imposto sobre o Rendimento de Pessoas Singulares (IRPS - Retenção na Fonte):**
-   - Retenções na fonte sobre trabalho dependente (2.ª Categoria) processadas de acordo com as tabelas progressivas da Lei n.º 11/2025.
-   - Entrega da **Guia de Pagamento Modelo 19** obrigatória até ao **dia 20 do mês seguinte**.
-
-3. **Prevenção ao Branqueamento de Capitais & Limite em Numerário:**
-   - Cumprimento rigoroso do limite legal de pagamentos em caixa (Lei n.º 14/2023): Todas as transacções acima de **250.000,00 MT** foram devidamente canalizadas por transferência bancária/meio electrónico auditável.
-
----
-
-#### 3. Auditoria Previdenciária (INSS & Segurança Social)
-- **Folha de Contribuições SISSMO:** Base de incidência salarial validada sem exclusões indevidas.
-- **Repartição das Taxas:** 3% retido na fonte aos trabalhadores e 4% de encargo patronal (total de 7% de taxa contributiva).
-- **Prazo Regulamentar:** Pagamento e submissão da folha de remunerações impreterivelmente até ao **dia 10 do mês seguinte**.
-
----
-
-#### 4. Auditoria Contabilística (PGC-NIRF)
-- As contas das classes **1 (Meios Financeiros)**, **2 (Inventários e Activos Biológicos)**, **3 (Investimentos de Capital)**, **4 (Contas a Receber e a Pagar)**, **6 (Gastos)** e **7 (Rendimentos)** foram mapeadas e validadas conforme o Plano Geral de Contabilidade de Moçambique.
-- O princípio da especialização dos exercícios e o método das partidas dobradas encontram-se plenamente balanceados no Balancete de Verificação.
-
----
-
-#### 5. Recomendações e Conclusão
-1. Manter a reconciliação bancária mensal com suporte dos extractos e talões de depósito/transferência.
-2. Arquivar os comprovativos de entrega electrónica (SISSMO e Portal da AT) durante o período legal de **10 anos**.
-3. **Parecer Final:** A contabilidade e os apuramentos fiscais da empresa encontram-se em **plena conformidade** com o quadro jurídico-tributário da República de Moçambique.`;
-      }
-
-      return res.json({
-        sucesso: true,
-        relatorio: relatorioMarkdown,
-        dataEmissao: new Date().toISOString()
-      });
-    } catch (err: any) {
-      console.error('Erro ao gerar relatório de conformidade IA:', err);
-      res.status(500).json({ error: 'Erro ao gerar relatório de conformidade por IA.' });
-    }
-  });
-
   // =========================================================================
-  // CLICKPAY BRAIN - OS 4 ASSISTENTES FINANCEIROS COM IA (GEMINI 3.8 FLASH)
+  // CLICKPAY BRAIN - OS 4 ASSISTENTES FINANCEIROS COM IA (GEMINI FLASH)
   // =========================================================================
 
   // Assistente 1: Leitura & Auditoria Fiscal de Facturas (AP)
@@ -3323,8 +3196,8 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
       if (process.env.GEMINI_API_KEY) {
         try {
           const ai = getGeminiClient();
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+          const response = await withAiTimeout<any>(ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
             contents: [
               {
                 inlineData: {
@@ -3365,7 +3238,7 @@ No período de **${periodo || 'Julho 2026'}**, a **${empresaNome}** movimentou u
                 required: ['fornecedor', 'numeroFactura', 'valorTotalMzn']
               }
             }
-          });
+          }));
 
           if (response.text) {
             parsedData = JSON.parse(response.text.trim());
@@ -3456,10 +3329,10 @@ Critérios de Tom:
 - Se diasAtraso > 20: Tom formal de cobrança jurídica preliminar, alertando para possível interrupção de serviços e incidência de juros de mora legais (Código Comercial de Moçambique).
 - Inclua emojis profissionais e instruções claras para pagar por M-Pesa/SIMO.`;
 
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+          const response = await withAiTimeout<any>(ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
             contents: prompt
-          });
+          }));
           mensagemGerada = response.text || "";
         } catch (geminiErr: any) {
           console.warn('Erro no Gemini Dunning, usando modelo pré-definido:', geminiErr.message);
@@ -3496,8 +3369,8 @@ Critérios de Tom:
       if (process.env.GEMINI_API_KEY && textoContrato) {
         try {
           const ai = getGeminiClient();
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+          const response = await withAiTimeout<any>(ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
             contents: `Actue como consultor jurídico-financeiro em Moçambique. Analise as cláusulas deste contrato ("${tituloContrato || 'Contrato Comercial'}").
 Texto do contrato:
 ${textoContrato.substring(0, 10000)}
@@ -3527,7 +3400,7 @@ Extraia os parâmetros críticos para monitorização contínua:
                 required: ['vigenciaMeses', 'prazoPreAvisoDias', 'riscosIdentificados']
               }
             }
-          });
+          }));
 
           if (response.text) {
             analiseJson = JSON.parse(response.text.trim());
@@ -3597,10 +3470,10 @@ Políticas Oficiais da Empresa:
 Responda de forma direta, prestativa e profissional em português de Moçambique à pergunta do colaborador:
 "${pergunta}"`;
 
-          const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
+          const response = await withAiTimeout<any>(ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
             contents: prompt
-          });
+          }));
           respostaIa = response.text || "";
         } catch (geminiErr: any) {
           console.warn('Erro no Gemini Policy Chat, usando base de regras local:', geminiErr.message);
@@ -3851,20 +3724,43 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
     }
   });
 
-  // 5.6 Download do Logótipo Oficial Payroll Tech MZ em formato PNG
-  app.get(['/api/download/logo-payroll-png', '/api/logo-payroll.png', '/api/download/logo-clickpay-jpg', '/api/logo-clickpay.jpg'], (req: Request, res: Response) => {
+  // 5.6 Download do Logótipo Oficial ClickPay em formato PNG / Transparente / JPG
+  app.get([
+    '/api/download/logo-clickpay-png',
+    '/api/download/logo-clickpay-transparent-png',
+    '/api/download/logo-payroll-png',
+    '/api/logo-payroll.png',
+    '/api/download/logo-clickpay-jpg',
+    '/api/logo-clickpay.jpg'
+  ], (req: Request, res: Response) => {
     try {
-      const pngPath = path.join(process.cwd(), 'public', 'logo-payroll.png');
-      if (fs.existsSync(pngPath)) {
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Content-Disposition', 'attachment; filename="PayrollTechMZ_Logo.png"');
-        return res.sendFile(pngPath);
+      if (req.path.includes('transparent')) {
+        const transparentPath = path.join(process.cwd(), 'public', 'clickpay-logo-transparent.png');
+        if (fs.existsSync(transparentPath)) {
+          res.setHeader('Content-Type', 'image/png');
+          res.setHeader('Content-Disposition', 'attachment; filename="ClickPay_Logo_Transparente.png"');
+          return res.sendFile(transparentPath);
+        }
       }
-      const jpgPath = path.join(process.cwd(), 'public', 'clickpay_logo.jpg');
-      if (fs.existsSync(jpgPath)) {
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Content-Disposition', 'attachment; filename="PayrollTechMZ_Logo.jpg"');
-        return res.sendFile(jpgPath);
+      if (req.path.includes('jpg')) {
+        const jpgPath = path.join(process.cwd(), 'public', 'clickpay_logo.jpg');
+        if (fs.existsSync(jpgPath)) {
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Content-Disposition', 'attachment; filename="ClickPay_Logo.jpg"');
+          return res.sendFile(jpgPath);
+        }
+      }
+      const clickpayPng = path.join(process.cwd(), 'public', 'clickpay-logo.png');
+      if (fs.existsSync(clickpayPng)) {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', 'attachment; filename="ClickPay_Logo.png"');
+        return res.sendFile(clickpayPng);
+      }
+      const fallbackPng = path.join(process.cwd(), 'public', 'logo-payroll.png');
+      if (fs.existsSync(fallbackPng)) {
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', 'attachment; filename="ClickPay_Logo.png"');
+        return res.sendFile(fallbackPng);
       }
       res.status(404).json({ error: 'Logótipo não encontrado.' });
     } catch (err: any) {

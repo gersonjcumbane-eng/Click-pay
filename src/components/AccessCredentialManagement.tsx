@@ -35,7 +35,7 @@ import {
   PhoneCall
 } from 'lucide-react';
 import { CompanyData } from '../types';
-import { useToast } from '../context/ToastContext';
+import { useToast, useConfirm } from '../context/ToastContext';
 
 interface AccessCredentialManagementProps {
   company: CompanyData;
@@ -89,6 +89,7 @@ export default function AccessCredentialManagement({
   userRole
 }: AccessCredentialManagementProps) {
   const { showSuccess, showError, showInfo } = useToast();
+  const confirmAction = useConfirm();
 
   // 1. Identificadores Oficiais ClickPayroll
   const [nuit, setNuit] = useState<string>(company.nuit || '402302399');
@@ -331,7 +332,13 @@ export default function AccessCredentialManagement({
 
   // Revogar token
   const handleRevokeToken = async (id: string, name: string) => {
-    if (!confirm(`Tem a certeza que deseja revogar o token "${name}"? Todas as integrações ativas com esta chave deixarão de funcionar imediatamente.`)) {
+    const confirmed = await confirmAction({
+      title: 'Revogar Token de API',
+      message: `Tem a certeza que deseja revogar o token "${name}"? Todas as integrações ativas com esta chave deixarão de funcionar imediatamente.`,
+      confirmText: 'Revogar Token',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     try {

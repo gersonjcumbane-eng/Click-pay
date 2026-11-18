@@ -35,6 +35,7 @@ import {
 import { Employee, CompanyData } from '../types';
 import { sendBrowserNotification } from '../utils/notifications';
 import { configuracaoFiscal, matrizFiscaisMoçambique } from '../db_tax';
+import { useToast, useConfirm } from '../context/ToastContext';
 
 interface FintechPaymentsProps {
   employees: Employee[];
@@ -58,6 +59,8 @@ export default function FintechPayments({
   selectedPeriod,
   onReload
 }: FintechPaymentsProps) {
+  const { showSuccess, showError } = useToast();
+  const confirmAction = useConfirm();
   const [activeSubTab, setActiveSubTab] = useState<'batch' | 'advances' | 'bankAccounts' | 'autoPilot'>('batch');
   const [vales, setVales] = useState<Vale[]>([]);
   const [loadingVales, setLoadingVales] = useState(false);
@@ -210,7 +213,13 @@ export default function FintechPayments({
 
   // Delete a Corporate Bank Account
   const handleDeleteBankAccount = async (numeroConta: string) => {
-    if (!window.confirm(`Tem certeza que deseja remover a conta bancária ${numeroConta}?`)) {
+    const confirmed = await confirmAction({
+      title: 'Remover Conta Bancária',
+      message: `Tem certeza que deseja remover a conta bancária ${numeroConta}?`,
+      confirmText: 'Remover Conta',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     try {
@@ -228,11 +237,11 @@ export default function FintechPayments({
           }
         }
       } else {
-        alert(data.erro || 'Erro ao remover conta bancária.');
+        showError(data.erro || 'Erro ao remover conta bancária.');
       }
     } catch (err) {
       console.error(err);
-      alert('Erro ao ligar ao servidor para remover conta.');
+      showError('Erro ao ligar ao servidor para remover conta.');
     }
   };
 
@@ -240,7 +249,7 @@ export default function FintechPayments({
   const handleRecharge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valorRecarga || !selectedBank) {
-      alert('Por favor, escolha uma conta bancária de origem e defina o valor.');
+      showError('Por favor, escolha uma conta bancária de origem e defina o valor.');
       return;
     }
     setRecharging(true);
@@ -270,7 +279,7 @@ export default function FintechPayments({
           "💳 Recarga de Saldo Concluída!",
           `A carteira corporativa da empresa foi recarregada com sucesso no valor de ${Number(valorRecarga).toLocaleString('pt-MZ')} MT.`
         );
-        alert('Carteira recarregada com sucesso!');
+        showSuccess('Carteira recarregada com sucesso!');
       } else {
         setErroFintech(data.erro || 'Falha ao recarregar a carteira.');
         setErroFintechDetails(data.detalhes || null);
@@ -315,7 +324,7 @@ export default function FintechPayments({
           "💳 Recarga de Saldo Concluída!",
           `A carteira corporativa da empresa foi recarregada com sucesso no valor de ${Number(modalAmount).toLocaleString('pt-MZ')} MT.`
         );
-        alert('Carteira recarregada com sucesso!');
+        showSuccess('Carteira recarregada com sucesso!');
       } else {
         setModalError(data.erro || 'Erro ao carregar saldo.');
       }
@@ -331,7 +340,7 @@ export default function FintechPayments({
     try {
       const res = await fetch('/api/fintech/extrato-pdf');
       if (!res.ok) {
-        alert('Não foi possível gerar o extrato no momento.');
+        showError('Não foi possível gerar o extrato no momento.');
         return;
       }
       const blob = await res.blob();
@@ -345,7 +354,7 @@ export default function FintechPayments({
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert('Erro ao transferir o extrato.');
+      showError('Erro ao transferir o extrato.');
     }
   };
 
@@ -426,7 +435,7 @@ export default function FintechPayments({
   // Batch Payment Submit
   const handleBatchPayment = async () => {
     if (selectedEmpIds.length === 0) {
-      alert("Selecione pelo menos um colaborador para efetuar o pagamento.");
+      showError("Selecione pelo menos um colaborador para efetuar o pagamento.");
       return;
     }
 
@@ -557,7 +566,7 @@ export default function FintechPayments({
     try {
       const res = await fetch('/api/vales/pdf-relatorio');
       if (!res.ok) {
-        alert('Não foi possível gerar o relatório consolidado de vales no momento.');
+        showError('Não foi possível gerar o relatório consolidado de vales no momento.');
         return;
       }
       const blob = await res.blob();
@@ -571,7 +580,7 @@ export default function FintechPayments({
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert('Erro ao transferir o relatório de vales.');
+      showError('Erro ao transferir o relatório de vales.');
     }
   };
 
@@ -579,7 +588,7 @@ export default function FintechPayments({
     try {
       const res = await fetch(`/api/vales/pdf-comprovativo/${encodeURIComponent(valeId)}`);
       if (!res.ok) {
-        alert('Não foi possível gerar o comprovativo deste adiantamento.');
+        showError('Não foi possível gerar o comprovativo deste adiantamento.');
         return;
       }
       const blob = await res.blob();
@@ -593,7 +602,7 @@ export default function FintechPayments({
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert('Erro ao transferir o comprovativo de adiantamento.');
+      showError('Erro ao transferir o comprovativo de adiantamento.');
     }
   };
 

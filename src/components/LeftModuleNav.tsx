@@ -77,9 +77,9 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
       {/* Brand & System Title (Clean & Executive) */}
       <div className="flex items-center gap-2.5 px-1 pb-3 border-b border-slate-200">
         <img 
-          src="/logo-payroll.png" 
+          src="/clickpay-logo.png" 
           alt="ClickPay" 
-          className="h-8 w-auto object-contain shrink-0" 
+          className="h-9 w-auto object-contain shrink-0" 
           referrerPolicy="no-referrer"
           onError={(e) => {
             (e.target as HTMLElement).style.display = 'none';

@@ -6,6 +6,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Startup connectivity check document
+    match /test/connection {
+      allow get: if true;
+    }
+
     // Hardened helpers
     function isSignedIn() {
       return request.auth != null;

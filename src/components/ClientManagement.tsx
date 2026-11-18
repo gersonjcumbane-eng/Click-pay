@@ -24,7 +24,7 @@ import {
   Bell,
   Cloud
 } from 'lucide-react';
-import { useToast } from '../context/ToastContext';
+import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { getDefaultNextBillingDate } from '../db_tax';
 
@@ -132,6 +132,7 @@ interface ClientManagementProps {
 
 export default function ClientManagement({ onCompanySwitched }: ClientManagementProps) {
   const { showSuccess, showError } = useToast();
+  const confirmAction = useConfirm();
   const [clients, setClients] = useState<ClientCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -286,6 +287,8 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
             return combined;
           });
         }
+      }, (error) => {
+        console.warn('Erro no listener de credential_requests Firebase:', error);
       });
     } catch (e) {
       console.warn('Listener Firebase credential_requests:', e);
@@ -299,7 +302,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const handleCreateFbUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFbEmail || !newFbPassword) {
-      alert('Por favor, defina o e-mail e a palavra-passe do utilizador.');
+      showError('Por favor, defina o e-mail e a palavra-passe do utilizador.');
       return;
     }
     const targetCompanyId = newFbCompanyId || (clients[0]?.id || 'cli_bronze');
@@ -339,7 +342,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
 
   const handleUpdateFbUser = async (email: string) => {
     if (!editingUserPassword) {
-      alert('Defina a nova palavra-passe de acesso.');
+      showError('Defina a nova palavra-passe de acesso.');
       return;
     }
     try {
@@ -378,10 +381,16 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
 
   const handleDeleteFbUser = async (email: string) => {
     if (email === 'admin@payrolltech.co.mz') {
-      alert('Não é permitido desativar a conta mestre dos Founders.');
+      showError('Não é permitido desativar a conta mestre dos Founders.');
       return;
     }
-    if (!confirm(`Tem a certeza que deseja desassociar a conta ${email} do Firebase Auth?`)) {
+    const confirmed = await confirmAction({
+      title: 'Desassociar Utilizador Firebase Auth',
+      message: `Tem a certeza que deseja desassociar a conta ${email} do Firebase Auth?`,
+      confirmText: 'Desassociar',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     try {
@@ -389,11 +398,11 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
         method: 'DELETE'
       });
       if (!res.ok) throw new Error('Erro ao apagar registo.');
-      alert(`Utilizador ${email} removido do Firebase Auth com sucesso!`);
+      showSuccess(`Utilizador ${email} removido do Firebase Auth com sucesso!`);
       fetchFbUsers();
       fetchClients();
     } catch (err: any) {
-      alert(err.message || 'Erro ao desassociar conta.');
+      showError(err.message || 'Erro ao desassociar conta.');
     }
   };
 
@@ -413,12 +422,18 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       // Re-fetch clients to update active badge
       await fetchClients();
     } catch (err: any) {
-      alert(err.message || 'Erro ao alternar de contexto.');
+      showError(err.message || 'Erro ao alternar de contexto.');
     }
   };
 
   const handleDeleteClient = async (id: string, name: string) => {
-    if (!window.confirm(`Tem a certeza que deseja eliminar o cliente "${name}" permanentemente do ERP? Esta ação é irreversível e apagará todos os colaboradores e processamentos associados.`)) {
+    const confirmed = await confirmAction({
+      title: 'Eliminar Cliente do ERP',
+      message: `Tem a certeza que deseja eliminar o cliente "${name}" permanentemente do ERP? Esta ação é irreversível e apagará todos os colaboradores e processamentos associados.`,
+      confirmText: 'Eliminar Cliente',
+      variant: 'danger'
+    });
+    if (!confirmed) {
       return;
     }
     try {
@@ -435,14 +450,14 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       onCompanySwitched();
       await fetchClients();
     } catch (err: any) {
-      alert(err.message || 'Erro ao eliminar o cliente.');
+      showError(err.message || 'Erro ao eliminar o cliente.');
     }
   };
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nome || !nuit) {
-      alert('Nome da Empresa e NUIT são obrigatórios.');
+      showError('Nome da Empresa e NUIT são obrigatórios.');
       return;
     }
 
@@ -1229,16 +1244,16 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
               <div className="flex justify-between items-start border-b-2 border-slate-300 pb-5 gap-4">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
-                    <img src="logo-payroll.png" alt="Payroll Tech Mz" className="h-10 w-auto object-contain" referrerPolicy="no-referrer" />
+                    <img src="/clickpay-logo.png" alt="ClickPay" className="h-10 w-auto object-contain" referrerPolicy="no-referrer" />
                     <div>
-                      <span className="text-xs font-black text-slate-900 block uppercase tracking-wide">Payroll Tech Mz, Lda</span>
-                      <span className="text-[8px] font-bold text-slate-400 font-mono tracking-wider">PRIMAVERA ERP V10 PARTNER</span>
+                      <span className="text-xs font-black text-slate-900 block uppercase tracking-wide">ClickPay Moçambique</span>
+                      <span className="text-[8px] font-bold text-slate-400 font-mono tracking-wider">ERP & FINTECH · NUEL 105086659</span>
                     </div>
                   </div>
                   <p className="text-[9px] text-slate-600 leading-tight">
-                    Av. Julius Nyerere, nº 3400, Edifício Jat V<br />
+                    Av. 24 de Julho, nº 1500, 5º Andar<br />
                     Maputo Cidade, Moçambique<br />
-                    <b>NUIT:</b> 400990887 | <b>Tel:</b> +258 861390061<br />
+                    <b>NUIT:</b> 402302399 | <b>Tel:</b> +258 86 139 0061<br />
                     <b>E-mail:</b> gersonjcumbane@gmail.com
                   </p>
                 </div>

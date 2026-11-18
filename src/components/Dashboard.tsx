@@ -41,6 +41,7 @@ import {
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, ComposedChart, Line } from 'recharts';
 import { Employee, CompanyData, PayrollSummary, PaymentLog } from '../types';
 import { vendasStore, comprasStore, caixaStore, getCurrentPeriod, getAvailablePeriods } from '../db_tax';
+import { useToast } from '../context/ToastContext';
 
 interface DashboardProps {
   employees: Employee[];
@@ -65,6 +66,7 @@ export default function Dashboard({
   userRole,
   onNavigateTab
 }: DashboardProps) {
+  const { showError } = useToast();
   // 1. Interactive Real-Time Financial Dashboard State
   const periodosDisponiveis = getAvailablePeriods();
   const [selectedDashboardPeriod, setSelectedDashboardPeriod] = useState<string>(() => selectedPeriod || getCurrentPeriod());
@@ -374,20 +376,17 @@ export default function Dashboard({
       });
 
       if (!res.ok) throw new Error('Falha ao emitir o aviso prévio.');
-      const data = await res.json();
-      
-      if (data.sucesso && data.linkFicheiro) {
-        const link = document.createElement('a');
-        link.href = data.linkFicheiro;
-        link.download = `aviso_previo_${empInss.replace(/\s+/g, '_')}.pdf`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } else {
-        throw new Error('Retorno inválido do servidor.');
-      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `aviso_previo_${empInss.replace(/\s+/g, '_')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Erro ao gerar o aviso prévio em PDF.');
+      showError(err.message || 'Erro ao gerar o aviso prévio em PDF.');
     } finally {
       setLoadingAviso(null);
     }
@@ -407,7 +406,7 @@ export default function Dashboard({
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Erro ao descarregar PDF de mapa de salários.');
+      showError(err.message || 'Erro ao descarregar PDF de mapa de salários.');
     }
   };
 
@@ -425,7 +424,7 @@ export default function Dashboard({
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Erro ao descarregar Excel de mapa de salários.');
+      showError(err.message || 'Erro ao descarregar Excel de mapa de salários.');
     }
   };
 
@@ -443,7 +442,7 @@ export default function Dashboard({
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Erro ao descarregar PDF de histórico financeiro.');
+      showError(err.message || 'Erro ao descarregar PDF de histórico financeiro.');
     }
   };
 
@@ -461,7 +460,7 @@ export default function Dashboard({
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err.message || 'Erro ao descarregar Excel de histórico financeiro.');
+      showError(err.message || 'Erro ao descarregar Excel de histórico financeiro.');
     }
   };
 

@@ -143,6 +143,8 @@ export default function CorporateSettings({
             return merged;
           });
         }
+      }, (error) => {
+        console.warn('Erro no listener de backups Firebase:', error);
       });
     } catch (err) {
       console.warn('Listener Firebase backups:', err);
@@ -321,7 +323,7 @@ export default function CorporateSettings({
       }
     } catch (err) {
       console.error(err);
-      alert('Erro ao processar exportação de dados.');
+      showError('Erro ao processar exportação de dados.');
     } finally {
       setExporting(null);
     }
@@ -337,7 +339,7 @@ export default function CorporateSettings({
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 2 * 1024 * 1024) {
-        alert("O ficheiro de logótipo excede o tamanho máximo permitido de 2MB.");
+        showError("O ficheiro de logótipo excede o tamanho máximo permitido de 2MB.");
         return;
       }
       const reader = new FileReader();
@@ -1234,16 +1236,29 @@ export default function CorporateSettings({
                 </a>
 
                 <a
-                  href="/api/download/logo-payroll-png"
-                  download="PayrollTechMZ_Logo.png"
+                  href="/api/download/logo-clickpay-png"
+                  download="ClickPay_Logo.png"
                   className="w-full py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-900 flex items-center justify-between transition-colors cursor-pointer shadow-xs"
-                  title="Descarregar logótipo original Payroll Tech MZ em formato PNG"
+                  title="Descarregar logótipo oficial ClickPay em formato PNG"
                 >
                   <span className="flex items-center gap-2">
-                    <img src="/logo-payroll.png" alt="Payroll Tech Mz" className="h-5 w-auto object-contain" referrerPolicy="no-referrer" />
-                    Logótipo Oficial Payroll Tech MZ (.PNG)
+                    <img src="/clickpay-logo.png" alt="ClickPay" className="h-5 w-auto object-contain" referrerPolicy="no-referrer" />
+                    Logótipo Oficial ClickPay (.PNG)
                   </span>
                   <span className="text-[10px] bg-emerald-200 text-emerald-950 font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider font-mono">PNG</span>
+                </a>
+
+                <a
+                  href="/api/download/logo-clickpay-transparent-png"
+                  download="ClickPay_Logo_Transparente.png"
+                  className="w-full py-2.5 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 flex items-center justify-between transition-colors cursor-pointer shadow-xs"
+                  title="Descarregar logótipo ClickPay com fundo transparente para artes de workshop e redes sociais"
+                >
+                  <span className="flex items-center gap-2">
+                    <img src="/clickpay-logo-transparent.png" alt="ClickPay Transparente" className="h-5 w-auto object-contain" referrerPolicy="no-referrer" />
+                    Logótipo ClickPay Fundo Transparente (.PNG)
+                  </span>
+                  <span className="text-[10px] bg-slate-200 text-slate-800 font-extrabold px-2 py-0.5 rounded-md uppercase tracking-wider font-mono">TRANSP.</span>
                 </a>
               </div>
             </div>

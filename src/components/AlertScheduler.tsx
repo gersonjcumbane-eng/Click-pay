@@ -34,6 +34,7 @@ import {
   getNotificationPermissionState, 
   sendBrowserNotification 
 } from '../utils/notifications';
+import { useToast, useConfirm } from '../context/ToastContext';
 
 interface AlertConfig {
   email_destino: string;
@@ -63,6 +64,8 @@ interface AlertSchedulerProps {
 }
 
 export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSchedulerProps) {
+  const { showError, showInfo } = useToast();
+  const confirmAction = useConfirm();
   const [config, setConfig] = useState<AlertConfig>({
     email_destino: company.email || "gestor@suaempresa.co.mz",
     enviar_expiracao_contrato: true,
@@ -170,11 +173,11 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
         setShowConfigSuccess(true);
         setTimeout(() => setShowConfigSuccess(false), 3000);
       } else {
-        alert("Erro ao salvar configurações do agendador.");
+        showError("Erro ao salvar configurações do agendador.");
       }
     } catch (err) {
       console.error(err);
-      alert("Erro ao comunicar com o servidor.");
+      showError("Erro ao comunicar com o servidor.");
     } finally {
       setSavingConfig(false);
     }
@@ -213,19 +216,25 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
             "✓ Verificação Concluída",
             `A verificação automática para a data ${new Date(simulatedDate).toLocaleDateString('pt-MZ')} foi concluída. Nenhuma obrigação pendente encontrada.`
           );
-          alert(`Verificação do dia ${new Date(simulatedDate).toLocaleDateString('pt-MZ')} finalizada. Nenhuma obrigação iminente ou expiração nova encontrada para esta data específica.`);
+          showInfo(`Verificação do dia ${new Date(simulatedDate).toLocaleDateString('pt-MZ')} finalizada. Nenhuma obrigação iminente ou expiração nova encontrada para esta data específica.`);
         }
       }
     } catch (err) {
       console.error(err);
-      alert("Erro ao disparar verificação.");
+      showError("Erro ao disparar verificação.");
     } finally {
       setRunningScheduler(false);
     }
   };
 
   const handleClearHistory = async () => {
-    if (confirm("Deseja apagar todo o histórico de e-mails de alerta enviados?")) {
+    const confirmed = await confirmAction({
+      title: 'Limpar Histórico de Alertas',
+      message: 'Deseja apagar todo o histórico de e-mails de alerta enviados?',
+      confirmText: 'Apagar Histórico',
+      variant: 'danger'
+    });
+    if (confirmed) {
       try {
         const res = await fetch('/api/alerts/clear-history', { method: 'POST' });
         if (res.ok) {

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Employee, CompanyData } from '../types';
 import { calcularFolhaSalario } from '../db_tax';
+import { useToast } from '../context/ToastContext';
 
 interface SISSMOExportProps {
   employees: Employee[];
@@ -37,6 +38,7 @@ export default function SISSMOExport({
   company,
   selectedPeriod
 }: SISSMOExportProps) {
+  const { showError } = useToast();
   const [activeSubTab, setActiveSubTab] = useState<'csv' | 'pdf' | 'irps'>('csv');
   const [downloading, setDownloading] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -75,7 +77,7 @@ export default function SISSMOExport({
       window.location.href = `/api/payroll/exportar-sissmo?periodo=${p}`;
     } catch (e) {
       console.error(e);
-      alert('Erro ao exportar ficheiro.');
+      showError('Erro ao exportar ficheiro.');
     } finally {
       setDownloading(false);
     }
@@ -90,7 +92,7 @@ export default function SISSMOExport({
       window.location.href = `/api/exportar/guia-inss-pdf?periodo=${p}&juros=${jVal}&multas=${mVal}`;
     } catch (e) {
       console.error(e);
-      alert('Erro ao exportar PDF.');
+      showError('Erro ao exportar PDF.');
     } finally {
       setTimeout(() => setGeneratingPdf(false), 2000);
     }
@@ -104,7 +106,7 @@ export default function SISSMOExport({
       window.location.href = `/api/exportar/guia-irps-pdf?periodo=${p}&juros=${jVal}`;
     } catch (e) {
       console.error(e);
-      alert('Erro ao exportar PDF da Guia de IRPS.');
+      showError('Erro ao exportar PDF da Guia de IRPS.');
     } finally {
       setTimeout(() => setGeneratingIrpsPdf(false), 2000);
     }

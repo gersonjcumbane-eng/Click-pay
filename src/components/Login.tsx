@@ -15,18 +15,8 @@ interface LoginProps {
 }
 
 export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEnterRegister }: LoginProps) {
-  const [email, setEmail] = useState(() => {
-    if (selectedPlan === 'Bronze') return 'bronze@payrolltech.co.mz';
-    if (selectedPlan === 'Silver') return 'silver@payrolltech.co.mz';
-    if (selectedPlan === 'Gold') return 'gold@payrolltech.co.mz';
-    return '';
-  });
-  const [password, setPassword] = useState(() => {
-    if (selectedPlan === 'Bronze') return 'bronze2026';
-    if (selectedPlan === 'Silver') return 'silver2026';
-    if (selectedPlan === 'Gold') return 'gold2026';
-    return '';
-  });
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -39,19 +29,6 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [resendingOtp, setResendingOtp] = useState(false);
   const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
-
-  React.useEffect(() => {
-    if (selectedPlan === 'Bronze') {
-      setEmail('bronze@payrolltech.co.mz');
-      setPassword('bronze2026');
-    } else if (selectedPlan === 'Silver') {
-      setEmail('silver@payrolltech.co.mz');
-      setPassword('silver2026');
-    } else if (selectedPlan === 'Gold') {
-      setEmail('gold@payrolltech.co.mz');
-      setPassword('gold2026');
-    }
-  }, [selectedPlan]);
   
   // O botão de chave mestre só é visível para o Gerson (Fundador):
   // 1. Automaticamente se houver histórico de admin no navegador
@@ -255,9 +232,9 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
             title="ClickPay"
           >
             <img 
-              src="/logo-payroll.png" 
+              src="/clickpay-logo.png" 
               alt="ClickPay" 
-              style={{ width: '90px', height: 'auto', marginBottom: '8px' }} 
+              style={{ width: '112px', height: 'auto', marginBottom: '8px' }} 
               className="mx-auto pointer-events-none"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -405,7 +382,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                 <input
                   type="email"
                   required
-                  autoComplete="username"
+                  autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="nome@suaempresa.co.mz"
@@ -421,7 +398,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                 <input
                   type="password"
                   required
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Digite a sua palavra-passe"
@@ -447,21 +424,19 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                 )}
               </button>
 
-              {/* Botões de Preenchimento Rápido por Pacote para Demonstração */}
+              {/* Seleção do Pacote (Sem Preenchimento Automático de Credenciais) */}
               <div className="pt-2 border-t border-slate-100">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 text-center">
-                  Preenchimento Rápido por Pacote:
+                  Pacote Selecionado:
                 </span>
                 <div className="grid grid-cols-3 gap-1.5">
                   <button
                     type="button"
                     onClick={() => {
-                      setEmail('bronze@payrolltech.co.mz');
-                      setPassword('bronze2026');
                       if (onSelectPlan) onSelectPlan('Bronze');
                     }}
                     className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                      email === 'bronze@payrolltech.co.mz' || email === 'construcao@payrolltech.co.mz'
+                      selectedPlan === 'Bronze'
                         ? 'bg-amber-100 border-amber-300 text-amber-950 font-black'
                         : 'bg-slate-50 hover:bg-amber-50 border-slate-200 text-slate-700'
                     }`}
@@ -472,12 +447,10 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                   <button
                     type="button"
                     onClick={() => {
-                      setEmail('silver@payrolltech.co.mz');
-                      setPassword('silver2026');
                       if (onSelectPlan) onSelectPlan('Silver');
                     }}
                     className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                      email === 'silver@payrolltech.co.mz' || email === 'educacao@payrolltech.co.mz'
+                      selectedPlan === 'Silver'
                         ? 'bg-blue-100 border-blue-300 text-blue-950 font-black'
                         : 'bg-slate-50 hover:bg-blue-50 border-slate-200 text-slate-700'
                     }`}
@@ -488,12 +461,10 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                   <button
                     type="button"
                     onClick={() => {
-                      setEmail('gold@payrolltech.co.mz');
-                      setPassword('gold2026');
                       if (onSelectPlan) onSelectPlan('Gold');
                     }}
                     className={`py-1.5 px-2 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                      email === 'gold@payrolltech.co.mz' || email === 'servicos@payrolltech.co.mz'
+                      selectedPlan === 'Gold'
                         ? 'bg-emerald-100 border-emerald-300 text-emerald-950 font-black'
                         : 'bg-slate-50 hover:bg-emerald-50 border-slate-200 text-slate-700'
                     }`}

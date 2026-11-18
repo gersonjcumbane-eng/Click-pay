@@ -21,6 +21,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { Employee, CompanyData } from '../types';
+import { useToast, useConfirm } from '../context/ToastContext';
 
 interface Contract {
   id: string;
@@ -45,6 +46,8 @@ interface ContractManagementProps {
 }
 
 export default function ContractManagement({ company, employees, onReload }: ContractManagementProps) {
+  const { showError, showInfo } = useToast();
+  const confirmAction = useConfirm();
   const [contratos, setContratos] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -145,7 +148,7 @@ export default function ContractManagement({ company, employees, onReload }: Con
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Erro ao comunicar com o servidor.');
+      showError(err.message || 'Erro ao comunicar com o servidor.');
     } finally {
       setDownloadingPdf(null);
     }
@@ -192,12 +195,18 @@ export default function ContractManagement({ company, employees, onReload }: Con
 
     } catch (err: any) {
       console.error(err);
-      alert(err.message);
+      showError(err.message || 'Erro ao criar contrato.');
     }
   };
 
   const handleRemoverContrato = async (id: string, nome: string) => {
-    if (confirm(`Atenção: Deseja remover o contrato de ${nome}? Isto também irá remover o colaborador correspondente do ERP de forma interligada.`)) {
+    const confirmed = await confirmAction({
+      title: 'Remover Contrato',
+      message: `Atenção: Deseja remover o contrato de ${nome}? Isto também irá remover o colaborador correspondente do ERP de forma interligada.`,
+      confirmText: 'Remover',
+      variant: 'danger'
+    });
+    if (confirmed) {
       try {
         const usuarioSimulado = JSON.stringify({ funcao: "CLIENTE_EMPRESA", empresa_id: "emp_piloto_01" });
         const res = await fetch(`/api/clientes/remover-contrato/${id}`, {
@@ -209,10 +218,10 @@ export default function ContractManagement({ company, employees, onReload }: Con
           if (onReload) onReload(); // Sync with parent database
         } else {
           const errData = await res.json();
-          alert(errData.erro || 'Erro ao remover contrato.');
+          showError(errData.erro || 'Erro ao remover contrato.');
         }
       } catch (err: any) {
-        alert(err.message || 'Erro de rede.');
+        showError(err.message || 'Erro de rede.');
       }
     }
   };
@@ -337,7 +346,7 @@ export default function ContractManagement({ company, employees, onReload }: Con
                               </button>
                             ) : (
                               <button
-                                onClick={() => alert('Abriremos o gestor de ficheiros de contrato.')}
+                                onClick={() => showInfo('Gestor de ficheiros de contrato selecionado.')}
                                 className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] rounded-lg flex items-center gap-1 transition-all border border-slate-200 cursor-pointer"
                               >
                                 Ver Detalhes

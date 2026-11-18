@@ -163,11 +163,11 @@ export default function A4DocumentModal({
                 {empresa.logo && empresa.logo.startsWith('data:image/') ? (
                   <img src={empresa.logo} alt="Logo" className="h-12 w-auto object-contain max-w-[160px]" referrerPolicy="no-referrer" />
                 ) : (
-                  <img src="/logo-payroll.png" alt="Payroll Tech" className="h-12 w-auto object-contain max-w-[160px]" referrerPolicy="no-referrer" />
+                  <img src="/clickpay-logo.png" alt="ClickPay" className="h-12 w-auto object-contain max-w-[160px]" referrerPolicy="no-referrer" />
                 )}
                 <div>
                   <h1 className="text-lg font-black text-slate-950 uppercase tracking-tight leading-tight">
-                    {empresa.nome || 'PAYROLL TECH MZ, LDA'}
+                    {empresa.nome || 'CLICKPAY MOÇAMBIQUE'}
                   </h1>
                   <span className="text-[9px] font-bold text-slate-500 tracking-wider block uppercase">
                     Software de Faturação Certificado nº 01/AT/2026

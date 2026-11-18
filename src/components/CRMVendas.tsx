@@ -26,6 +26,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { LeadItem, PropostaItem, ContratoComercialItem, CompanyData } from '../types';
+import { useConfirm } from '../context/ToastContext';
 
 interface CRMVendasProps {
   companyData: CompanyData;
@@ -33,6 +34,7 @@ interface CRMVendasProps {
 }
 
 export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToFinancial }) => {
+  const confirmAction = useConfirm();
   const [activeTab, setActiveTab] = useState<'pipeline' | 'propostas' | 'contratos' | 'metricas'>('pipeline');
 
   // State Stores
@@ -287,7 +289,13 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
 
   // ⚡ CONVERTER PROPOSTA EM FATURA NA TESOURARIA (DIRECT TREASURY INTEGRATION)
   const handleConvertPropostaToInvoice = async (propId: string) => {
-    if (!confirm('Deseja converter esta proposta comercial numa Fatura oficial com lançamento automático na Contabilidade PGC-NIRF e Tesouraria?')) {
+    const confirmed = await confirmAction({
+      title: 'Converter Proposta em Fatura',
+      message: 'Deseja converter esta proposta comercial numa Fatura oficial com lançamento automático na Contabilidade PGC-NIRF e Tesouraria?',
+      confirmText: 'Converter Agora',
+      variant: 'info'
+    });
+    if (!confirmed) {
       return;
     }
 

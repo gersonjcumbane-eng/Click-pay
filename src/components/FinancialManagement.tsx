@@ -29,7 +29,7 @@ import {
   Eye
 } from 'lucide-react';
 import { CompraItem, VendaItem, LivroCaixaItem, ApuramentoIVA, CompanyData } from '../types';
-import { useToast } from '../context/ToastContext';
+import { useToast, useConfirm } from '../context/ToastContext';
 import { ComplianceAssist } from './ComplianceAssist';
 import { PLANO_CONTAS_PGC_MOZAMBIQUE, getPlanoContasComSaldos, PgcContaComSaldo, validarEClassificarLancamentoPGC } from '../pgc_mozambique';
 import { employees } from '../db_tax';
@@ -43,6 +43,7 @@ interface FinancialManagementProps {
 
 export default function FinancialManagement({ company, selectedPeriod, initialSubTab }: FinancialManagementProps) {
   const { showSuccess, showError, showInfo } = useToast();
+  const confirmAction = useConfirm();
   const [activeSubTab, setActiveSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>(initialSubTab || 'conformidade');
 
   const [pgcSearch, setPgcSearch] = useState<string>('');
@@ -403,7 +404,13 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   };
 
   const handleDeleteCompra = async (id: string) => {
-    if (!confirm('Deseja eliminar esta compra?')) return;
+    const confirmed = await confirmAction({
+      title: 'Eliminar Compra',
+      message: 'Deseja eliminar esta compra?',
+      confirmText: 'Eliminar',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/compras/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -416,7 +423,13 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   };
 
   const handleDeleteVenda = async (id: string) => {
-    if (!confirm('Deseja eliminar esta venda?')) return;
+    const confirmed = await confirmAction({
+      title: 'Eliminar Venda',
+      message: 'Deseja eliminar esta venda?',
+      confirmText: 'Eliminar',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/vendas/${id}`, { method: 'DELETE' });
       if (res.ok) {
@@ -429,7 +442,13 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   };
 
   const handleDeleteCaixa = async (id: string) => {
-    if (!confirm('Deseja eliminar este movimento do Livro de Caixa?')) return;
+    const confirmed = await confirmAction({
+      title: 'Eliminar Movimento de Caixa',
+      message: 'Deseja eliminar este movimento do Livro de Caixa?',
+      confirmText: 'Eliminar',
+      variant: 'danger'
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/caixa/${id}`, { method: 'DELETE' });
       if (res.ok) {
