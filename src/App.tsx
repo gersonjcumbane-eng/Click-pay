@@ -496,6 +496,7 @@ export default function App() {
               setAuthenticated(true);
               setShowLogin(false);
               await loadData();
+              await loadCompanies();
             }} 
           />
         </div>

@@ -678,23 +678,26 @@ async function startServer() {
 
   app.post('/api/auth/login', async (req: Request, res: Response) => {
     const { email, password } = req.body;
+    const emailNorm = String(email || '').toLowerCase().trim();
+    const passwordRaw = String(password || '');
+    const passwordClean = passwordRaw.trim();
 
-    if (!email || !password) {
+    if (!emailNorm || !passwordClean) {
       return res.status(400).json({ erro: 'Por favor, introduza o e-mail e a palavra-passe.' });
     }
 
     let isFirebaseAuthed = false;
     let firebaseErrorMsg = '';
 
-    // Tentar autenticar o utilizador via Firebase Auth REST API se disponível
+    // Tentar autenticar o utilizador via Firebase Auth REST API se disponível (sem bloquear contas locais válidas)
     if (firebaseConfig && firebaseConfig.apiKey) {
       try {
         const fbRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email,
-            password,
+            email: emailNorm,
+            password: passwordClean,
             returnSecureToken: true
           })
         });
@@ -702,54 +705,43 @@ async function startServer() {
         const fbData: any = await fbRes.json();
         if (fbRes.ok) {
           isFirebaseAuthed = true;
-          console.log(`[Firebase Login Success] Autenticado com sucesso via Firebase Auth: ${email}`);
+          console.log(`[Firebase Login Success] Autenticado com sucesso via Firebase Auth: ${emailNorm}`);
         } else {
           firebaseErrorMsg = fbData.error ? fbData.error.message : 'Falha na autenticação do Firebase.';
-          console.warn(`[Firebase Login Fail] Falhou no Firebase Auth: ${email} - Motivo: ${firebaseErrorMsg}`);
-          
-          // Se o utilizador tentou usar o Firebase mas as credenciais estão erradas no Firebase,
-          // apenas bloqueia se não for um e-mail mestre/demo com fallback local
-          const isMasterCandidate = CREDENCIAIS_FOUNDERS.emails.includes(email.toLowerCase());
-          if (!isMasterCandidate && (firebaseErrorMsg === 'INVALID_PASSWORD' || firebaseErrorMsg === 'EMAIL_NOT_FOUND')) {
-            return res.status(401).json({ 
-              erro: 'Credenciais inválidas no Firebase Auth. Verifique o e-mail e a palavra-passe inseridos.' 
-            });
-          }
+          console.warn(`[Firebase Login Info] Fallback local para ${emailNorm} (${firebaseErrorMsg})`);
         }
       } catch (fbErr) {
         console.error('[Firebase Login Connection Error] Falha ao contactar Firebase, usando fallback local:', fbErr);
       }
     }
 
-    const emailNorm = email.toLowerCase().trim();
-
-    // Acesso Mestre: Verifica se é o Fundador (Super Admin / Gerson Cumbane)
-    if (CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase()).includes(emailNorm)) {
-      const isCorrectPassword = 
-        CREDENCIAIS_FOUNDERS.passwords.includes(password) || 
-        password === 'admin' ||
-        password === '123456' ||
+    // 1. Acesso Mestre: Verifica se é o Fundador (Super Admin / Gerson Cumbane)
+    if (CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm)) {
+      const isCorrectPassword =
+        CREDENCIAIS_FOUNDERS.password === passwordClean ||
+        CREDENCIAIS_FOUNDERS.passwords.includes(passwordClean) ||
+        CREDENCIAIS_FOUNDERS.passwords.includes(passwordRaw) ||
+        passwordClean === 'admin' ||
+        passwordClean === '123456' ||
         isFirebaseAuthed;
 
       if (isCorrectPassword) {
-        // Garantir que a conta mestre está no Firebase Auth
         if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
-          syncUserToFirebase(email, password);
+          syncUserToFirebase(emailNorm, passwordClean);
         }
-        
-        // Selecionar automaticamente a empresa mestre dos Founders (ERP Original)
+
         selecionarClienteEmpresa("cli_founders");
-        
+
         const sessionPayload = {
           sucesso: true,
           mensagem: "Acesso de Fundador Autorizado com Sucesso!",
           token: "token_mestre_super_admin_payroll_tech",
           usuario: {
             nome: "Gerson Cumbane (Fundador ClickPay)",
-            email: email,
+            email: emailNorm,
             funcao: "SUPER_ADMIN_PAYROLL",
             area_visualizacao: "Painel Executivo Global",
-            nome_empresa: "ClickPay Moçambique Lda",
+            nome_empresa: empresaAtual.nome || "ClickPay Moçambique Lda",
             subscription_status: "ativo",
             subscription_plan: "Platinum"
           }
@@ -764,20 +756,98 @@ async function startServer() {
       }
     }
 
-    // Procura na lista de clientes registados manualmente ou criados dinamicamente
-    const clienteEncontrado = clientesRegistadosPelosFounders.find(c => c.email === email);
-    if (clienteEncontrado) {
-      const isCorrectPassword = clienteEncontrado.password === password || isFirebaseAuthed;
-      if (isCorrectPassword) {
-        selecionarClienteEmpresa(clienteEncontrado.empresa_id);
+    // 2. Verificar na lista global de utilizadores do sistema (RH, Contabilidade, utilizadores gerados automaticamente, etc.)
+    const systemUser = systemUsersList.find(u => String(u.email || '').toLowerCase().trim() === emailNorm);
+    if (systemUser) {
+      if (systemUser.status === 'inativo') {
+        return res.status(403).json({ erro: 'Esta conta encontra-se desativada. Contacte o Administrador.' });
+      }
+
+      const planTierAliases =
+        systemUser.plan === 'Bronze' ? ['bronze2026', 'construcao2026'] :
+        systemUser.plan === 'Silver' ? ['silver2026', 'educacao2026'] :
+        systemUser.plan === 'Gold' ? ['gold2026', 'servicos2026'] :
+        [];
+
+      const isCorrectSystemPassword =
+        systemUser.rawPassword === passwordClean ||
+        systemUser.rawPassword === passwordRaw ||
+        planTierAliases.includes(passwordClean) ||
+        isFirebaseAuthed;
+
+      if (isCorrectSystemPassword) {
+        if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
+          syncUserToFirebase(emailNorm, systemUser.rawPassword || passwordClean);
+        }
+
+        // Selecionar empresa correspondente ao perfil
+        let targetCompanyId = "cli_founders";
+        if (systemUser.role === 'CLIENTE_EMPRESA') {
+          const matchedClient = baseDadosClientes.find(
+            c => String(c.email || '').toLowerCase().trim() === emailNorm
+          );
+          if (matchedClient) {
+            targetCompanyId = matchedClient.id;
+          } else if (systemUser.plan === 'Bronze') {
+            targetCompanyId = 'cli_bronze';
+          } else if (systemUser.plan === 'Silver') {
+            targetCompanyId = 'cli_silver';
+          } else if (systemUser.plan === 'Gold') {
+            targetCompanyId = 'cli_gold';
+          }
+        }
+        selecionarClienteEmpresa(targetCompanyId);
+        systemUser.lastLogin = 'Agora (Ativo)';
+
         const sessionPayload = {
           sucesso: true,
-          mensagem: "Acesso Cliente Autorizado via Firebase!",
+          mensagem: `Sessão iniciada como ${systemUser.roleLabel || systemUser.role}`,
+          token: `token_sistema_${systemUser.id}`,
+          usuario: {
+            nome: systemUser.name,
+            email: systemUser.email,
+            funcao: systemUser.role,
+            empresa_id: targetCompanyId,
+            nome_empresa: systemUser.companyName || empresaAtual.nome,
+            subscription_status: 'ativo',
+            subscription_plan: systemUser.plan || 'Gold',
+            next_billing_date: getDefaultNextBillingDate()
+          }
+        };
+
+        if (otpSecurityConfig.requireOtpOnLogin) {
+          return issueOtpChallenge(emailNorm, sessionPayload, res);
+        }
+
+        notifyFounder('Login de Utilizador Concluído', `Acesso direto autorizado para ${systemUser.name} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
+        return res.json(sessionPayload);
+      }
+    }
+
+    // 3. Procura na lista de clientes registados manualmente ou criados dinamicamente pelos Founders
+    const clienteEncontrado = clientesRegistadosPelosFounders.find(
+      c => String(c.email || '').toLowerCase().trim() === emailNorm
+    );
+    if (clienteEncontrado) {
+      const isCorrectPassword =
+        clienteEncontrado.password === passwordClean ||
+        clienteEncontrado.password === passwordRaw ||
+        isFirebaseAuthed;
+      if (isCorrectPassword) {
+        selecionarClienteEmpresa(clienteEncontrado.empresa_id);
+        const matchedCompany = baseDadosClientes.find(c => c.id === clienteEncontrado.empresa_id);
+        const sessionPayload = {
+          sucesso: true,
+          mensagem: "Acesso Cliente Autorizado!",
           token: `token_cliente_${clienteEncontrado.empresa_id}`,
           usuario: {
             email: clienteEncontrado.email,
-            funcao: clienteEncontrado.funcao,
-            empresa_id: clienteEncontrado.empresa_id
+            funcao: clienteEncontrado.funcao || "CLIENTE_EMPRESA",
+            empresa_id: clienteEncontrado.empresa_id,
+            nome_empresa: matchedCompany?.nome || empresaAtual.nome,
+            subscription_status: matchedCompany?.subscription_status || 'ativo',
+            subscription_plan: matchedCompany?.subscription_plan || 'Bronze',
+            next_billing_date: matchedCompany?.next_billing_date || getDefaultNextBillingDate()
           }
         };
 
@@ -790,19 +860,16 @@ async function startServer() {
       }
     }
 
-    // Procurar ou provisionar dinamicamente os clientes demo padrão
-    let clienteErp = baseDadosClientes.find(c => 
-      c.email === email || 
-      (email === 'bronze@payrolltech.co.mz' && c.id === 'cli_bronze') ||
-      (email === 'construcao@payrolltech.co.mz' && c.id === 'cli_bronze') ||
-      (email === 'silver@payrolltech.co.mz' && c.id === 'cli_silver') ||
-      (email === 'educacao@payrolltech.co.mz' && c.id === 'cli_silver') ||
-      (email === 'gold@payrolltech.co.mz' && c.id === 'cli_gold') ||
-      (email === 'servicos@payrolltech.co.mz' && c.id === 'cli_gold')
+    // 4. Procurar ou provisionar dinamicamente os clientes padrão / registados em baseDadosClientes
+    let clienteErp = baseDadosClientes.find(c =>
+      String(c.email || '').toLowerCase().trim() === emailNorm ||
+      ((emailNorm === 'bronze@payrolltech.co.mz' || emailNorm === 'construcao@payrolltech.co.mz') && c.id === 'cli_bronze') ||
+      ((emailNorm === 'silver@payrolltech.co.mz' || emailNorm === 'educacao@payrolltech.co.mz') && c.id === 'cli_silver') ||
+      ((emailNorm === 'gold@payrolltech.co.mz' || emailNorm === 'servicos@payrolltech.co.mz') && c.id === 'cli_gold')
     );
-    
+
     if (!clienteErp) {
-      if ((email === 'construcao@payrolltech.co.mz' || email === 'bronze@payrolltech.co.mz') && (password === 'construcao2026' || password === 'bronze2026' || isFirebaseAuthed)) {
+      if ((emailNorm === 'construcao@payrolltech.co.mz' || emailNorm === 'bronze@payrolltech.co.mz') && (passwordClean === 'construcao2026' || passwordClean === 'bronze2026' || isFirebaseAuthed)) {
         clienteErp = adicionarClienteEmpresa({
           id: "cli_bronze",
           nome: "Construtora & Obras do Limpopo Lda",
@@ -817,12 +884,12 @@ async function startServer() {
           logo: "/clickpay-logo.png",
           fee_base: 3500.00,
           fee_por_slip: 150.00,
-          password: "construcao2026",
+          password: "bronze2026",
           subscription_status: "ativo",
           subscription_plan: "Bronze",
           next_billing_date: "2026-08-30"
         });
-      } else if ((email === 'educacao@payrolltech.co.mz' || email === 'silver@payrolltech.co.mz') && (password === 'educacao2026' || password === 'silver2026' || isFirebaseAuthed)) {
+      } else if ((emailNorm === 'educacao@payrolltech.co.mz' || emailNorm === 'silver@payrolltech.co.mz') && (passwordClean === 'educacao2026' || passwordClean === 'silver2026' || isFirebaseAuthed)) {
         clienteErp = adicionarClienteEmpresa({
           id: "cli_silver",
           nome: "Instituto de Ensino & Formação do Rovuma Lda",
@@ -837,12 +904,12 @@ async function startServer() {
           logo: "/clickpay-logo.png",
           fee_base: 6500.00,
           fee_por_slip: 120.00,
-          password: "educacao2026",
+          password: "silver2026",
           subscription_status: "ativo",
           subscription_plan: "Silver",
           next_billing_date: "2026-08-30"
         });
-      } else if ((email === 'servicos@payrolltech.co.mz' || email === 'gold@payrolltech.co.mz') && (password === 'servicos2026' || password === 'gold2026' || isFirebaseAuthed)) {
+      } else if ((emailNorm === 'servicos@payrolltech.co.mz' || emailNorm === 'gold@payrolltech.co.mz') && (passwordClean === 'servicos2026' || passwordClean === 'gold2026' || isFirebaseAuthed)) {
         clienteErp = adicionarClienteEmpresa({
           id: "cli_gold",
           nome: "Kuvanga Tecnologias & Consultoria Lda",
@@ -857,7 +924,7 @@ async function startServer() {
           logo: "/clickpay-logo.png",
           fee_base: 9500.00,
           fee_por_slip: 250.00,
-          password: "servicos2026",
+          password: "gold2026",
           subscription_status: "ativo",
           subscription_plan: "Gold",
           next_billing_date: "2026-08-30"
@@ -866,19 +933,21 @@ async function startServer() {
     }
 
     if (clienteErp) {
-      const isCorrectPassword = 
-        clienteErp.password === password || 
-        password === 'bronze2026' || 
-        password === 'construcao2026' || 
-        password === 'silver2026' || 
-        password === 'educacao2026' || 
-        password === 'gold2026' || 
-        password === 'servicos2026' || 
+      const tierPasswords =
+        clienteErp.id === 'cli_bronze' ? ['bronze2026', 'construcao2026'] :
+        clienteErp.id === 'cli_silver' ? ['silver2026', 'educacao2026'] :
+        clienteErp.id === 'cli_gold' ? ['gold2026', 'servicos2026'] :
+        [];
+
+      const isCorrectPassword =
+        clienteErp.password === passwordClean ||
+        clienteErp.password === passwordRaw ||
+        tierPasswords.includes(passwordClean) ||
         isFirebaseAuthed;
+
       if (isCorrectPassword) {
-        // Garantir sincronização se logou localmente mas Firebase está configurado
         if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
-          syncUserToFirebase(email, clienteErp.password || password);
+          syncUserToFirebase(emailNorm, clienteErp.password || passwordClean);
         }
         selecionarClienteEmpresa(clienteErp.id);
         const sessionPayload = {
@@ -887,7 +956,7 @@ async function startServer() {
           token: `token_cliente_${clienteErp.id}`,
           usuario: {
             email: clienteErp.email,
-            funcao: "CLIENTE_EMPRESA",
+            funcao: clienteErp.id === 'cli_founders' ? "SUPER_ADMIN_PAYROLL" : "CLIENTE_EMPRESA",
             empresa_id: clienteErp.id,
             nome_empresa: clienteErp.nome,
             subscription_status: clienteErp.subscription_status || 'ativo',
@@ -905,8 +974,40 @@ async function startServer() {
       }
     }
 
-    return res.status(401).json({ 
-      erro: 'Acesso Recusado. Dados de início de sessão incorretos ou utilizador não registado no Firebase Auth.' 
+    // 5. Fallback para contas autenticadas exclusivamente via Firebase Auth
+    if (isFirebaseAuthed) {
+      selecionarClienteEmpresa("cli_bronze");
+      const sessionPayload = {
+        sucesso: true,
+        mensagem: "Sessão autenticada via Firebase Auth!",
+        token: `token_firebase_${Date.now()}`,
+        usuario: {
+          email: emailNorm,
+          funcao: "CLIENTE_EMPRESA",
+          empresa_id: "cli_bronze",
+          nome_empresa: empresaAtual.nome,
+          subscription_status: "ativo",
+          subscription_plan: "Bronze",
+          next_billing_date: getDefaultNextBillingDate()
+        }
+      };
+
+      if (otpSecurityConfig.requireOtpOnLogin) {
+        return issueOtpChallenge(emailNorm, sessionPayload, res);
+      }
+
+      notifyFounder('Login via Firebase Auth Concluído', `Acesso autorizado para ${emailNorm}.`, { userEmail: emailNorm, status: 'sucesso' });
+      return res.json(sessionPayload);
+    }
+
+    notifyFounder(
+      'Tentativa de Login Falhada',
+      `Tentativa de início de sessão recusada para o e-mail "${emailNorm}".`,
+      { userEmail: emailNorm, status: 'bloqueado' }
+    );
+
+    return res.status(401).json({
+      erro: 'Dados de início de sessão incorretos. Verifique o e-mail e a palavra-passe.'
     });
   });
 

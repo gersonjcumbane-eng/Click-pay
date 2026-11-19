@@ -65,7 +65,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: cleanEmail, password: cleanPassword })
       });
 
       if (response.ok) {
@@ -85,7 +85,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         if (data.sucesso) {
           localStorage.setItem('paytek_auth', 'true');
           localStorage.setItem('paytek_token', data.token);
-          localStorage.setItem('paytek_user', email);
+          localStorage.setItem('paytek_user', data.usuario?.email || cleanEmail);
           if (data.usuario) {
             if (data.usuario.funcao) {
               localStorage.setItem('paytek_role', data.usuario.funcao);
@@ -150,7 +150,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         if (data.sucesso) {
           localStorage.setItem('paytek_auth', 'true');
           localStorage.setItem('paytek_token', data.token);
-          localStorage.setItem('paytek_user', email);
+          localStorage.setItem('paytek_user', data.usuario?.email || email.toLowerCase().trim());
           if (data.usuario) {
             if (data.usuario.funcao) {
               localStorage.setItem('paytek_role', data.usuario.funcao);
