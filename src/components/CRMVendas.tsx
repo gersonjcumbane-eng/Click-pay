@@ -112,9 +112,10 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
         fetch('/api/crm/contratos')
       ]);
 
-      if (resLeads.ok) setLeads(await resLeads.json());
-      if (resProp.ok) setPropostas(await resProp.json());
-      if (resCtr.ok) setContratos(await resCtr.json());
+      const isJson = (r: Response) => r.ok && (r.headers.get('content-type') || '').includes('application/json');
+      if (isJson(resLeads)) setLeads(await resLeads.json());
+      if (isJson(resProp)) setPropostas(await resProp.json());
+      if (isJson(resCtr)) setContratos(await resCtr.json());
     } catch (err) {
       console.error('Erro ao carregar dados do CRM:', err);
     } finally {

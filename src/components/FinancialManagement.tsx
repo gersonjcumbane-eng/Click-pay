@@ -274,10 +274,11 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
         fetch(`/api/financeiro/apuramento-iva?periodo=${encodeURIComponent(selectedPeriod)}`)
       ]);
 
-      if (compRes.ok) setCompras(await compRes.json());
-      if (vendRes.ok) setVendas(await vendRes.json());
-      if (cxRes.ok) setCaixa(await cxRes.json());
-      if (ivaRes.ok) setApuramentoIva(await ivaRes.json());
+      const isJson = (r: Response) => r.ok && (r.headers.get('content-type') || '').includes('application/json');
+      if (isJson(compRes)) setCompras(await compRes.json());
+      if (isJson(vendRes)) setVendas(await vendRes.json());
+      if (isJson(cxRes)) setCaixa(await cxRes.json());
+      if (isJson(ivaRes)) setApuramentoIva(await ivaRes.json());
     } catch (err) {
       console.error('Erro ao carregar dados financeiros:', err);
     } finally {

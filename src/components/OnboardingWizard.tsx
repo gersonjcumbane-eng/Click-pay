@@ -75,6 +75,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
   const [metodoPagamento, setMetodoPagamento] = useState<'ONLINE' | 'VOUCHER'>('ONLINE');
   const [carteiraNumero, setCarteiraNumero] = useState('');
   const [voucherCode, setVoucherCode] = useState('');
+  const [isPayingPlan, setIsPayingPlan] = useState(false);
 
   // Step 3: Warehouse Initial State
   const [armazemNome, setArmazemNome] = useState('Armazém Principal');
@@ -125,6 +126,9 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     let clientId = `cli_reg_${Date.now()}`;
     let serverData: any = null;
 
+    const isJsonRes = (r: Response | null) =>
+      !!r && (r.headers.get('content-type') || '').includes('application/json');
+
     try {
       const res = await fetch('/api/auth/register-onboarding', {
         method: 'POST',
@@ -138,12 +142,12 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         })
       }).catch(() => null);
 
-      if (res && res.ok) {
+      if (res && res.ok && isJsonRes(res)) {
         serverData = await res.json().catch(() => null);
         if (serverData?.usuario?.id || serverData?.usuario?.empresa_id) {
           clientId = serverData.usuario.id || serverData.usuario.empresa_id;
         }
-      } else if (res && !res.ok) {
+      } else if (res && !res.ok && isJsonRes(res) && res.status >= 400 && res.status < 500 && res.status !== 404 && res.status !== 405) {
         const errData = await res.json().catch(() => ({}));
         setFormError(errData.erro || 'Não foi possível criar a conta. Verifique os dados.');
         setIsCreatingAccount(false);
@@ -176,6 +180,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       localStorage.setItem('paytek_token', serverData?.token || `token_cliente_${clientId}`);
       localStorage.setItem('paytek_user', cleanEmail);
       localStorage.setItem('paytek_role', serverData?.usuario?.funcao || 'CLIENTE_EMPRESA');
+      localStorage.setItem('paytek_company_id', clientId);
       localStorage.setItem('paytek_sub_status', 'ativo');
       localStorage.setItem('paytek_sub_plan', 'Starter');
       localStorage.setItem('paytek_company_name', cleanEmpresa);
@@ -196,16 +201,19 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     setIsSearchingNuel(true);
     try {
       const res = await fetch(`/api/nuel/consultar?nuel=${encodeURIComponent(nuelSearch)}`);
-      const data = await res.json();
-      if (data.sucesso && data.empresa) {
-        setNomeEmpresa(data.empresa.nome || `Empresa ${nuelSearch}`);
-        setNuit(data.empresa.nuit || nuit || '400123456');
-        setNuel(data.empresa.nuel || nuelSearch);
-        if (data.empresa.provincia) setProvincia(data.empresa.provincia);
-        if (data.empresa.distrito) setDistrito(data.empresa.distrito);
-        if (data.empresa.endereco) setEndereco(data.empresa.endereco);
-        if (data.empresa.email) setEmpresaEmail(data.empresa.email);
-        if (data.empresa.telefone) setEmpresaTelefone(data.empresa.telefone);
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (res.ok && isJson) {
+        const data = await res.json();
+        if (data.sucesso && data.empresa) {
+          setNomeEmpresa(data.empresa.nome || `Empresa ${nuelSearch}`);
+          setNuit(data.empresa.nuit || nuit || '400123456');
+          setNuel(data.empresa.nuel || nuelSearch);
+          if (data.empresa.provincia) setProvincia(data.empresa.provincia);
+          if (data.empresa.distrito) setDistrito(data.empresa.distrito);
+          if (data.empresa.endereco) setEndereco(data.empresa.endereco);
+          if (data.empresa.email) setEmpresaEmail(data.empresa.email);
+          if (data.empresa.telefone) setEmpresaTelefone(data.empresa.telefone);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -225,6 +233,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     const cleanNuit = nuit.replace(/\s+/g, '').trim();
     const targetPlan = selectedPlan === 'Vitalicio' ? 'Gold' : selectedPlan;
     const feeBase = targetPlan === 'Starter' ? 3500 : targetPlan === 'Growth' ? 6500 : 9500;
+    const mappedPlan = targetPlan === 'Starter' ? 'Bronze' : targetPlan === 'Growth' ? 'Silver' : 'Gold';
 
     try {
       const payload = {
@@ -250,11 +259,16 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
+      }).catch(() => null);
 
-      const data = await res.json();
+      const isJson = !!res && (res.headers.get('content-type') || '').includes('application/json');
 
-      if (res.ok && data.sucesso) {
+      if (res && isJson) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setFormError(data.erro || 'Falha ao concluir registo. Verifique os dados.');
+          return;
+        }
         const clientId = createdCompanyId || data.usuario?.id || data.usuario?.empresa_id || `cli_reg_${Date.now()}`;
         await syncRegisteredAccountToFirestore({
           clientId,
@@ -270,23 +284,59 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         });
 
         localStorage.setItem('paytek_auth', 'true');
-        localStorage.setItem('paytek_token', data.token);
+        localStorage.setItem('paytek_token', data.token || `token_cliente_${clientId}`);
         localStorage.setItem('paytek_user', cleanEmail);
-        if (data.usuario) {
-          localStorage.setItem('paytek_role', data.usuario.funcao || 'CLIENTE_EMPRESA');
-          localStorage.setItem('paytek_sub_status', data.usuario.subscription_status || 'ativo');
-          localStorage.setItem('paytek_sub_plan', data.usuario.subscription_plan || targetPlan);
-          const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-          localStorage.setItem('paytek_sub_expire', data.usuario.next_billing_date || defaultExp);
-          localStorage.setItem('paytek_company_name', data.usuario.nome_empresa || cleanEmpresa);
-        }
+        localStorage.setItem('paytek_role', data.usuario?.funcao || 'CLIENTE_EMPRESA');
+        localStorage.setItem('paytek_company_id', clientId);
+        localStorage.setItem('paytek_sub_status', data.usuario?.subscription_status || 'ativo');
+        localStorage.setItem('paytek_sub_plan', data.usuario?.subscription_plan || mappedPlan);
+        const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        localStorage.setItem('paytek_sub_expire', data.usuario?.next_billing_date || defaultExp);
+        localStorage.setItem('paytek_company_name', data.usuario?.nome_empresa || cleanEmpresa);
         onSuccess(data.usuario);
-      } else {
-        setFormError(data.erro || 'Falha ao concluir registo. Verifique os dados.');
+        return;
       }
+
+      // Modo nuvem / deploy estático (Firebase Hosting / Vercel): concluir diretamente via Firebase Firestore
+      const clientId = createdCompanyId || `cli_reg_${Date.now()}`;
+      await syncRegisteredAccountToFirestore({
+        clientId,
+        nomeEmpresa: cleanEmpresa,
+        email: cleanEmail,
+        nuit: cleanNuit || '400000000',
+        password: senha,
+        plano: targetPlan,
+        feeBase,
+        telefone: empresaTelefone || '+258 84 000 0000',
+        endereco,
+        provincia
+      });
+
+      const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const fallbackUser = {
+        id: clientId,
+        email: cleanEmail,
+        funcao: 'CLIENTE_EMPRESA',
+        empresa_id: clientId,
+        nome_empresa: cleanEmpresa,
+        subscription_status: 'ativo',
+        subscription_plan: mappedPlan,
+        next_billing_date: defaultExp
+      };
+
+      localStorage.setItem('paytek_auth', 'true');
+      localStorage.setItem('paytek_token', `token_cliente_${clientId}`);
+      localStorage.setItem('paytek_user', cleanEmail);
+      localStorage.setItem('paytek_role', 'CLIENTE_EMPRESA');
+      localStorage.setItem('paytek_company_id', clientId);
+      localStorage.setItem('paytek_sub_status', 'ativo');
+      localStorage.setItem('paytek_sub_plan', mappedPlan);
+      localStorage.setItem('paytek_sub_expire', defaultExp);
+      localStorage.setItem('paytek_company_name', cleanEmpresa);
+      onSuccess(fallbackUser);
     } catch (err) {
       console.error(err);
-      setFormError('Erro de ligação com o servidor ClickPay ERP.');
+      setFormError('Erro ao concluir a configuração no Firebase. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -1207,10 +1257,37 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                     </button>
 
                     <button
-                      onClick={() => setCurrentStep(3)}
-                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
+                      type="button"
+                      disabled={isPayingPlan}
+                      onClick={async () => {
+                        if (metodoPagamento === 'ONLINE' && carteiraNumero.trim()) {
+                          setIsPayingPlan(true);
+                          const amountNum = selectedPlan === 'Growth' ? 6500 : selectedPlan === 'Business' ? 9500 : 3500;
+                          try {
+                            const res = await fetch('/api/payments/c2b/collect', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                phone: carteiraNumero.trim(),
+                                amount: amountNum,
+                                description: `Plano ${selectedPlan} ClickPay ERP`
+                              })
+                            });
+                            const payData = await res.json().catch(() => null);
+                            if (payData?.transaction?.responseMessage) {
+                              showToast(payData.transaction.responseMessage);
+                            }
+                          } catch {
+                            // Continua para configuração de armazém mesmo em modo offline
+                          } finally {
+                            setIsPayingPlan(false);
+                          }
+                        }
+                        setCurrentStep(3);
+                      }}
+                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
                     >
-                      Finalizar e Activar Conta
+                      {isPayingPlan ? 'A processar carteira móvel...' : 'Finalizar e Activar Conta'}
                       <ArrowRight size={14} />
                     </button>
                   </div>

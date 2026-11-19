@@ -6,8 +6,15 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from "@google/genai";
+import {
+  getMobileGatewayStatuses,
+  dispatchB2CPayment,
+  collectC2BPayment,
+  listMobileTransactions,
+  queryMobileTransactionStatus,
+  processOperatorWebhook
+} from './src/services/mobileMoneyService';
 import { 
   employees, 
   configuracaoFiscal, 
@@ -73,7 +80,7 @@ import { gerarCartaApoioDocx } from './src/docxService';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Carregar configuração do Firebase para sincronização de contas
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -135,6 +142,16 @@ async function startServer() {
   // Body parser com suporte a documentos e faturas
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      service: 'clickpay-erp',
+      env: process.env.NODE_ENV || 'development',
+      port: PORT,
+      timestamp: new Date().toISOString()
+    });
+  });
 
   let aiClient: any = null;
   function getGeminiClient() {
@@ -974,7 +991,98 @@ async function startServer() {
       }
     }
 
-    // 5. Fallback para contas autenticadas exclusivamente via Firebase Auth
+    // 5. Verificar na coleção saas_clients do Firestore (recuperação após reinício do servidor)
+    if (firebaseConfig && firebaseConfig.projectId && firebaseConfig.apiKey) {
+      try {
+        const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+        const queryUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
+        const fsRes = await fetch(queryUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            structuredQuery: {
+              from: [{ collectionId: 'saas_clients' }],
+              where: {
+                fieldFilter: {
+                  field: { fieldPath: 'email' },
+                  op: 'EQUAL',
+                  value: { stringValue: emailNorm }
+                }
+              },
+              limit: 1
+            }
+          })
+        });
+        if (fsRes.ok) {
+          const fsRows: any = await fsRes.json().catch(() => []);
+          const matchedDoc = Array.isArray(fsRows) ? fsRows.find((r: any) => r?.document?.fields) : null;
+          if (matchedDoc) {
+            const f = matchedDoc.document.fields;
+            const docId = f.id?.stringValue || matchedDoc.document.name?.split('/').pop() || `cli_fs_${Date.now()}`;
+            const companyName = f.companyName?.stringValue || f.tradeName?.stringValue || 'Empresa ClickPay';
+            const docPassword = f.adminPassword?.stringValue || '';
+            const docPlan = f.plan?.stringValue || 'Starter';
+            const docStatus = String(f.status?.stringValue || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo';
+            const docNuit = f.nuit?.stringValue || '400000000';
+            const docFee = Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || 3500);
+
+            if (docPassword === passwordClean || docPassword === passwordRaw || isFirebaseAuthed) {
+              const planMapped =
+                docPlan === 'Starter' ? 'Bronze' :
+                docPlan === 'Growth' ? 'Silver' :
+                docPlan === 'Business' ? 'Gold' :
+                docPlan;
+
+              let restored = baseDadosClientes.find(c => c.id === docId || String(c.email || '').toLowerCase().trim() === emailNorm);
+              if (!restored) {
+                restored = adicionarClienteEmpresa({
+                  id: docId,
+                  nome: companyName,
+                  nuit: docNuit,
+                  endereco: f.address?.stringValue || 'Maputo, Moçambique',
+                  provincia: 'Maputo Cidade',
+                  distrito: 'KaMpfumo',
+                  regime_iva: 'Geral (16%)',
+                  nuel: '100000000',
+                  email: emailNorm,
+                  telefone: f.phone?.stringValue || '+258 84 000 0000',
+                  logo: '/clickpay-logo.png',
+                  password: docPassword || passwordClean,
+                  subscription_status: docStatus as any,
+                  subscription_plan: planMapped as any,
+                  next_billing_date: getDefaultNextBillingDate(),
+                  fee_base: docFee,
+                  fee_por_slip: 100
+                });
+              }
+              selecionarClienteEmpresa(restored.id);
+              const sessionPayload = {
+                sucesso: true,
+                mensagem: `Sessão restaurada com sucesso para ${companyName}`,
+                token: `token_cliente_${restored.id}`,
+                usuario: {
+                  email: emailNorm,
+                  funcao: 'CLIENTE_EMPRESA',
+                  empresa_id: restored.id,
+                  nome_empresa: restored.nome,
+                  subscription_status: restored.subscription_status || 'ativo',
+                  subscription_plan: restored.subscription_plan || 'Bronze',
+                  next_billing_date: restored.next_billing_date || getDefaultNextBillingDate()
+                }
+              };
+              if (otpSecurityConfig.requireOtpOnLogin) {
+                return issueOtpChallenge(emailNorm, sessionPayload, res);
+              }
+              return res.json(sessionPayload);
+            }
+          }
+        }
+      } catch (fsLookupErr) {
+        console.warn('[Firestore Login Lookup Warning]:', fsLookupErr);
+      }
+    }
+
+    // 6. Fallback para contas autenticadas exclusivamente via Firebase Auth
     if (isFirebaseAuthed) {
       selecionarClienteEmpresa("cli_bronze");
       const sessionPayload = {
@@ -4267,16 +4375,29 @@ Host: https://clickpay.co.mz
         contaBanco.saldo -= custoTotalOperacao;
       }
 
-      // Simulação do disparo da API B2C para as operadoras (M-Pesa/e-Mola)
-      console.log(`[FINTECH] Lote liquidado com sucesso. Débito de ${custoTotalOperacao} MT efetuado diretamente na conta bancária.`);
-
-      // Obter detalhes de transação para histórico ou relatório do ecrã
-      const detalheTransacoes = listaTrabalhadores.map((t: any) => ({
-        funcionario: t.nome,
-        contacto_carteira: t.telefone || t.carteira_movel || '841234567',
-        valor_enviado: Number(t.salarioLiquido) || 0,
-        referencia_b2c: `PAY-MZ-${Math.floor(100000 + Math.random() * 900000)}`
-      }));
+      // Disparo da API B2C para as operadoras (M-Pesa / e-Mola / mKesh) via mobileMoneyService
+      const detalheTransacoes = await Promise.all(
+        listaTrabalhadores.map(async (t: any) => {
+          const phone = t.telefone || t.carteira_movel || '841234567';
+          const valor = Number(t.salarioLiquido) || 0;
+          const b2cTx = await dispatchB2CPayment({
+            phone,
+            amount: valor,
+            beneficiaryName: t.nome,
+            reference: `SAL-${Date.now().toString().slice(-6)}`
+          });
+          return {
+            funcionario: t.nome,
+            contacto_carteira: phone,
+            operadora: b2cTx.operator,
+            modo_integracao: b2cTx.mode,
+            valor_enviado: valor,
+            status_operadora: b2cTx.status,
+            referencia_b2c: b2cTx.operatorTransactionId || b2cTx.id
+          };
+        })
+      );
+      console.log(`[FINTECH] Lote liquidado (${detalheTransacoes.length} transferências). Débito de ${custoTotalOperacao} MT efetuado diretamente na conta bancária.`);
 
       // 4. Gravar operação no histórico para que apareça de forma 100% dinâmica na Análise de Períodos
       try {
@@ -4472,28 +4593,36 @@ Host: https://clickpay.co.mz
         });
       }
 
-      // 5. Marcar os vales descontados como descontados e registrar logs de transações
-      trabalhadoresAPagar.forEach((trab: any) => {
+      // 5. Marcar os vales descontados como descontados e disparar transações B2C nas operadoras móveis
+      for (const trab of trabalhadoresAPagar) {
         const { emp, liquidoFinal, valesDoMes, inss, irps } = trab;
         
         valesDoMes.forEach((v: any) => {
           v.status = "DESCONTADO_FOLHA";
         });
 
+        const b2cTx = await dispatchB2CPayment({
+          phone: emp.carteira_movel || '841234567',
+          amount: liquidoFinal,
+          beneficiaryName: emp.nome,
+          reference: `AUTO-${activePeriod.replace(/\s+/g, '')}`
+        });
+
         logsPagamentosGlobais.push({
-          id_transacao: `TX-AUTO-${Math.floor(10000 + Math.random() * 90000)}`,
+          id_transacao: b2cTx.operatorTransactionId || b2cTx.id,
           data: new Date().toISOString().split('T')[0],
           funcionario: emp.nome,
           carteira: emp.carteira_movel || '841234567',
           liquido: liquidoFinal,
           inss: inss,
           irps: irps,
-          status: "LIQUIDADO",
+          status: b2cTx.status === 'FALHOU' ? 'FALHOU' : 'LIQUIDADO',
           periodo: activePeriod
         });
 
-        logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 🚀 [API DISPARO] Transferência B2C móvel efetuada com sucesso de ${liquidoFinal.toLocaleString('pt-MZ')} MT para o número ${emp.carteira_movel} (${emp.nome}).`);
-      });
+        const modeTag = b2cTx.simulated ? 'SIMULAÇÃO' : b2cTx.mode;
+        logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 🚀 [${b2cTx.operator} · ${modeTag}] Transferência B2C de ${liquidoFinal.toLocaleString('pt-MZ')} MT para ${emp.carteira_movel} (${emp.nome}) — Ref: ${b2cTx.operatorTransactionId || b2cTx.id}.`);
+      }
 
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 📄 [PDF COMPILATION] Todos os recibos salariais em PDF correspondentes foram gerados de forma autónoma no repositório de arquivos.`);
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] ✅ [COMPLETE] Ciclo de liquidação em piloto automático concluído com sucesso total para o período de ${activePeriod}.`);
@@ -4533,28 +4662,36 @@ Host: https://clickpay.co.mz
       }
 
       console.log(`[FINTECH] Iniciando processamento de lote para Empresa: ${empresa_id}`);
-      let logsTransacoes: any[] = [];
+      const logsTransacoes: any[] = [];
       let totalFinanciado = 0;
 
-      // Percorre a lista efetuando a transferência monetária simulada via API de telecomunicações
-      listaTrabalhadores.forEach((trabalhador: any) => {
-        // Regra Fintech: Aplica a taxa de conveniência de 15 MT por trabalhador
+      for (const trabalhador of listaTrabalhadores) {
         const taxaConveniencia = 15.00;
-        totalFinanciado += (Number(trabalhador.salarioLiquido) || 0) + taxaConveniencia;
+        const valorLiquido = Number(trabalhador.salarioLiquido) || 0;
+        totalFinanciado += valorLiquido + taxaConveniencia;
+        const phone = trabalhador.telefone || trabalhador.carteira_movel || '841234567';
+
+        const b2cTx = await dispatchB2CPayment({
+          phone,
+          amount: valorLiquido,
+          beneficiaryName: trabalhador.nome
+        });
 
         logsTransacoes.push({
           funcionario: trabalhador.nome,
-          contacto_carteira: trabalhador.telefone || trabalhador.carteira_movel, // Ex: 84XXXXXXX ou 86XXXXXXX
-          valor_enviado: Number(trabalhador.salarioLiquido) || 0,
+          contacto_carteira: phone,
+          operadora: b2cTx.operator,
+          modo_integracao: b2cTx.mode,
+          valor_enviado: valorLiquido,
           taxa_plataforma: taxaConveniencia,
-          status_liquidacao: "SUCESSO_LIQUIDADO",
-          referencia_b2c: `PAY-MZ-${Math.floor(100000 + Math.random() * 900000)}`
+          status_liquidacao: b2cTx.status,
+          referencia_b2c: b2cTx.operatorTransactionId || b2cTx.id
         });
-      });
+      }
 
       return res.json({
         sucesso: true,
-        mensagem: `Lote de salários liquidado com sucesso via API financeira! Total de ${listaTrabalhadores.length} trabalhadores pagos.`,
+        mensagem: `Lote de salários processado via Mobile Money Gateway! Total de ${listaTrabalhadores.length} trabalhadores.`,
         resumoFinanceiro: {
           totalLiquidoDisparado: totalFinanciado - (listaTrabalhadores.length * 15),
           totalTaxasGanhasStartup: listaTrabalhadores.length * 15,
@@ -4565,6 +4702,126 @@ Host: https://clickpay.co.mz
 
     } catch (error) {
       res.status(500).json({ erro: 'Erro interno ao processar liquidação em lote.' });
+    }
+  });
+
+  // =========================================================================
+  // 1B. GATEWAYS MÓVEIS MOÇAMBIQUE (M-PESA, E-MOLA, MKESH) & WEBHOOKS
+  // =========================================================================
+  app.get('/api/payments/gateways/status', (req: Request, res: Response) => {
+    const forwardedProto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+    const baseUrl = (process.env.APP_URL || `${forwardedProto}://${host}`).replace(/\/+$/, '');
+    const gateways = getMobileGatewayStatuses().map((gw) => ({
+      ...gw,
+      webhookUrl: `${baseUrl}${gw.webhookPath}`
+    }));
+
+    return res.json({
+      sucesso: true,
+      baseUrl,
+      gateways,
+      transactions: listMobileTransactions(50)
+    });
+  });
+
+  app.post('/api/payments/c2b/collect', async (req: Request, res: Response) => {
+    try {
+      const { phone, amount, reference, description, operator } = req.body;
+      if (!phone || !amount || Number(amount) <= 0) {
+        return res.status(400).json({ erro: 'Informe um número de telemóvel moçambicano e um valor positivo em MT.' });
+      }
+      const tx = await collectC2BPayment({
+        phone: String(phone),
+        amount: Number(amount),
+        reference: reference ? String(reference) : undefined,
+        description: description ? String(description) : 'Pagamento ClickPay ERP',
+        operatorOverride: operator
+      });
+      return res.status(tx.status === 'FALHOU' ? 402 : 200).json({
+        sucesso: tx.status !== 'FALHOU',
+        transaction: tx
+      });
+    } catch (err: any) {
+      return res.status(500).json({ erro: err?.message || 'Erro ao iniciar cobrança móvel C2B.' });
+    }
+  });
+
+  app.post('/api/payments/b2c/disburse', async (req: Request, res: Response) => {
+    try {
+      const { phone, amount, beneficiaryName, reference, operator } = req.body;
+      if (!phone || !amount || Number(amount) <= 0) {
+        return res.status(400).json({ erro: 'Informe o número da carteira móvel e o valor a transferir em MT.' });
+      }
+      const tx = await dispatchB2CPayment({
+        phone: String(phone),
+        amount: Number(amount),
+        beneficiaryName: beneficiaryName ? String(beneficiaryName) : undefined,
+        reference: reference ? String(reference) : undefined,
+        operatorOverride: operator
+      });
+      return res.status(tx.status === 'FALHOU' ? 402 : 200).json({
+        sucesso: tx.status !== 'FALHOU',
+        transaction: tx
+      });
+    } catch (err: any) {
+      return res.status(500).json({ erro: err?.message || 'Erro ao processar desembolso B2C.' });
+    }
+  });
+
+  app.get('/api/payments/transactions', (req: Request, res: Response) => {
+    const limit = Number(req.query.limit || 50);
+    return res.json({
+      sucesso: true,
+      transactions: listMobileTransactions(limit)
+    });
+  });
+
+  app.get('/api/payments/status/:ref', async (req: Request, res: Response) => {
+    const result = await queryMobileTransactionStatus(String(req.params.ref));
+    return res.json({
+      sucesso: result.found,
+      ...result
+    });
+  });
+
+  app.post('/api/webhooks/mpesa', (req: Request, res: Response) => {
+    try {
+      const result = processOperatorWebhook('MPESA', req.headers, req.body);
+      return res.status(200).json({
+        received: true,
+        output_ResponseCode: 'INS-0',
+        output_ResponseDesc: 'Request processed successfully',
+        transaction: result.transaction
+      });
+    } catch (err: any) {
+      return res.status(401).json({ received: false, erro: err?.message || 'Webhook não autorizado.' });
+    }
+  });
+
+  app.post('/api/webhooks/emola', (req: Request, res: Response) => {
+    try {
+      const result = processOperatorWebhook('EMOLA', req.headers, req.body);
+      return res.status(200).json({
+        received: true,
+        status: 'OK',
+        transaction: result.transaction
+      });
+    } catch (err: any) {
+      return res.status(401).json({ received: false, erro: err?.message || 'Webhook e-Mola não autorizado.' });
+    }
+  });
+
+  app.post('/api/webhooks/mkesh', (req: Request, res: Response) => {
+    try {
+      const result = processOperatorWebhook('MKESH', req.headers, req.body);
+      return res.status(200).json({
+        received: true,
+        status: 'OK',
+        transaction: result.transaction
+      });
+    } catch (err: any) {
+      return res.status(401).json({ received: false, erro: err?.message || 'Webhook mKesh não autorizado.' });
     }
   });
 
@@ -5995,15 +6252,29 @@ Host: https://clickpay.co.mz
   });
 
 
-  // Vite Integration
+  // Retornar JSON 404 para rotas /api/* não existentes antes do fallback SPA
+  app.all('/api/*', (req: Request, res: Response) => {
+    res.status(404).json({ erro: `Rota API não encontrada: ${req.method} ${req.path}` });
+  });
+
+  // Vite Integration (apenas em desenvolvimento) / Static Dist (produção)
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const cwdDist = path.join(process.cwd(), 'dist');
+    const relDist = path.resolve(__dirname, '..', 'dist');
+    const sameDist = path.resolve(__dirname);
+    const distPath = fs.existsSync(path.join(cwdDist, 'index.html'))
+      ? cwdDist
+      : fs.existsSync(path.join(relDist, 'index.html'))
+      ? relDist
+      : sameDist;
+
     app.use(express.static(distPath));
     app.get('*', (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));

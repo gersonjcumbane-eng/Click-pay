@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
-import { getDefaultNextBillingDate } from '../db_tax';
+import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
 
 interface ClientCompany {
   id: string;
@@ -200,7 +200,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     try {
       setLoadingFbUsers(true);
       const res = await fetch('/api/firebase-auth/users');
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         if (data && typeof data === 'object' && 'users' in data) {
           setFbUsers(data.users || []);
@@ -223,9 +223,10 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     try {
       setLoading(true);
       const res = await fetch('/api/clients');
-      if (!res.ok) throw new Error('Não foi possível obter a lista de empresas clientes.');
-      const data = await res.json();
+      const isJson = res.ok && (res.headers.get('content-type') || '').includes('application/json');
+      const data = isJson ? await res.json() : baseDadosClientes;
       setClients(data);
+      setError(null);
       
       // If there's an active client and no invoice client selected, select the active one by default
       const active = data.find((c: ClientCompany) => c.isActive);
@@ -239,7 +240,8 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
         }
       }
     } catch (err: any) {
-      setError(err.message || 'Erro ao carregar clientes.');
+      setClients(baseDadosClientes as any);
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -248,7 +250,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const fetchCredentialRequests = async () => {
     try {
       const res = await fetch('/api/admin/credential-requests');
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         if (Array.isArray(data)) {
           setCredentialRequests(prev => {

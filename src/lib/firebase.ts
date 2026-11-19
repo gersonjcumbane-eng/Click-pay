@@ -1,12 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
-export { doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot };
+export { doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where };
 
 export enum OperationType {
   CREATE = 'create',
@@ -254,6 +254,85 @@ export async function syncRegisteredAccountToFirestore(params: {
   }
 
   return { syncedCollections, errors };
+}
+
+// Autenticar conta registada no Firebase (Firestore saas_clients + Firebase Auth) para ambientes estáticos/cloud
+export async function authenticateClientInFirebase(
+  email: string,
+  password: string
+): Promise<{
+  ok: boolean;
+  client?: {
+    id: string;
+    email: string;
+    companyName: string;
+    plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+    status: 'ativo' | 'suspenso';
+    nuit?: string;
+  };
+}> {
+  const emailNorm = String(email || '').toLowerCase().trim();
+  const passRaw = String(password || '');
+  const passTrim = passRaw.trim();
+  if (!emailNorm || !passTrim) return { ok: false };
+
+  const mapPlan = (p?: string): 'Bronze' | 'Silver' | 'Gold' | 'Platinum' => {
+    if (!p) return 'Bronze';
+    if (p === 'Starter' || p === 'Bronze') return 'Bronze';
+    if (p === 'Growth' || p === 'Silver' || p === 'Profissional') return 'Silver';
+    if (p === 'Business' || p === 'Gold' || p === 'Empresarial') return 'Gold';
+    if (p === 'Platinum') return 'Platinum';
+    return 'Bronze';
+  };
+
+  let firebaseAuthOk = false;
+  try {
+    const cred = await signInWithEmailAndPassword(auth, emailNorm, passTrim);
+    if (cred?.user) {
+      firebaseAuthOk = true;
+    }
+  } catch {
+    // Continua para verificação na coleção saas_clients do Firestore
+  }
+
+  try {
+    const q = query(collection(db, 'saas_clients'), where('email', '==', emailNorm));
+    const snap = await getDocs(q);
+    for (const d of snap.docs) {
+      const data: any = d.data();
+      const storedPass = String(data.adminPassword || '');
+      if (firebaseAuthOk || storedPass === passTrim || storedPass === passRaw) {
+        return {
+          ok: true,
+          client: {
+            id: data.id || d.id,
+            email: emailNorm,
+            companyName: data.companyName || data.tradeName || 'Empresa ClickPay',
+            plan: mapPlan(data.plan),
+            status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo',
+            nuit: data.nuit || ''
+          }
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore saas_clients auth lookup warning:', err);
+  }
+
+  if (firebaseAuthOk) {
+    return {
+      ok: true,
+      client: {
+        id: `cli_fb_${Date.now()}`,
+        email: emailNorm,
+        companyName: emailNorm.split('@')[0],
+        plan: 'Bronze',
+        status: 'ativo'
+      }
+    };
+  }
+
+  return { ok: false };
 }
 
 // Test Connection to Firestore as per requirements

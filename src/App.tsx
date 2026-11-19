@@ -233,8 +233,16 @@ export default function App() {
       } else {
         // RESILIÊNCIA TOTAL PARA VERCEL (Sem backend Express Node em runtime estático):
         // Carrega os dados locais do db_tax diretamente sem travar na tela com erro de JSON inválido
+        const savedCompanyName = localStorage.getItem('paytek_company_name');
+        const savedPlan = localStorage.getItem('paytek_sub_plan') as any;
+        const savedStatus = localStorage.getItem('paytek_sub_status') as any;
         const localEmployees = [...defaultEmployees];
-        const localCompany = { ...empresaAtual };
+        const localCompany = {
+          ...empresaAtual,
+          ...(savedCompanyName ? { nome: savedCompanyName } : {}),
+          ...(savedPlan ? { subscription_plan: savedPlan } : {}),
+          ...(savedStatus ? { subscription_status: savedStatus } : {})
+        };
         const localConfig = { ...configuracaoFiscal };
         const localLogs = [...paymentLogs];
 
@@ -271,8 +279,16 @@ export default function App() {
       }
     } catch (err: any) {
       console.warn('Ativando fallback de dados locais integrados:', err);
+      const savedCompanyName = localStorage.getItem('paytek_company_name');
+      const savedPlan = localStorage.getItem('paytek_sub_plan') as any;
+      const savedStatus = localStorage.getItem('paytek_sub_status') as any;
       setEmployees([...defaultEmployees]);
-      setCompany({ ...empresaAtual });
+      setCompany({
+        ...empresaAtual,
+        ...(savedCompanyName ? { nome: savedCompanyName } : {}),
+        ...(savedPlan ? { subscription_plan: savedPlan } : {}),
+        ...(savedStatus ? { subscription_status: savedStatus } : {})
+      });
       setConfigFiscal({ ...configuracaoFiscal });
       setLogs([...paymentLogs]);
       setError(null);

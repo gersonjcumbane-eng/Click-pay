@@ -246,7 +246,7 @@ export default function Dashboard({
       const res = await fetch('/api/clientes/listar-contratos', {
         headers: { 'usuario-simulado': usuarioSimulado }
       });
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setContratos(data);
       }
@@ -273,7 +273,7 @@ export default function Dashboard({
     setLoadingCarteira(true);
     try {
       const res = await fetch('/api/fintech/carteira');
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setSaldoCarteira(data.saldo_disponivel_mz || 0);
       }

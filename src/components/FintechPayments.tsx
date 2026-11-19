@@ -30,7 +30,12 @@ import {
   Cpu,
   Sparkles,
   Settings,
-  Zap
+  Zap,
+  Smartphone,
+  Copy,
+  Check,
+  RefreshCw,
+  Radio
 } from 'lucide-react';
 import { Employee, CompanyData } from '../types';
 import { sendBrowserNotification } from '../utils/notifications';
@@ -61,9 +66,20 @@ export default function FintechPayments({
 }: FintechPaymentsProps) {
   const { showSuccess, showError } = useToast();
   const confirmAction = useConfirm();
-  const [activeSubTab, setActiveSubTab] = useState<'batch' | 'advances' | 'bankAccounts' | 'autoPilot'>('batch');
+  const [activeSubTab, setActiveSubTab] = useState<'batch' | 'advances' | 'bankAccounts' | 'autoPilot' | 'gateways'>('batch');
   const [vales, setVales] = useState<Vale[]>([]);
   const [loadingVales, setLoadingVales] = useState(false);
+
+  // Mobile Money Gateways State (M-Pesa, e-Mola, mKesh)
+  const [gateways, setGateways] = useState<any[]>([]);
+  const [mobileTransactions, setMobileTransactions] = useState<any[]>([]);
+  const [loadingGateways, setLoadingGateways] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+  const [c2bPhone, setC2bPhone] = useState('');
+  const [c2bAmount, setC2bAmount] = useState('');
+  const [c2bDesc, setC2bDesc] = useState('Subscrição ClickPay ERP');
+  const [c2bLoading, setC2bLoading] = useState(false);
+  const [c2bResult, setC2bResult] = useState<any | null>(null);
   
   // Auto-Pilot states
   const [isAutoPilotActive, setIsAutoPilotActive] = useState(true);
@@ -126,7 +142,7 @@ export default function FintechPayments({
     setLoadingVales(true);
     try {
       const res = await fetch('/api/vales/listar');
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setVales(data);
       }
@@ -141,7 +157,7 @@ export default function FintechPayments({
   const fetchSaldo = async () => {
     try {
       const res = await fetch('/api/fintech/carteira');
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setSaldoDisponivel(data.saldo_disponivel_mz);
       }
@@ -154,7 +170,7 @@ export default function FintechPayments({
   const fetchContasBancarias = async () => {
     try {
       const res = await fetch('/api/fintech/contas-bancarias');
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setContasBancarias(data);
         if (data.length > 0) {
@@ -165,6 +181,62 @@ export default function FintechPayments({
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const fetchGatewaysStatus = async () => {
+    setLoadingGateways(true);
+    try {
+      const res = await fetch('/api/payments/gateways/status');
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
+        const data = await res.json();
+        setGateways(data.gateways || []);
+        setMobileTransactions(data.transactions || []);
+      }
+    } catch (e) {
+      console.error('Erro ao consultar gateways móveis:', e);
+    } finally {
+      setLoadingGateways(false);
+    }
+  };
+
+  const handleCopyWebhook = (url: string, key: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedWebhook(key);
+    showSuccess('URL de Webhook copiado!');
+    setTimeout(() => setCopiedWebhook(null), 2500);
+  };
+
+  const handleCollectC2B = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!c2bPhone.trim() || !c2bAmount || Number(c2bAmount) <= 0) {
+      showError('Informe o telemóvel moçambicano e o valor em MT.');
+      return;
+    }
+    setC2bLoading(true);
+    setC2bResult(null);
+    try {
+      const res = await fetch('/api/payments/c2b/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: c2bPhone.trim(),
+          amount: Number(c2bAmount),
+          description: c2bDesc.trim() || 'ClickPay ERP'
+        })
+      });
+      const data = await res.json();
+      setC2bResult(data);
+      if (data.sucesso) {
+        showSuccess(`Cobrança ${data.transaction?.operator || ''} processada!`);
+        fetchGatewaysStatus();
+      } else {
+        showError(data.transaction?.responseMessage || data.erro || 'Falha na cobrança móvel.');
+      }
+    } catch (err) {
+      showError('Erro de ligação ao servidor de pagamentos.');
+    } finally {
+      setC2bLoading(false);
     }
   };
 
@@ -759,6 +831,17 @@ export default function FintechPayments({
           >
             <Cpu size={12} className={activeSubTab === 'autoPilot' ? 'animate-spin' : ''} />
             🤖 Piloto Automático
+          </button>
+          <button
+            onClick={() => { setActiveSubTab('gateways'); fetchGatewaysStatus(); }}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'gateways' 
+                ? 'bg-emerald-700 text-white shadow-xs' 
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Smartphone size={12} />
+            Operadoras & Webhooks
           </button>
         </div>
       </div>
@@ -1539,7 +1622,7 @@ export default function FintechPayments({
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeSubTab === 'bankAccounts' ? (
         /* GESTÃO DE CONTAS BANCÁRIAS REAL SUBTAB */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Form para Cadastro de Nova Conta */}
@@ -1732,7 +1815,255 @@ export default function FintechPayments({
             </div>
           </div>
         </div>
-      )}
+      ) : activeSubTab === 'gateways' ? (
+        /* GATEWAYS MÓVEIS MOÇAMBIQUE (M-PESA, E-MOLA, MKESH) */
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl">
+                  <Radio size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    Integração Oficial de Operadoras Móveis (M-Pesa · e-Mola · mKesh)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Deteção automática de rede por prefixo (84/85 M-Pesa, 86/87 e-Mola, 82/83 mKesh), encriptação RSA no servidor e webhooks de confirmação.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={fetchGatewaysStatus}
+                disabled={loadingGateways}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-colors self-start"
+              >
+                <RefreshCw size={13} className={loadingGateways ? 'animate-spin' : ''} />
+                <span>Atualizar Estado</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {gateways.map((gw) => {
+                const isLive = gw.mode === 'LIVE_API';
+                const isSandbox = gw.mode === 'SANDBOX_API';
+                return (
+                  <div key={gw.operator} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 flex flex-col justify-between space-y-4">
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-slate-900">{gw.name}</span>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                          isLive
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : isSandbox
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {isLive ? 'Produção Ativa' : isSandbox ? 'Sandbox Ativo' : 'Simulação'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-600">
+                        <span>Prefixos: <b className="font-mono">{(gw.prefixes || []).join(' / ')}</b></span>
+                        <span>Código: <b className="font-mono">{gw.shortcodeMasked || 'Por configurar'}</b></span>
+                      </div>
+
+                      {/* Webhook URL para registar na operadora */}
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-1">
+                        <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                          URL de Webhook (Callback HTTPS)
+                        </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <code className="text-[10px] font-mono text-slate-700 truncate">{gw.webhookUrl}</code>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyWebhook(gw.webhookUrl, gw.operator)}
+                            className="p-1 text-slate-500 hover:text-blue-900 rounded cursor-pointer shrink-0"
+                            title="Copiar Webhook URL"
+                          >
+                            {copiedWebhook === gw.operator ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Secrets necessários no servidor */}
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                          Variáveis de Servidor (Secrets)
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {(gw.requiredEnvVars || []).map((envVar: string) => {
+                            const isMissing = (gw.missingEnvVars || []).includes(envVar);
+                            return (
+                              <span
+                                key={envVar}
+                                className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                                  isMissing
+                                    ? 'bg-white border-amber-200 text-amber-800'
+                                    : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                }`}
+                              >
+                                {envVar}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Requisitos KYC */}
+                    <div className="pt-2 border-t border-slate-200/80 space-y-1">
+                      <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                        Documentos & Requisitos da Operadora
+                      </span>
+                      <ul className="space-y-1 text-[10px] text-slate-600">
+                        {(gw.kycDocuments || []).slice(0, 3).map((docItem: string, i: number) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="text-emerald-600 font-bold">•</span>
+                            <span>{docItem}</span>
+                          </li>
+                        ))}
+                        {(gw.technicalRequirements || []).slice(0, 2).map((reqItem: string, i: number) => (
+                          <li key={`t-${i}`} className="flex items-start gap-1.5 text-slate-500">
+                            <span className="text-blue-700 font-bold">→</span>
+                            <span>{reqItem}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Terminal de Cobrança C2B & Histórico de Transações Móveis */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
+                <div className="p-2 bg-blue-50 text-blue-900 rounded-xl">
+                  <Smartphone size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900 text-sm">Cobrança C2B (Prompt PIN)</h4>
+                  <p className="text-[10px] text-slate-500">Testar ou cobrar subscrição/factura no telemóvel do cliente.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleCollectC2B} className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 block">Telemóvel (+258)</label>
+                  <input
+                    type="tel"
+                    required
+                    value={c2bPhone}
+                    onChange={(e) => setC2bPhone(e.target.value)}
+                    placeholder="Ex: 841234567 ou 861234567"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 block">Valor (MT)</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    step="0.01"
+                    value={c2bAmount}
+                    onChange={(e) => setC2bAmount(e.target.value)}
+                    placeholder="Ex: 3500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 block">Descrição</label>
+                  <input
+                    type="text"
+                    value={c2bDesc}
+                    onChange={(e) => setC2bDesc(e.target.value)}
+                    placeholder="Subscrição ClickPay ERP"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={c2bLoading}
+                  className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                >
+                  {c2bLoading ? 'A enviar pedido...' : 'Solicitar Pagamento Móvel'}
+                </button>
+              </form>
+
+              {c2bResult?.transaction && (
+                <div className={`p-3 rounded-xl border text-[11px] space-y-1 ${
+                  c2bResult.sucesso ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'
+                }`}>
+                  <p className="font-bold">
+                    {c2bResult.transaction.operator} · {c2bResult.transaction.status}
+                  </p>
+                  <p>{c2bResult.transaction.responseMessage}</p>
+                  <p className="font-mono text-[10px]">Ref: {c2bResult.transaction.thirdPartyReference}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="font-bold text-slate-900 text-sm">Registo de Transações das Operadoras (B2C & C2B)</h4>
+                  <p className="text-[10px] text-slate-500">Inclui referências de API, modo (Produção / Sandbox / Simulação) e confirmações de Webhook.</p>
+                </div>
+              </div>
+
+              {mobileTransactions.length === 0 ? (
+                <div className="py-10 text-center text-xs text-slate-400">
+                  Nenhuma transação móvel registada nesta sessão. Dispare um pagamento em lote ou teste uma cobrança C2B ao lado.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase">
+                        <th className="py-2 pr-3">Tipo</th>
+                        <th className="py-2 pr-3">Rede</th>
+                        <th className="py-2 pr-3">MSISDN</th>
+                        <th className="py-2 pr-3 text-right">Valor</th>
+                        <th className="py-2 pr-3">Referência</th>
+                        <th className="py-2 text-right">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {mobileTransactions.map((tx: any) => (
+                        <tr key={tx.id} className="hover:bg-slate-50">
+                          <td className="py-2 pr-3 font-mono font-bold text-slate-700">{tx.direction}</td>
+                          <td className="py-2 pr-3 font-bold text-blue-900">{tx.operator}</td>
+                          <td className="py-2 pr-3 font-mono text-slate-600">{tx.msisdn}</td>
+                          <td className="py-2 pr-3 text-right font-mono font-bold text-slate-900">
+                            {Number(tx.amount || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                          </td>
+                          <td className="py-2 pr-3 font-mono text-[10px] text-slate-500">{tx.operatorTransactionId || tx.thirdPartyReference}</td>
+                          <td className="py-2 text-right">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              tx.status === 'FALHOU'
+                                ? 'bg-rose-100 text-rose-800'
+                                : tx.simulated
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}>
+                              {tx.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* OVERLAY MODAL: RECARREGAR CARTEIRA */}
       {showRechargeModal && (

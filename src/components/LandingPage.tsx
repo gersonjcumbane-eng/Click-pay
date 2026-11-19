@@ -4,27 +4,13 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Building2, 
-  Lock, 
-  ArrowRight, 
-  CheckCircle2, 
-  Users, 
-  Receipt, 
-  TrendingUp, 
-  Smartphone, 
-  ShieldCheck, 
-  Calculator, 
-  Sparkles,
-  Phone,
+import {
+  ArrowRight,
+  Check,
   Mail,
-  MapPin,
-  X,
-  FileText,
-  Compass,
-  Eye,
-  Award,
-  RefreshCw
+  MessageSquare,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { calcularFolhaSalario } from '../db_tax';
 import { db, doc, setDoc } from '../lib/firebase';
@@ -36,16 +22,121 @@ interface LandingPageProps {
   onEnterPlanDemo: (plan: 'Bronze' | 'Silver' | 'Gold') => void;
 }
 
-export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlanDemo }: LandingPageProps) {
-  const { showSuccess } = useToast();
-  // Simulador inicial começa com 0 para simulação limpa
+type ModuleTab = 'salarios' | 'faturacao' | 'fintech' | 'crm';
+
+const MODULE_CONTENT: Record<
+  ModuleTab,
+  {
+    eyebrow: string;
+    title: string;
+    description: string;
+    bullets: string[];
+    previewTitle: string;
+    previewSubtitle: string;
+    rows: { label: string; value: string; tone?: 'neutral' | 'muted' | 'positive' | 'negative' }[];
+  }
+> = {
+  salarios: {
+    eyebrow: 'Recursos Humanos',
+    title: 'Processamento salarial e obrigações ao INSS',
+    description:
+      'Apuramento automático do INSS (3% trabalhador e 4% entidade empregadora), retenção progressiva de IRPS por dependentes e preparação de mapas para o portal SISSMO.',
+    bullets: [
+      'Recibos de vencimento mensais prontos a emitir em PDF',
+      'Controlo de contratos de trabalho e prazos legais (Lei 13/2023)',
+      'Gestão de faltas, subsídios e adiantamentos salariais'
+    ],
+    previewTitle: 'Exemplo de Demonstrativo Salarial',
+    previewSubtitle: 'Estrutura mensal por colaborador',
+    rows: [
+      { label: 'Salário Base', value: '35.000,00 MT' },
+      { label: 'INSS Trabalhador (3%)', value: '-1.050,00 MT', tone: 'negative' },
+      { label: 'Retenção IRPS (Tabela 2026)', value: '-1.275,00 MT', tone: 'negative' },
+      { label: 'Encargo Patronal INSS (4%)', value: '1.400,00 MT', tone: 'muted' },
+      { label: 'Líquido a Transferir', value: '32.675,00 MT', tone: 'positive' }
+    ]
+  },
+  faturacao: {
+    eyebrow: 'Vendas & Fiscalidade',
+    title: 'Faturação estruturada em Meticais',
+    description:
+      'Emita Faturas (FT), Faturas-Recibo (FR), Vendas a Dinheiro (VD) e Cotações Pró-Forma com suporte para Regime Geral de IVA (16%) e regime simplificado ISPC (3%).',
+    bullets: [
+      'Numeração sequencial e cálculo automático de IVA ou ISPC',
+      'Registo de clientes com validação de NUIT',
+      'Partilha direta de documentos em PDF por e-mail ou WhatsApp'
+    ],
+    previewTitle: 'Estrutura de Documento Comercial',
+    previewSubtitle: 'Exemplo de fatura emitida',
+    rows: [
+      { label: 'Documento', value: 'Fatura FT 2026/089' },
+      { label: 'Regime Fiscal', value: 'Regime Geral (IVA 16%)' },
+      { label: 'Base Tributável', value: '50.000,00 MT' },
+      { label: 'IVA Liquidado (16%)', value: '8.000,00 MT', tone: 'muted' },
+      { label: 'Total da Fatura', value: '58.000,00 MT', tone: 'positive' }
+    ]
+  },
+  fintech: {
+    eyebrow: 'Carteiras Móveis',
+    title: 'Pagamentos e dispersão via M-Pesa, e-Mola e mKesh',
+    description:
+      'Centralize recebimentos de clientes e execute pagamentos salariais diretamente para carteiras móveis nacionais com rastreabilidade e reconciliação automática.',
+    bullets: [
+      'Deteção automática da operadora pelos prefixos 82 a 87',
+      'Processamento de folhas em lote sem circulação de numerário',
+      'Registo de referência, estado e extrato por transação'
+    ],
+    previewTitle: 'Fluxo de Liquidação Móvel',
+    previewSubtitle: 'Canais suportados em Moçambique',
+    rows: [
+      { label: 'Vodacom M-Pesa', value: 'Prefixos 84 / 85' },
+      { label: 'Movitel e-Mola', value: 'Prefixos 86 / 87' },
+      { label: 'Tmcel mKesh', value: 'Prefixos 82 / 83' },
+      { label: 'Formato MSISDN', value: '258 + 9 dígitos', tone: 'muted' },
+      { label: 'Conciliação', value: 'Automática por referência', tone: 'positive' }
+    ]
+  },
+  crm: {
+    eyebrow: 'Gestão Comercial',
+    title: 'Pipeline comercial e renovação de contratos',
+    description:
+      'Acompanhe propostas em curso, organize a carteira de clientes empresariais e converta orçamentos aprovados em faturação sem duplicação de dados.',
+    bullets: [
+      'Registo de oportunidades por fase comercial',
+      'Alertas de vencimento e renovação de contratos',
+      'Histórico consolidado de contas a receber por cliente'
+    ],
+    previewTitle: 'Acompanhamento Comercial',
+    previewSubtitle: 'Visão operacional de carteira',
+    rows: [
+      { label: 'Propostas Emitidas', value: 'Conversão direta em FT' },
+      { label: 'Controlo de Contratos', value: 'Alertas de renovação' },
+      { label: 'Ficha de Cliente', value: 'NUIT, contacto e extrato' },
+      { label: 'Contas Correntes', value: 'Pendentes e liquidados', tone: 'muted' },
+      { label: 'Relatórios', value: 'Exportação mensal', tone: 'positive' }
+    ]
+  }
+};
+
+function formatMzn(value: number): string {
+  return `${value.toLocaleString('pt-MZ', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })} MT`;
+}
+
+export default function LandingPage({
+  onEnterLogin,
+  onEnterRegister,
+  onEnterPlanDemo
+}: LandingPageProps) {
+  const { showSuccess, showError } = useToast();
   const [salarioBase, setSalarioBase] = useState<number>(0);
   const [dependentes, setDependentes] = useState<number>(0);
   const [showContactModal, setShowContactModal] = useState<boolean>(false);
-  const [selectedPlanForContact, setSelectedPlanForContact] = useState<string>('Starter');
-  const [activeTab, setActiveTab] = useState<'salarios' | 'faturacao' | 'fintech' | 'crm'>('salarios');
+  const [selectedPlanForContact, setSelectedPlanForContact] = useState<string>('Profissional');
+  const [activeTab, setActiveTab] = useState<ModuleTab>('salarios');
 
-  // Contact modal state
   const [reqEmpresa, setReqEmpresa] = useState<string>('');
   const [reqResponsavel, setReqResponsavel] = useState<string>('');
   const [reqEmail, setReqEmail] = useState<string>('');
@@ -53,12 +144,13 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
   const [reqSubmitting, setReqSubmitting] = useState<boolean>(false);
   const [reqSuccess, setReqSuccess] = useState<boolean>(false);
 
-  // Acesso exclusivo do Fundador (Gerson Cumbane) para zerar cálculos da Landing Page
   const [isFounder, setIsFounder] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     const urlParams = new URLSearchParams(window.location.search);
     const hasAdminParam = urlParams.get('admin') === 'true' || window.location.hash === '#admin';
-    const isSavedFounder = localStorage.getItem('paytek_user') === 'gersonjcumbane@gmail.com' || localStorage.getItem('paytek_role') === 'SUPER_ADMIN_PAYROLL';
+    const isSavedFounder =
+      localStorage.getItem('paytek_user') === 'gersonjcumbane@gmail.com' ||
+      localStorage.getItem('paytek_role') === 'SUPER_ADMIN_PAYROLL';
     return hasAdminParam || isSavedFounder;
   });
 
@@ -68,7 +160,7 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
     setFounderClicks(next);
     if (next >= 3) {
       setIsFounder(true);
-      showSuccess('Modo Fundador Ativado: Controles de reset e gestão de cálculos liberados!');
+      showSuccess('Controlo de reposição do simulador ativado.');
     }
   };
 
@@ -77,10 +169,10 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
     setDependentes(0);
   };
 
-  // Cálculo ao vivo oficial
   const res = calcularFolhaSalario(salarioBase, 0, dependentes);
   const encargoPatronalInss = salarioBase * 0.04;
   const custoTotalEmpresa = salarioBase + encargoPatronalInss;
+  const currentModule = MODULE_CONTENT[activeTab];
 
   const handleOpenContact = (planName: string) => {
     setSelectedPlanForContact(planName);
@@ -90,167 +182,238 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
 
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reqEmpresa || !reqEmail || !reqTelefone) return;
+    if (!reqEmpresa.trim() || !reqEmail.trim() || !reqTelefone.trim()) return;
+
     setReqSubmitting(true);
     const reqId = `REQ-${Date.now()}`;
     const payload = {
       id: reqId,
-      empresa: reqEmpresa,
-      responsavel: reqResponsavel,
-      email: reqEmail,
-      telefone: reqTelefone,
+      empresa: reqEmpresa.trim(),
+      responsavel: reqResponsavel.trim(),
+      email: reqEmail.trim(),
+      telefone: reqTelefone.trim(),
       plano: selectedPlanForContact,
       status: 'PENDENTE',
       createdAt: new Date().toISOString()
     };
+
     try {
-      await fetch('/api/auth/request-credentials', {
+      const apiPromise = fetch('/api/auth/request-credentials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }).catch(() => null);
-      await setDoc(doc(db, 'credential_requests', reqId), payload, { merge: true }).catch(() => null);
+      })
+        .then((r) => r.ok)
+        .catch(() => false);
+
+      const firestorePromise = setDoc(doc(db, 'credential_requests', reqId), payload, {
+        merge: true
+      })
+        .then(() => true)
+        .catch(() => false);
+
+      const [apiOk, firestoreOk] = await Promise.all([apiPromise, firestorePromise]);
+      if (!apiOk && !firestoreOk) {
+        showError('Não foi possível registar o pedido. Tente via WhatsApp.');
+        return;
+      }
+      setReqSuccess(true);
     } finally {
       setReqSubmitting(false);
-      setReqSuccess(true);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800 antialiased selection:bg-blue-900 selection:text-white">
-      {/* Navbar Minimalista e Limpa */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div 
-            className="flex items-center gap-2.5 cursor-pointer select-none" 
+    <div className="min-h-screen bg-[#FAFAFB] flex flex-col font-sans text-slate-900 antialiased selection:bg-blue-900 selection:text-white">
+      {/* Header — 3 clean zones */}
+      <header className="bg-white/95 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
+          <div
+            className="flex items-center gap-2.5 cursor-pointer select-none shrink-0"
             onClick={handleSecretFounderTrigger}
             title="ClickPay"
           >
-            <img 
-              src="/clickpay-logo.png" 
-              alt="ClickPay" 
-              className="h-9 w-auto object-contain pointer-events-none" 
+            <img
+              src="/clickpay-logo.png"
+              alt="ClickPay"
+              className="h-8 w-auto object-contain pointer-events-none"
               referrerPolicy="no-referrer"
-              onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
             />
-            <span className="text-xl font-black text-slate-950 tracking-tight">ClickPay</span>
+            <span className="text-lg font-semibold tracking-tight text-slate-950 whitespace-nowrap">
+              ClickPay
+            </span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-8 text-xs font-bold text-slate-600">
-            <a href="#institucional" className="hover:text-blue-900 transition-colors">Quem somos</a>
-            <a href="#modulos" className="hover:text-blue-900 transition-colors">Funcionalidades</a>
-            <a href="#planos" className="hover:text-blue-900 transition-colors">Planos & Preços</a>
+          <nav className="hidden md:flex items-center gap-8 text-[13px] font-medium text-slate-600">
+            <a
+              href="#modulos"
+              className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
+            >
+              Funcionalidades
+            </a>
+            <a
+              href="#simulador"
+              className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
+            >
+              Simulador
+            </a>
+            <a
+              href="#planos"
+              className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
+            >
+              Planos
+            </a>
+            <a
+              href="#contacto"
+              className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
+            >
+              Contacto
+            </a>
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
+              type="button"
               onClick={onEnterLogin}
-              className="px-4 py-2 text-slate-700 hover:text-blue-900 hover:bg-slate-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-slate-200"
+              className="px-3.5 py-2 text-[13px] font-medium text-slate-700 hover:text-slate-950 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Lock size={13} />
-              <span>Entrar</span>
+              Entrar
             </button>
             <button
+              type="button"
               onClick={onEnterRegister || onEnterLogin}
-              className="px-4.5 py-2 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Sparkles size={13} className="text-amber-400" />
-              <span>Criar Conta</span>
+              Criar Conta
             </button>
           </div>
         </div>
       </header>
 
-      {/* Hero Section Direto e Profissional */}
-      <section className="py-16 md:py-24 bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          <div className="lg:col-span-7 space-y-6 text-left">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-900 rounded-full text-xs font-bold border border-blue-100">
-              <ShieldCheck size={14} className="text-blue-700" />
-              Conforme a Autoridade Tributária & INSS Moçambique · Padrão Primavera V10
-            </span>
+      {/* Hero Section */}
+      <section className="bg-white border-b border-slate-200 py-16 md:py-24">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-14 items-center">
+          <div className="lg:col-span-7 space-y-6">
+            <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-blue-900">
+              IRPS 2026 (Lei 11/2025) · Lei do Trabalho 13/2023 · SISSMO INSS
+            </p>
 
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-950 tracking-tight leading-[1.15]">
-              Gestão Financeira, Salários e Facturação <span className="text-blue-900">num só lugar.</span>
+            <h1 className="text-[clamp(2rem,3.6vw,3.15rem)] font-semibold text-slate-950 tracking-tight leading-[1.1]">
+              Gestão salarial, faturação e pagamentos móveis num único sistema.
             </h1>
 
-            <p className="text-sm sm:text-base text-slate-600 leading-relaxed font-normal max-w-xl">
-              Elimine o papel e as folhas de cálculo. O <b>ClickPay</b> automatiza o processamento salarial com a nova tabela de <b>IRPS 2026</b>, gera guias do <b>SISSMO</b>, emite facturas certificadas no padrão <b>Primavera ERP V10</b> com IVA ou ISPC (3%) e liquida pagamentos em lote via <b>M-Pesa e e-Mola</b>.
+            <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-xl">
+              Automatize o processamento de salários, declarações ao INSS e emissão de faturas em
+              Meticais, com liquidação direta via M-Pesa e e-Mola para empresas em Moçambique.
             </p>
 
-            <div className="flex flex-wrap gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-1">
               <button
+                type="button"
                 onClick={onEnterRegister || onEnterLogin}
-                className="px-6 py-3 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                className="px-5 py-2.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-[13px] font-semibold transition-colors inline-flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
               >
-                <Building2 size={15} />
-                <span>Iniciar Demonstração Gratuita</span>
-                <ArrowRight size={14} />
+                <span>Criar Conta</span>
+                <ArrowRight size={15} />
               </button>
 
               <button
+                type="button"
                 onClick={onEnterLogin}
-                className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border border-slate-200"
+                className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-lg text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                <Lock size={14} />
-                <span>Aceder ao Painel ERP</span>
+                Aceder ao Painel
               </button>
             </div>
 
-            <div className="pt-6 border-t border-slate-100 grid grid-cols-3 gap-4 max-w-md">
+            <div className="pt-6 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
-                <span className="text-lg font-black text-slate-900 block font-mono">100%</span>
-                <span className="text-[11px] text-slate-500 font-medium">Leis de Moçambique</span>
+                <p className="text-[13px] font-semibold text-slate-950">Salários & SISSMO</p>
+                <p className="text-[12px] text-slate-500 mt-0.5 leading-relaxed">
+                  Retenção de IRPS por dependentes e guias INSS 3% + 4%.
+                </p>
               </div>
               <div>
-                <span className="text-lg font-black text-slate-900 block font-mono">SISSMO</span>
-                <span className="text-[11px] text-slate-500 font-medium">Exportação Oficial</span>
+                <p className="text-[13px] font-semibold text-slate-950">Faturação IVA / ISPC</p>
+                <p className="text-[12px] text-slate-500 mt-0.5 leading-relaxed">
+                  Emissão de faturas, recibos e cotações em Meticais.
+                </p>
               </div>
               <div>
-                <span className="text-lg font-black text-slate-900 block font-mono">M-Pesa</span>
-                <span className="text-[11px] text-slate-500 font-medium">Pagamento em Lote</span>
+                <p className="text-[13px] font-semibold text-slate-950">Carteiras Móveis</p>
+                <p className="text-[12px] text-slate-500 mt-0.5 leading-relaxed">
+                  Recebimentos e pagamentos via M-Pesa, e-Mola e mKesh.
+                </p>
               </div>
             </div>
           </div>
 
-          {/* Hero Preview Card */}
+          {/* Architectural Operational Specification Card — Zero fake metrics */}
           <div className="lg:col-span-5">
-            <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-xl border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                  <span className="text-xs font-bold tracking-wider text-slate-300">clickpay.co.mz</span>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="px-6 py-4 bg-slate-950 text-white flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400">
+                    Plataforma Empresarial
+                  </p>
+                  <p className="text-sm font-semibold text-white mt-0.5">clickpay.co.mz</p>
                 </div>
-                <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono font-bold">Primavera V10 Compliant</span>
+                <span className="text-[12px] font-mono text-slate-300">MZN</span>
               </div>
 
-              <div className="space-y-3">
-                <div className="bg-slate-800/80 p-3.5 rounded-xl border border-slate-700 space-y-1">
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Resumo da Folha Salarial</span>
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-xl font-bold font-mono text-white">450.000,00 MT</span>
-                    <span className="text-xs text-emerald-400 font-bold">12 Funcionários</span>
+              <div className="divide-y divide-slate-100">
+                <div className="px-6 py-4 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-mono text-slate-400">01</p>
+                    <p className="text-sm font-semibold text-slate-950">Folha Salarial & IRPS</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Cálculo mensal conforme Lei 11/2025 e subsídios
+                    </p>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-slate-800/50 p-2.5 rounded-lg border border-slate-700/60">
-                    <span className="text-[10px] text-slate-400 block font-medium">INSS (3% + 4%)</span>
-                    <span className="font-bold font-mono text-slate-200">31.500,00 MT</span>
-                  </div>
-                  <div className="bg-slate-800/50 p-2.5 rounded-lg border border-slate-700/60">
-                    <span className="text-[10px] text-slate-400 block font-medium">IRPS Retido</span>
-                    <span className="font-bold font-mono text-slate-200">42.800,00 MT</span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-blue-950/60 border border-blue-900/60 rounded-xl flex items-center justify-between text-xs">
-                  <span className="font-bold text-blue-200 flex items-center gap-1.5">
-                    <CheckCircle2 size={14} className="text-emerald-400" />
-                    Piloto Automático M-Pesa
+                  <span className="text-xs font-medium text-slate-700 whitespace-nowrap shrink-0">
+                    Automático
                   </span>
-                  <span className="text-[10px] bg-emerald-950 text-emerald-300 font-bold px-2 py-0.5 rounded">
-                    Dispersão Pronta
+                </div>
+
+                <div className="px-6 py-4 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-mono text-slate-400">02</p>
+                    <p className="text-sm font-semibold text-slate-950">Segurança Social (INSS)</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Apuramento 3% + 4% e exportação para SISSMO
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-slate-700 whitespace-nowrap shrink-0">
+                    Mensal
+                  </span>
+                </div>
+
+                <div className="px-6 py-4 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-mono text-slate-400">03</p>
+                    <p className="text-sm font-semibold text-slate-950">Faturação & Contabilidade</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Regime Geral (IVA 16%), ISPC (3%) e PGC-NIRF
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-slate-700 whitespace-nowrap shrink-0">
+                    AT / PGC
+                  </span>
+                </div>
+
+                <div className="px-6 py-4 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-mono text-slate-400">04</p>
+                    <p className="text-sm font-semibold text-slate-950">Pagamentos Móveis</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Cobranças e dispersão salarial M-Pesa e e-Mola
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-blue-900 whitespace-nowrap shrink-0">
+                    84–87
                   </span>
                 </div>
               </div>
@@ -259,263 +422,185 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
         </div>
       </section>
 
-      {/* SEÇÃO INSTITUCIONAL: MISSÃO, VISÃO & VALORES PROFISSIONAIS */}
-      <section id="institucional" className="py-16 bg-slate-50 border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="text-center max-w-2xl mx-auto space-y-2 mb-12">
-            <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Identidade Corporativa</span>
-            <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">Compromisso com o Futuro de Moçambique</h2>
-            <p className="text-xs sm:text-sm text-slate-600 font-normal">
-              Construímos tecnologia financeira e de gestão desenhada especificamente para capacitar as empresas moçambicanas.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Missão */}
-            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-900 flex items-center justify-center font-bold">
-                <Compass size={20} />
-              </div>
-              <h3 className="text-base font-bold text-slate-950">Nossa Missão</h3>
-              <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                Desmistificar e automatizar a gestão financeira, salarial e fiscal para micro, pequenas e médias empresas em Moçambique, eliminando a burocracia do papel e promovendo a inclusão digital e financeira de trabalhadores e empreendedores.
-              </p>
-            </div>
-
-            {/* Visão */}
-            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
-                <Eye size={20} />
-              </div>
-              <h3 className="text-base font-bold text-slate-950">Nossa Visão</h3>
-              <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                Ser o ecossistema ERP e Fintech de referência em Moçambique e nos PALOP, reconhecido pela excelência em conformidade fiscal, inovação em pagamentos móveis e confiabilidade rigorosa no padrão de auditoria internacional.
-              </p>
-            </div>
-
-            {/* Valores */}
-            <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-900 flex items-center justify-center font-bold">
-                <Award size={20} />
-              </div>
-              <h3 className="text-base font-bold text-slate-950">Nossos Valores</h3>
-              <ul className="text-xs text-slate-600 space-y-1.5 font-normal">
-                <li>• <b>Rigor e Conformidade:</b> Respeito estrito às leis fiscais e laborais nacionais.</li>
-                <li>• <b>Segurança e Integridade:</b> Proteção absoluta dos dados e salários das empresas.</li>
-                <li>• <b>Inovação Prática:</b> Tecnologia útil adaptada às carteiras M-Pesa e e-Mola.</li>
-                <li>• <b>Transparência Total:</b> Preços em Meticais e sem encargos ocultos.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Módulos do Sistema Padrão Primavera V10 */}
-      <section id="modulos" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 w-full">
-        <div className="text-center max-w-2xl mx-auto space-y-2 mb-10">
-          <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Módulos Integrados</span>
-          <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">Arquitetura ERP Conforme Primavera V10 & PGC-NIRF</h2>
-          <p className="text-xs sm:text-sm text-slate-600 font-normal">Todos os documentos gerados seguem o layout oficial das grandes referências de mercado.</p>
+      {/* Core Capabilities */}
+      <section id="modulos" className="py-16 md:py-20 max-w-6xl mx-auto px-4 sm:px-6 w-full">
+        <div className="max-w-2xl space-y-2 mb-10">
+          <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-blue-900">
+            Módulos Integrados
+          </p>
+          <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight">
+            Operação financeira, fiscal e laboral numa única plataforma
+          </h2>
+          <p className="text-sm text-slate-600">
+            Estruturado para empresas em Moçambique que precisam de controlo documental e rigor nos
+            cálculos.
+          </p>
         </div>
 
-        {/* Tab Buttons */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8">
+        {/* Clean Tab Bar */}
+        <div className="border-b border-slate-200 flex flex-wrap gap-6 mb-8">
           {[
-            { id: 'salarios', label: 'Salários & INSS', icon: Users },
-            { id: 'faturacao', label: 'Facturação Eletrónica', icon: Receipt },
-            { id: 'fintech', label: 'Pagamentos M-Pesa', icon: Smartphone },
-            { id: 'crm', label: 'CRM & Vendas', icon: TrendingUp }
+            { id: 'salarios', label: 'Salários & INSS' },
+            { id: 'faturacao', label: 'Faturação' },
+            { id: 'fintech', label: 'Pagamentos Móveis' },
+            { id: 'crm', label: 'CRM & Contratos' }
           ].map((tab) => {
-            const Icon = tab.icon;
             const active = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer transition-all ${
-                  active ? 'bg-blue-900 text-white shadow-sm' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+                type="button"
+                onClick={() => setActiveTab(tab.id as ModuleTab)}
+                className={`pb-3 text-[13px] font-medium transition-colors border-b-2 -mb-px cursor-pointer whitespace-nowrap shrink-0 ${
+                  active
+                    ? 'border-blue-900 text-blue-900 font-semibold'
+                    : 'border-transparent text-slate-500 hover:text-slate-900'
                 }`}
               >
-                <Icon size={14} />
-                <span>{tab.label}</span>
+                {tab.label}
               </button>
             );
           })}
         </div>
 
-        {/* Content Box */}
-        <div className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-sm max-w-4xl mx-auto">
-          {activeTab === 'salarios' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-3">
-                <span className="text-[10px] font-bold text-blue-900 uppercase">Recursos Humanos</span>
-                <h3 className="text-lg font-bold text-slate-900">Processamento Salarial sem Erros</h3>
-                <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                  Cálculo automático de INSS (3% trabalhador e 4% patronal), escalões progressivos de IRPS por dependentes familiares e geração do ficheiro oficial para carregamento no portal SISSMO.
-                </p>
-                <ul className="space-y-2 text-xs text-slate-700">
-                  <li className="flex items-center gap-2">✓ Recibos de vencimento em layout padrão Primavera ERP V10</li>
-                  <li className="flex items-center gap-2">✓ Auditoria de contratos e avisos prévios (Lei 13/2023)</li>
-                  <li className="flex items-center gap-2">✓ Controlo de faltas e adiantamentos (vales)</li>
-                </ul>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-                <span className="font-bold text-slate-800 block">Layout Recibo Primavera V10</span>
-                <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1 font-mono text-[11px]">
-                  <div className="flex justify-between"><span>Salário Base:</span><span>35.000,00 MT</span></div>
-                  <div className="flex justify-between text-rose-600"><span>INSS (3%):</span><span>-1.050,00 MT</span></div>
-                  <div className="flex justify-between text-rose-600"><span>IRPS Retido:</span><span>-1.275,00 MT</span></div>
-                  <div className="border-t border-slate-200 pt-1 flex justify-between font-bold text-emerald-700">
-                    <span>Líquido a Transferir:</span><span>32.675,00 MT</span>
-                  </div>
-                  <div className="text-[9px] text-slate-400 pt-1">Software de Facturação Certificado nº 01/AT/2026</div>
-                </div>
-              </div>
-            </div>
-          )}
+        {/* Single-Level Detail Panel */}
+        <div className="bg-white rounded-xl border border-slate-200 p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="lg:col-span-7 space-y-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-900">
+              {currentModule.eyebrow}
+            </p>
+            <h3 className="text-xl font-semibold text-slate-950 tracking-tight">
+              {currentModule.title}
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed">{currentModule.description}</p>
+            <ul className="space-y-2.5 pt-2">
+              {currentModule.bullets.map((item) => (
+                <li key={item} className="flex items-start gap-2.5 text-[13px] text-slate-700">
+                  <Check size={15} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
 
-          {activeTab === 'faturacao' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-3">
-                <span className="text-[10px] font-bold text-blue-900 uppercase">Vendas & Clientes</span>
-                <h3 className="text-lg font-bold text-slate-900">Facturação Conforme a Autoridade Tributária</h3>
-                <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                  Emita Facturas (FT), Facturas-Recibo (FR), Vendas a Dinheiro (VD) e Cotações Pró-Forma. Suporte completo para o regime simplificado ISPC (3%) ou Regime Geral de IVA (16%).
-                </p>
-                <ul className="space-y-2 text-xs text-slate-700">
-                  <li className="flex items-center gap-2">✓ QR Code oficial da Autoridade Tributária</li>
-                  <li className="flex items-center gap-2">✓ Layout corporativo idêntico a Primavera V10</li>
-                  <li className="flex items-center gap-2">✓ Envio por WhatsApp e E-mail em 1 clique</li>
-                </ul>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-                <span className="font-bold text-slate-800 block">Factura Oficial Certificada</span>
-                <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5 text-[11px]">
-                  <div className="flex justify-between font-bold text-slate-900">
-                    <span>FACTURA FT 2026/089</span>
-                    <span className="text-emerald-700">QR CODE AT ✓</span>
-                  </div>
-                  <div className="text-slate-500">Cliente: Empresa Comercial Lda (NUIT 400123456)</div>
-                  <div className="border-t border-slate-100 pt-1 flex justify-between font-bold font-mono">
-                    <span>Total com IVA:</span><span>58.000,00 MT</span>
-                  </div>
-                </div>
-              </div>
+          <div className="lg:col-span-5 border border-slate-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+              <p className="text-xs font-semibold text-slate-900">{currentModule.previewTitle}</p>
+              <p className="text-[11px] text-slate-500">{currentModule.previewSubtitle}</p>
             </div>
-          )}
-
-          {activeTab === 'fintech' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-3">
-                <span className="text-[10px] font-bold text-blue-900 uppercase">Canais de Pagamento</span>
-                <h3 className="text-lg font-bold text-slate-900">Dispersão em Massa via Carteiras Móveis</h3>
-                <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                  Liquide os salários da equipa diretamente para as contas M-Pesa e e-Mola dos trabalhadores, sem filas nos bancos ou circulação perigosa de dinheiro físico.
-                </p>
-                <ul className="space-y-2 text-xs text-slate-700">
-                  <li className="flex items-center gap-2">✓ Pagamentos instantâneos para 84, 85, 86, 87</li>
-                  <li className="flex items-center gap-2">✓ Piloto Automático com 1 clique</li>
-                  <li className="flex items-center gap-2">✓ Extrato e comprovativos detalhados</li>
-                </ul>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-                <span className="font-bold text-slate-800 block">Piloto Automático M-Pesa</span>
-                <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-2 text-[11px]">
-                  <div className="flex justify-between items-center text-emerald-700 font-bold">
-                    <span>12 de 12 Pagamentos Concluídos</span>
-                    <span>✓ Sucesso</span>
-                  </div>
-                  <p className="text-slate-500 text-[10px]">Todos os funcionários receberam SMS de confirmação no telemóvel.</p>
+            <div className="divide-y divide-slate-100 bg-white">
+              {currentModule.rows.map((row) => (
+                <div
+                  key={row.label}
+                  className="px-4 py-2.5 flex items-center justify-between gap-4 text-xs"
+                >
+                  <span className="text-slate-600">{row.label}</span>
+                  <span
+                    className={`font-mono tabular-nums font-medium text-right ${
+                      row.tone === 'negative'
+                        ? 'text-rose-700'
+                        : row.tone === 'positive'
+                        ? 'text-emerald-800 font-semibold'
+                        : row.tone === 'muted'
+                        ? 'text-slate-500'
+                        : 'text-slate-900'
+                    }`}
+                  >
+                    {row.value}
+                  </span>
                 </div>
-              </div>
+              ))}
             </div>
-          )}
-
-          {activeTab === 'crm' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-              <div className="space-y-3">
-                <span className="text-[10px] font-bold text-blue-900 uppercase">Comercial</span>
-                <h3 className="text-lg font-bold text-slate-900">CRM & Gestão de Contratos</h3>
-                <p className="text-xs text-slate-600 leading-relaxed font-normal">
-                  Gerencie oportunidades de negócio, elabore propostas comerciais profissionais e converta cotações diretamente em vendas sem retrabalho.
-                </p>
-                <ul className="space-y-2 text-xs text-slate-700">
-                  <li className="flex items-center gap-2">✓ Pipeline visual de negociações</li>
-                  <li className="flex items-center gap-2">✓ Controlo de datas de renovação de contratos</li>
-                  <li className="flex items-center gap-2">✓ Histórico de faturamento por cliente</li>
-                </ul>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-                <span className="font-bold text-slate-800 block">Pipeline de Oportunidades</span>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="p-2 bg-white rounded border border-slate-200">
-                    <span className="text-[9px] text-slate-400 block">Em Negociação</span>
-                    <span className="font-bold text-slate-800">180.000 MT</span>
-                  </div>
-                  <div className="p-2 bg-white rounded border border-slate-200">
-                    <span className="text-[9px] text-emerald-600 block">Fechado / Ganho</span>
-                    <span className="font-bold text-emerald-800">420.000 MT</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       </section>
 
-      {/* Simulador de Salário IRPS 2026 com opção de Zerar Cálculos (Exclusivo Fundador) */}
-      <section id="simulador" className="py-16 bg-white border-t border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6">
-          <div className="text-center space-y-2 mb-8">
-            <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Simulador Interativo</span>
-            <div className="flex items-center justify-center gap-2">
-              <h2 className="text-2xl font-black text-slate-950">Simulador de Salário & Impostos Moçambique</h2>
-              {/* Botão de Zerar Cálculos Exclusivo para Gerson Cumbane */}
-              {isFounder && (
-                <button
-                  onClick={handleZerarCalculosLanding}
-                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-xs"
-                  title="Opção exclusiva do Fundador: Zerar valores do simulador"
-                >
-                  <RefreshCw size={11} />
-                  <span>Zerar Cálculos (Fundador)</span>
-                </button>
-              )}
+      {/* Live Salary & Tax Simulator */}
+      <section id="simulador" className="py-16 md:py-20 bg-white border-t border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+            <div className="space-y-2 max-w-xl">
+              <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-blue-900">
+                Simulador Fiscal
+              </p>
+              <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight">
+                Simulador de Salário, IRPS e INSS
+              </h2>
+              <p className="text-sm text-slate-600">
+                Calcule em tempo real os descontos legais e o custo total para a entidade
+                empregadora.
+              </p>
             </div>
-            <p className="text-xs text-slate-600">Teste o cálculo do IRPS 2026 e INSS em tempo real:</p>
+
+            {isFounder && (
+              <button
+                type="button"
+                onClick={handleZerarCalculosLanding}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer transition-colors self-start sm:self-auto"
+              >
+                <RefreshCw size={12} />
+                <span>Repor Valores</span>
+              </button>
+            )}
           </div>
 
-          <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-            <div className="space-y-4">
+          <div className="bg-[#FAFAFB] rounded-xl border border-slate-200 p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="lg:col-span-6 space-y-6">
               <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="text-xs font-bold text-slate-700">
-                    Salário Base Mensal:
+                <div className="flex justify-between items-baseline mb-2">
+                  <label
+                    htmlFor="simulador-salario"
+                    className="text-xs font-semibold text-slate-800"
+                  >
+                    Salário Base Mensal (MZN)
                   </label>
-                  <span className="font-mono text-blue-900 font-bold text-xs">{salarioBase.toLocaleString()} MT</span>
+                  <span className="font-mono tabular-nums text-sm font-semibold text-blue-900">
+                    {formatMzn(salarioBase)}
+                  </span>
                 </div>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="150000" 
-                  step="1000" 
-                  value={salarioBase} 
-                  onChange={(e) => setSalarioBase(Number(e.target.value))}
-                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-900"
-                />
+
+                <div className="space-y-3">
+                  <input
+                    id="simulador-salario"
+                    type="number"
+                    min={0}
+                    max={1000000}
+                    step={500}
+                    value={salarioBase || ''}
+                    onChange={(e) => {
+                      const v = Math.max(0, Number(e.target.value) || 0);
+                      setSalarioBase(v);
+                    }}
+                    placeholder="0"
+                    className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm font-mono tabular-nums text-slate-950 focus:outline-none focus:border-blue-900"
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={150000}
+                    step={1000}
+                    value={Math.min(salarioBase, 150000)}
+                    onChange={(e) => setSalarioBase(Number(e.target.value))}
+                    aria-label="Ajustar salário base mensal"
+                    className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-900"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Número de Dependentes: <span className="text-blue-900 font-bold">{dependentes}</span>
-                </label>
-                <div className="flex gap-2">
+                <span className="text-xs font-semibold text-slate-800 block mb-2">
+                  Número de Dependentes
+                </span>
+                <div className="grid grid-cols-5 gap-2">
                   {[0, 1, 2, 3, 4].map((d) => (
                     <button
                       key={d}
+                      type="button"
                       onClick={() => setDependentes(d)}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
-                        dependentes === d ? 'bg-blue-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
+                      className={`py-2 rounded-lg text-xs font-semibold cursor-pointer transition-colors border ${
+                        dependentes === d
+                          ? 'bg-blue-900 text-white border-blue-900'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                       }`}
                     >
                       {d === 4 ? '4+' : d}
@@ -525,114 +610,216 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
               </div>
             </div>
 
-            <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2 text-xs font-mono">
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-600 font-sans">INSS Trabalhador (3%):</span>
-                <span className="text-rose-600 font-bold">-{res.inssTrabalhador.toFixed(2)} MT</span>
+            <div className="lg:col-span-6 bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+              <div className="px-5 py-3 flex justify-between items-center text-xs">
+                <span className="text-slate-600">Salário Bruto</span>
+                <span className="font-mono tabular-nums font-medium text-slate-900">
+                  {formatMzn(salarioBase)}
+                </span>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-100">
-                <span className="text-slate-600 font-sans">Retenção IRPS 2026:</span>
-                <span className="text-rose-600 font-bold">-{res.irpsConstatado.toFixed(2)} MT</span>
+              <div className="px-5 py-3 flex justify-between items-center text-xs">
+                <span className="text-slate-600">INSS Trabalhador (3%)</span>
+                <span className="font-mono tabular-nums font-medium text-rose-700">
+                  -{formatMzn(res.inssTrabalhador)}
+                </span>
               </div>
-              <div className="flex justify-between py-1.5 px-2 bg-emerald-50 text-emerald-950 rounded-lg font-bold">
-                <span className="font-sans">Salário Líquido:</span>
-                <span className="text-sm font-bold text-emerald-700">{res.salarioLiquido.toFixed(2)} MT</span>
+              <div className="px-5 py-3 flex justify-between items-center text-xs">
+                <span className="text-slate-600">Retenção IRPS 2026</span>
+                <span className="font-mono tabular-nums font-medium text-rose-700">
+                  -{formatMzn(res.irpsConstatado)}
+                </span>
               </div>
-              <div className="flex justify-between py-1 px-2 text-slate-500 text-[10px] font-sans">
-                <span>Custo Total Empregador (+4% INSS):</span>
-                <span>{custoTotalEmpresa.toFixed(2)} MT</span>
+              <div className="px-5 py-3.5 bg-slate-50 flex justify-between items-center">
+                <span className="text-xs font-semibold text-slate-900">Salário Líquido</span>
+                <span className="text-base font-mono tabular-nums font-semibold text-emerald-800">
+                  {formatMzn(res.salarioLiquido)}
+                </span>
+              </div>
+              <div className="px-5 py-3 flex justify-between items-center text-xs">
+                <span className="text-slate-500">INSS Empregador (+4%) · Custo Total</span>
+                <span className="font-mono tabular-nums font-medium text-slate-700">
+                  {formatMzn(custoTotalEmpresa)}
+                </span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Planos & Preços Transparentes */}
-      <section id="planos" className="py-16 max-w-6xl mx-auto px-4 sm:px-6 w-full">
-        <div className="text-center max-w-2xl mx-auto space-y-2 mb-10">
-          <span className="text-blue-900 font-bold text-xs uppercase tracking-widest">Preços em Meticais</span>
-          <h2 className="text-2xl sm:text-3xl font-black text-slate-950">Planos sem Fidelização</h2>
-          <p className="text-xs text-slate-600">Sem surpresas de câmbio em dólares. Pague via M-Pesa, e-Mola ou Transferência Bancária.</p>
+      {/* Plans & Pricing */}
+      <section id="planos" className="py-16 md:py-20 max-w-6xl mx-auto px-4 sm:px-6 w-full">
+        <div className="max-w-2xl space-y-2 mb-10">
+          <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-blue-900">
+            Preços em Meticais
+          </p>
+          <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight">
+            Planos transparentes, sem fidelização
+          </h2>
+          <p className="text-sm text-slate-600">
+            Faturação em Meticais sem exposição cambial. Liquidação via M-Pesa, e-Mola ou
+            transferência bancária.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Starter */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-5">
-            <div className="space-y-3">
-              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Starter (Bronze)</span>
-              <h3 className="text-lg font-bold text-slate-900">Microempresa</h3>
-              <p className="text-xs text-slate-500 font-normal">Ideal para pequenos negócios, startups e prestadores de serviços.</p>
-              <div className="pt-2">
-                <span className="text-2xl font-black text-slate-950 font-mono">3.500,00 MT</span>
-                <span className="text-[10px] text-slate-400 block">/mês</span>
+          <div className="bg-white rounded-xl p-6 border border-slate-200 flex flex-col justify-between space-y-6">
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                  Starter · Microempresa
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Para negócios em início de atividade e prestadores de serviços.
+                </p>
               </div>
-              <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                <li className="flex items-center gap-2">✓ Até 5 Colaboradores</li>
-                <li className="flex items-center gap-2">✓ Facturação & Vendas (M1)</li>
-                <li className="flex items-center gap-2">✓ Recibos de Salário Padrão Primavera V10</li>
-                <li className="flex items-center gap-2">✓ Simulador IRPS (Lei 11/2025) & INSS</li>
-                <li className="flex items-center gap-2">✓ Suporte via WhatsApp</li>
+
+              <div className="pt-2 border-t border-slate-100">
+                <span className="text-2xl font-semibold text-slate-950 font-mono tabular-nums">
+                  3.500,00 MT
+                </span>
+                <span className="text-xs text-slate-500"> / mês</span>
+              </div>
+
+              <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Até 5 colaboradores</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Faturação e vendas (IVA / ISPC)</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Recibos de salário mensais</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Cálculo IRPS (Lei 11/2025) & INSS</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Suporte técnico via WhatsApp</span>
+                </li>
               </ul>
             </div>
+
             <button
+              type="button"
               onClick={() => onEnterPlanDemo('Bronze')}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+              className="w-full py-2.5 bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 font-semibold rounded-lg text-xs cursor-pointer transition-colors"
             >
               Escolher Starter
             </button>
           </div>
 
-          {/* Growth / Silver */}
-          <div className="bg-white rounded-2xl p-6 border-2 border-blue-900 shadow-md flex flex-col justify-between space-y-5 relative">
-            <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-900 text-white text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider">
-              Mais Popular
-            </span>
-            <div className="space-y-3">
-              <span className="text-[10px] bg-blue-50 text-blue-900 font-bold px-2 py-0.5 rounded uppercase">Profissional (Silver)</span>
-              <h3 className="text-lg font-bold text-slate-900">Pequena Empresa</h3>
-              <p className="text-xs text-slate-500 font-normal">Para empresas com equipa ativa, gestão de compras e obrigações com o INSS.</p>
-              <div className="pt-2">
-                <span className="text-2xl font-black text-blue-900 font-mono">6.500,00 MT</span>
-                <span className="text-[10px] text-slate-400 block">/mês</span>
+          {/* Profissional */}
+          <div className="bg-white rounded-xl p-6 border-2 border-blue-900 flex flex-col justify-between space-y-6">
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-blue-900">
+                    Profissional · Pequena Empresa
+                  </p>
+                  <span className="text-[11px] font-semibold text-blue-900">Recomendado</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Para equipas ativas com gestão de stocks e obrigações ao SISSMO.
+                </p>
               </div>
-              <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                <li className="flex items-center gap-2">✓ Até 15 Colaboradores</li>
-                <li className="flex items-center gap-2">✓ SISSMO & Guias INSS com Ficheiro Oficial</li>
-                <li className="flex items-center gap-2">✓ Contratos de Trabalho (Lei 13/2023)</li>
-                <li className="flex items-center gap-2">✓ Compras & Stocks (M2)</li>
-                <li className="flex items-center gap-2">✓ Alertas Fiscais & Prazos da AT (M5)</li>
-                <li className="flex items-center gap-2">✓ Vales & Fintech M-Pesa / e-Mola</li>
+
+              <div className="pt-2 border-t border-slate-100">
+                <span className="text-2xl font-semibold text-blue-900 font-mono tabular-nums">
+                  6.500,00 MT
+                </span>
+                <span className="text-xs text-slate-500"> / mês</span>
+              </div>
+
+              <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>Até 15 colaboradores</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>Ficheiros SISSMO & guias do INSS</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>Contratos de trabalho (Lei 13/2023)</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>Compras, fornecedores e inventário</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>Alertas de prazos fiscais da AT</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
+                  <span>Pagamentos via M-Pesa e e-Mola</span>
+                </li>
               </ul>
             </div>
+
             <button
+              type="button"
               onClick={() => onEnterPlanDemo('Silver')}
-              className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-sm"
+              className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-semibold rounded-lg text-xs cursor-pointer transition-colors"
             >
               Escolher Profissional
             </button>
           </div>
 
-          {/* Business / Gold */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between space-y-5">
-            <div className="space-y-3">
-              <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded uppercase">Empresarial (Gold)</span>
-              <h3 className="text-lg font-bold text-slate-900">Média Empresa</h3>
-              <p className="text-xs text-slate-500 font-normal">Plataforma integral com IA Financeira e contabilidade PGC-NIRF completa.</p>
-              <div className="pt-2">
-                <span className="text-2xl font-black text-slate-950 font-mono">9.500,00 MT</span>
-                <span className="text-[10px] text-slate-400 block">/mês</span>
+          {/* Empresarial */}
+          <div className="bg-white rounded-xl p-6 border border-slate-200 flex flex-col justify-between space-y-6">
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                  Empresarial · Média Empresa
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Contabilidade PGC-NIRF completa e gestão multi-armazém.
+                </p>
               </div>
-              <ul className="space-y-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
-                <li className="flex items-center gap-2">✓ Até 30 Colaboradores</li>
-                <li className="flex items-center gap-2">✓ BRAIN IA (4 Agentes Autónomos)</li>
-                <li className="flex items-center gap-2">✓ Contabilidade PGC: DRE, Balanço e Caixa</li>
-                <li className="flex items-center gap-2">✓ Multi-Armazém & Gestão Avançada de Stocks</li>
-                <li className="flex items-center gap-2">✓ Suporte Executivo Prioritário</li>
+
+              <div className="pt-2 border-t border-slate-100">
+                <span className="text-2xl font-semibold text-slate-950 font-mono tabular-nums">
+                  9.500,00 MT
+                </span>
+                <span className="text-xs text-slate-500"> / mês</span>
+              </div>
+
+              <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Até 30 colaboradores</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Contabilidade PGC: DRE, Balanço e Fluxo de Caixa</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Gestão avançada de stocks e múltiplos armazéns</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Reconciliação financeira e tesouraria</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
+                  <span>Acompanhamento executivo prioritário</span>
+                </li>
               </ul>
             </div>
+
             <button
+              type="button"
               onClick={() => onEnterPlanDemo('Gold')}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-950 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-950 text-white font-semibold rounded-lg text-xs cursor-pointer transition-colors"
             >
               Escolher Empresarial
             </button>
@@ -640,64 +827,83 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
         </div>
       </section>
 
-      {/* Secção de Contacto Simples e Direta */}
-      <section id="contacto" className="py-12 bg-slate-900 text-white">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-1 text-center md:text-left">
-            <h3 className="text-lg font-bold">Precisa de assistência ou demonstração presencial?</h3>
-            <p className="text-xs text-slate-400">A nossa equipa técnica e de suporte em Maputo está disponível para apoiar.</p>
+      {/* Contact Band */}
+      <section id="contacto" className="bg-slate-950 text-white py-12 border-t border-slate-800">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400">
+              Suporte em Maputo
+            </p>
+            <h3 className="text-lg font-semibold text-white">
+              Precisa de uma demonstração para a sua empresa?
+            </h3>
+            <p className="text-xs text-slate-400">
+              Fale com a nossa equipa técnica para configuração inicial ou esclarecimentos fiscais.
+            </p>
           </div>
+
           <div className="flex flex-wrap items-center gap-3">
-            <a 
+            <a
               href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20ClickPay%20ERP%20(clickpay.co.mz)."
               target="_blank"
               rel="noreferrer"
-              className="px-4 py-2.5 bg-[#25D366] hover:bg-[#20ba5a] text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition-colors"
+              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-white font-medium rounded-lg text-xs inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
             >
+              <MessageSquare size={14} className="text-emerald-400" />
               <span>WhatsApp: +258 84 201 4173</span>
             </a>
             <button
-              onClick={() => handleOpenContact('Starter')}
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-colors"
+              type="button"
+              onClick={() => handleOpenContact('Profissional')}
+              className="px-4 py-2.5 bg-blue-800 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs inline-flex items-center gap-2 cursor-pointer transition-colors whitespace-nowrap shrink-0"
             >
-              <Mail size={13} />
+              <Mail size={14} />
               <span>Solicitar Acesso</span>
             </button>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="bg-slate-950 text-slate-400 py-8 border-t border-slate-800 text-xs text-center">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 ClickPay Moçambique · NUIT: 402302399 | NUEL: 105086659. Todos os direitos reservados.</p>
-          <p className="text-[11px] text-slate-500">Conforme o Código do IRPS (Lei 11/2025), Lei do Trabalho 13/2023, Regulamento SISSMO e Padrão Primavera V10.</p>
+      {/* Quiet Footer */}
+      <footer className="bg-slate-950 text-slate-400 py-6 border-t border-slate-900 text-xs">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <p>© 2026 ClickPay Moçambique · NUIT 402302399 · NUEL 105086659</p>
+          <p className="text-[11px] text-slate-500">
+            IRPS (Lei 11/2025) · Lei do Trabalho 13/2023 · Regulamento SISSMO
+          </p>
         </div>
       </footer>
 
-      {/* Modal de Solicitação de Credenciais */}
+      {/* Credential Request Modal */}
       {showContactModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 relative space-y-4">
+          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200 relative space-y-4">
             <button
+              type="button"
               onClick={() => setShowContactModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              aria-label="Fechar janela"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
             >
               <X size={18} />
             </button>
 
             <div className="space-y-1">
-              <h3 className="text-base font-bold text-slate-950">Solicitar Acesso ao ERP</h3>
-              <p className="text-xs text-slate-500">Preencha os dados e receba as credenciais da sua empresa:</p>
+              <h3 className="text-base font-semibold text-slate-950">Solicitar Acesso</h3>
+              <p className="text-xs text-slate-500">
+                Indique os dados da sua empresa para receber contacto da equipa ClickPay.
+              </p>
             </div>
 
             {reqSuccess ? (
-              <div className="p-4 bg-emerald-50 text-emerald-900 rounded-xl text-xs text-center space-y-2">
-                <p className="font-bold">✓ Solicitação Registada!</p>
-                <p className="text-[11px]">As credenciais de acesso para a empresa <b>{reqEmpresa}</b> foram enviadas ao administrador.</p>
+              <div className="p-4 bg-slate-50 border border-slate-200 text-slate-900 rounded-lg text-xs space-y-2">
+                <p className="font-semibold text-emerald-800">Pedido registado com sucesso</p>
+                <p className="text-slate-600">
+                  A solicitação da empresa <b>{reqEmpresa}</b> foi enviada à nossa equipa.
+                </p>
                 <button
+                  type="button"
                   onClick={() => setShowContactModal(false)}
-                  className="mt-2 w-full py-2 bg-emerald-700 text-white rounded-lg font-bold"
+                  className="mt-2 w-full py-2 bg-slate-900 hover:bg-slate-950 text-white rounded-lg font-semibold cursor-pointer"
                 >
                   Fechar
                 </button>
@@ -705,54 +911,58 @@ export default function LandingPage({ onEnterLogin, onEnterRegister, onEnterPlan
             ) : (
               <form onSubmit={handleSubmitRequest} className="space-y-3 text-xs">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Nome da Empresa *</label>
+                  <label className="font-medium text-slate-700 block mb-1">Nome da Empresa *</label>
                   <input
                     type="text"
                     required
                     value={reqEmpresa}
                     onChange={(e) => setReqEmpresa(e.target.value)}
                     placeholder="Ex: Comercial Limpopo Lda"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Nome do Responsável</label>
+                  <label className="font-medium text-slate-700 block mb-1">
+                    Nome do Responsável
+                  </label>
                   <input
                     type="text"
                     value={reqResponsavel}
                     onChange={(e) => setReqResponsavel(e.target.value)}
-                    placeholder="Seu Nome"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                    placeholder="Nome completo"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">E-mail *</label>
+                  <label className="font-medium text-slate-700 block mb-1">E-mail *</label>
                   <input
                     type="email"
                     required
                     value={reqEmail}
                     onChange={(e) => setReqEmail(e.target.value)}
                     placeholder="email@empresa.co.mz"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Telefone / WhatsApp *</label>
+                  <label className="font-medium text-slate-700 block mb-1">
+                    Telefone / WhatsApp *
+                  </label>
                   <input
                     type="tel"
                     required
                     value={reqTelefone}
                     onChange={(e) => setReqTelefone(e.target.value)}
                     placeholder="+258 84..."
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none focus:border-blue-900"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={reqSubmitting}
-                  className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl transition-all cursor-pointer shadow-sm"
+                  className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors cursor-pointer"
                 >
-                  {reqSubmitting ? 'A Enviar...' : 'Enviar Pedido'}
+                  {reqSubmitting ? 'A enviar...' : 'Enviar Pedido'}
                 </button>
               </form>
             )}
