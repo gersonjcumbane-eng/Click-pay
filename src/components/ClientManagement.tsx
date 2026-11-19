@@ -294,8 +294,63 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       console.warn('Listener Firebase credential_requests:', e);
     }
 
+    let unsubClients: (() => void) | undefined;
+    try {
+      unsubClients = onSnapshot(collection(db, 'saas_clients'), (snap) => {
+        const fbClients: ClientCompany[] = [];
+        snap.forEach((d) => {
+          const data = d.data() || {};
+          const rawPlan = String(data.plan || 'Starter').toLowerCase();
+          const normalizedPlan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum' =
+            rawPlan.includes('platinum') ? 'Platinum' :
+            rawPlan.includes('gold') || rawPlan.includes('business') || rawPlan.includes('empresarial') ? 'Gold' :
+            rawPlan.includes('silver') || rawPlan.includes('growth') || rawPlan.includes('profissional') ? 'Silver' :
+            'Bronze';
+          fbClients.push({
+            id: d.id,
+            nome: String(data.companyName || data.tradeName || data.nome || 'Empresa ClickPay'),
+            nuit: String(data.nuit || ''),
+            endereco: String(data.address || data.endereco || 'Maputo'),
+            provincia: String(data.provincia || 'Maputo Cidade'),
+            distrito: String(data.distrito || 'KaMpfumo'),
+            regime_iva: 'IVA Normal (16%)',
+            nuel: String(data.nuel || ''),
+            email: String(data.email || ''),
+            telefone: String(data.phone || data.telefone || '+258 84 000 0000'),
+            logo: '/clickpay-logo.png',
+            subscription_status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo',
+            subscription_plan: normalizedPlan,
+            fee_base: Number(data.monthlyFee) || 3500,
+            fee_por_slip: 0,
+            billingFeeMzn: Number(data.monthlyFee) || 3500,
+            next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            countEmployees: 0,
+            payrollGrossTotal: 0,
+            isActive: false
+          });
+        });
+        if (fbClients.length > 0) {
+          setClients(prev => {
+            const combined = [...prev];
+            fbClients.forEach(fc => {
+              const existingIdx = combined.findIndex(c => c.id === fc.id || (fc.email && c.email?.toLowerCase() === fc.email.toLowerCase()));
+              if (existingIdx === -1) {
+                combined.unshift(fc);
+              }
+            });
+            return combined;
+          });
+        }
+      }, (error) => {
+        console.warn('Erro no listener de saas_clients Firebase:', error);
+      });
+    } catch (e) {
+      console.warn('Listener Firebase saas_clients:', e);
+    }
+
     return () => {
       if (unsubReq) unsubReq();
+      if (unsubClients) unsubClients();
     };
   }, []);
 
@@ -1478,7 +1533,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-1.5 text-[9.5px] text-slate-700 leading-relaxed">
                 <span className="font-bold text-slate-900 block flex items-center gap-1 text-[10px]">
                   <ShieldCheck size={13} className="text-blue-900" />
-                  Coordenadas Bancárias Oficiais para Transferência / M-Pesa (Payroll Tech MZ, Lda)
+                  Coordenadas Bancárias Oficiais para Transferência / M-Pesa (ClickPay Moçambique, Lda)
                 </span>
                 <p className="text-[9px]">
                   Efectue a transferência bancária para uma das contas abaixo e envie o comprovativo para: <b>gersonjcumbane@gmail.com</b>
@@ -1512,7 +1567,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
                 <div className="grid grid-cols-2 gap-4 text-center pt-2">
                   <div className="space-y-1">
                     <div className="border-b border-dashed border-slate-300 w-48 mx-auto h-5"></div>
-                    <p className="text-[7.5px] text-slate-400 uppercase tracking-widest font-bold">Assinatura Autorizada (Payroll Tech)</p>
+                    <p className="text-[7.5px] text-slate-400 uppercase tracking-widest font-bold">Assinatura Autorizada (ClickPay)</p>
                   </div>
                   <div className="space-y-1">
                     <div className="border-b border-dashed border-slate-300 w-48 mx-auto h-5"></div>

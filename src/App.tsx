@@ -95,7 +95,7 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
             <p className="text-sm font-black text-blue-900">👑 {requiredPlan}</p>
           </div>
           <a
-            href="mailto:gersonjcumbane@gmail.com?subject=Solicita%C3%A7%C3%A3o%20de%20Upgrade%20-%20Payroll%20Tech%20Mz"
+            href="mailto:gersonjcumbane@gmail.com?subject=Solicita%C3%A7%C3%A3o%20de%20Upgrade%20-%20ClickPay%20Mo%C3%A7ambique"
             className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl text-xs transition-colors shadow-md shadow-blue-900/10 whitespace-nowrap"
           >
             Fazer Upgrade Agora
@@ -461,6 +461,10 @@ export default function App() {
       return (
         <OnboardingWizard
           onCancel={() => setShowOnboarding(false)}
+          onEnterLogin={() => {
+            setShowOnboarding(false);
+            setShowLogin(true);
+          }}
           onSuccess={async () => {
             setAuthenticated(true);
             setShowOnboarding(false);
@@ -521,7 +525,7 @@ export default function App() {
           <div className="space-y-2">
             <h2 className="text-xl font-black text-slate-900 tracking-tight">Serviço Suspenso temporariamente</h2>
             <p className="text-sm text-slate-500">
-              A assinatura do software <b>Payroll Tech Mz</b> para a empresa <b className="text-slate-800">{company.nome || 'sua empresa'}</b> encontra-se suspensa ou aguardando pagamento.
+              A assinatura do software <b>ClickPay</b> para a empresa <b className="text-slate-800">{company.nome || 'sua empresa'}</b> encontra-se suspensa ou aguardando pagamento.
             </p>
           </div>
 
@@ -545,10 +549,10 @@ export default function App() {
           </p>
 
           <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3.5 text-xs font-semibold text-blue-900 flex flex-col gap-2 items-center">
-            <span>📞 Suporte Payroll Tech: +258 861390061</span>
+            <span>📞 Suporte ClickPay: +258 861390061</span>
             <span>📧 Administrador: gersonjcumbane@gmail.com</span>
             <a 
-              href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20solicitar%20suporte%20para%20minha%20conta%20na%20plataforma%20Payroll%20Tech%20MZ."
+              href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20solicitar%20suporte%20para%20minha%20conta%20na%20plataforma%20ClickPay%20ERP."
               target="_blank"
               rel="noreferrer"
               className="mt-1 px-4 py-1.5 bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all shadow-xs"
@@ -615,7 +619,7 @@ export default function App() {
 
           <div className="flex items-center gap-2">
             <span className="text-xs font-extrabold text-black truncate max-w-[170px]">
-              {company?.nome || 'Payroll Tech Mz'}
+              {company?.nome || 'ClickPay'}
             </span>
           </div>
         </div>

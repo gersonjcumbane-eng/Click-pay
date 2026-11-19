@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -56,23 +56,25 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 // Sincronizar dados de clientes e senhas no Firebase Firestore
-export async function syncClientToFirestore(clientData: any) {
-  const path = `erp_clients/${clientData.id}`;
+export async function syncClientToFirestore(clientData: any): Promise<{ ok: boolean; error?: string }> {
   try {
-    await setDoc(doc(db, 'erp_clients', clientData.id), {
-      id: String(clientData.id).substring(0, 128),
+    const safeId = String(clientData.id || `cli_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
+    await setDoc(doc(db, 'erp_clients', safeId), {
+      id: safeId,
       nome: String(clientData.nome || '').substring(0, 256),
       nuit: String(clientData.nuit || '').substring(0, 32),
       email: String(clientData.email || '').substring(0, 256),
-      telefone: String(clientData.telefone || '').substring(0, 64),
+      telefone: String(clientData.telefone || '+258 84 000 0000').substring(0, 64),
       passwordHash: String(clientData.password || '••••••••').substring(0, 256),
-      subscription_plan: clientData.subscription_plan || 'Bronze',
+      subscription_plan: clientData.subscription_plan || 'Starter',
       subscription_status: clientData.subscription_status || 'ativo',
-      fee_base: Number(clientData.fee_base) || 3000,
+      fee_base: Number(clientData.fee_base) || 3500,
       updatedAt: new Date().toISOString()
-    });
-  } catch (error) {
+    }, { merge: true });
+    return { ok: true };
+  } catch (error: any) {
     console.warn('Sync client to Firestore warning:', error);
+    return { ok: false, error: error?.message || String(error) };
   }
 }
 
@@ -97,23 +99,161 @@ export async function syncBackupToFirestore(backup: any) {
 }
 
 // Sincronizar pedido de credenciais no Firebase Firestore
-export async function syncCredentialRequestToFirestore(reqData: any) {
+export async function syncCredentialRequestToFirestore(reqData: any): Promise<{ ok: boolean; error?: string }> {
   try {
-    await setDoc(doc(db, 'erp_credential_requests', reqData.id), {
-      id: String(reqData.id).substring(0, 128),
+    const safeId = String(reqData.id || `REQ_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
+    await setDoc(doc(db, 'erp_credential_requests', safeId), {
+      id: safeId,
       nomeEmpresa: String(reqData.nomeEmpresa || '').substring(0, 256),
-      nomeResponsavel: String(reqData.nomeResponsavel || '').substring(0, 256),
+      nomeResponsavel: String(reqData.nomeResponsavel || reqData.nomeEmpresa || '').substring(0, 256),
       email: String(reqData.email || '').substring(0, 256),
-      telefone: String(reqData.telefone || '').substring(0, 64),
+      telefone: String(reqData.telefone || '+258 84 000 0000').substring(0, 64),
       nuit: String(reqData.nuit || '').substring(0, 32),
       planoEscolhido: String(reqData.planoEscolhido || 'Starter').substring(0, 64),
-      precoMensal: Number(reqData.precoMensal) || 3000,
-      status: reqData.status || 'PENDENTE',
+      precoMensal: Number(reqData.precoMensal) || 3500,
+      status: reqData.status === 'APROVADO' || reqData.status === 'CREDENCIAIS_ENVIADAS' ? reqData.status : 'PENDENTE',
       dataSolicitacao: String(reqData.dataSolicitacao || new Date().toISOString()).substring(0, 64)
     });
-  } catch (error) {
+    return { ok: true };
+  } catch (error: any) {
     console.warn('Sync credential request to Firestore warning:', error);
+    return { ok: false, error: error?.message || String(error) };
   }
+}
+
+// Registar e sincronizar conta recém-criada em todas as coleções Firebase da ClickPay
+export async function syncRegisteredAccountToFirestore(params: {
+  clientId: string;
+  nomeEmpresa: string;
+  email: string;
+  nuit: string;
+  password: string;
+  plano?: string;
+  feeBase?: number;
+  telefone?: string;
+  endereco?: string;
+  provincia?: string;
+}) {
+  const now = new Date().toISOString();
+  const safeId = String(params.clientId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
+  const reqId = `ONB_${safeId}`.substring(0, 128);
+  const plano = params.plano || 'Starter';
+  const feeBase = Number(params.feeBase) || (plano === 'Gold' || plano === 'Business' ? 9500 : plano === 'Silver' || plano === 'Growth' ? 6500 : 3500);
+  const syncedCollections: string[] = [];
+  const errors: string[] = [];
+
+  // 1. Tentar criar utilizador no Firebase Auth (se o provedor Email/Password estiver ativo)
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, params.email, params.password);
+    if (cred?.user?.uid) {
+      syncedCollections.push('firebase_auth');
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        uid: cred.user.uid,
+        email: String(params.email).substring(0, 256),
+        role: 'CLIENTE_EMPRESA',
+        companyId: safeId,
+        createdAt: now,
+        status: 'ativo'
+      }, { merge: true });
+      syncedCollections.push('users');
+    }
+  } catch (authErr: any) {
+    // Se Email/Password estiver desativado no console Firebase, continua normalmente para gravar no Firestore
+    if (authErr?.code !== 'auth/operation-not-allowed' && authErr?.code !== 'auth/email-already-in-use') {
+      console.warn('Firebase Auth signup info:', authErr?.code || authErr?.message);
+    }
+  }
+
+  // 2. Gravar na coleção oficial erp_clients
+  const erpRes = await syncClientToFirestore({
+    id: safeId,
+    nome: params.nomeEmpresa,
+    nuit: params.nuit,
+    email: params.email,
+    telefone: params.telefone || '+258 84 000 0000',
+    password: params.password,
+    subscription_plan: plano,
+    subscription_status: 'ativo',
+    fee_base: feeBase
+  });
+  if (erpRes.ok) syncedCollections.push('erp_clients');
+  else if (erpRes.error) errors.push(`erp_clients: ${erpRes.error}`);
+
+  // 3. Gravar na coleção saas_clients (listagem em tempo real)
+  try {
+    await setDoc(doc(db, 'saas_clients', safeId), {
+      id: safeId,
+      companyName: String(params.nomeEmpresa).substring(0, 256),
+      tradeName: String(params.nomeEmpresa).substring(0, 256),
+      nuit: String(params.nuit).substring(0, 32),
+      email: String(params.email).substring(0, 256),
+      phone: String(params.telefone || '+258 84 000 0000').substring(0, 64),
+      address: `${params.endereco || 'Maputo'}, ${params.provincia || 'Maputo Cidade'}`,
+      plan: plano,
+      monthlyFee: feeBase,
+      status: 'Ativo',
+      adminName: String(params.nomeEmpresa).substring(0, 256),
+      adminPassword: String(params.password).substring(0, 256),
+      createdAt: now,
+      updatedAt: now
+    }, { merge: true });
+    syncedCollections.push('saas_clients');
+  } catch (err: any) {
+    errors.push(`saas_clients: ${err?.message || String(err)}`);
+  }
+
+  // 4. Gravar na coleção companies
+  try {
+    await setDoc(doc(db, 'companies', safeId), {
+      id: safeId,
+      nome: String(params.nomeEmpresa).substring(0, 256),
+      nuit: String(params.nuit).substring(0, 32),
+      email: String(params.email).substring(0, 256),
+      plano,
+      status: 'ativo',
+      origem: 'Criar Conta ClickPay',
+      createdAt: now,
+      updatedAt: now
+    }, { merge: true });
+    syncedCollections.push('companies');
+  } catch (err: any) {
+    errors.push(`companies: ${err?.message || String(err)}`);
+  }
+
+  // 5. Gravar pedido/registo de credenciais no Firestore
+  const reqRes = await syncCredentialRequestToFirestore({
+    id: reqId,
+    nomeEmpresa: params.nomeEmpresa,
+    nomeResponsavel: params.nomeEmpresa,
+    email: params.email,
+    telefone: params.telefone || '+258 84 000 0000',
+    nuit: params.nuit,
+    planoEscolhido: plano,
+    precoMensal: feeBase,
+    status: 'APROVADO',
+    dataSolicitacao: now
+  });
+  if (reqRes.ok) syncedCollections.push('erp_credential_requests');
+  else if (reqRes.error) errors.push(`erp_credential_requests: ${reqRes.error}`);
+
+  try {
+    await setDoc(doc(db, 'credential_requests', reqId), {
+      id: reqId,
+      empresa: String(params.nomeEmpresa).substring(0, 256),
+      responsavel: String(params.nomeEmpresa).substring(0, 256),
+      nuit: String(params.nuit).substring(0, 32),
+      email: String(params.email).substring(0, 256),
+      telefone: String(params.telefone || '+258 84 000 0000').substring(0, 64),
+      plano,
+      status: 'REGISTADO_ONLINE',
+      createdAt: now
+    }, { merge: true });
+    syncedCollections.push('credential_requests');
+  } catch (err: any) {
+    errors.push(`credential_requests: ${err?.message || String(err)}`);
+  }
+
+  return { syncedCollections, errors };
 }
 
 // Test Connection to Firestore as per requirements

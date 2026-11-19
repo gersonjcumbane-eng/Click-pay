@@ -404,7 +404,7 @@ export default function A4DocumentModal({
                 Dados Bancários Oficiais para Liquidação por Transferência / M-Pesa
               </span>
               <span className="text-[10px] font-bold text-blue-800 font-mono">
-                Titular: {empresa.nome || 'Payroll Tech MZ, Lda'}
+                Titular: {empresa.nome || 'ClickPay Moçambique, Lda'}
               </span>
             </div>
 
@@ -443,7 +443,7 @@ export default function A4DocumentModal({
               <div className="border-b-2 border-slate-800 w-56 mx-auto h-8"></div>
               <div>
                 <p className="font-bold text-slate-900 uppercase">Pela Entidade Emitente</p>
-                <p className="text-[10px] text-slate-500">{empresa.nome || 'Payroll Tech MZ, Lda'}</p>
+                <p className="text-[10px] text-slate-500">{empresa.nome || 'ClickPay Moçambique, Lda'}</p>
               </div>
             </div>
 

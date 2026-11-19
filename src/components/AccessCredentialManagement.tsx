@@ -489,7 +489,7 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
             <div className="flex items-center gap-2">
               <Building size={18} className="text-blue-900" />
               <h2 className="text-base font-bold text-slate-950">
-                Identificadores Oficiais da ClickPayroll (AT & Registo Comercial)
+                Identificadores Oficiais da ClickPay (AT & Registo Comercial)
               </h2>
             </div>
             <p className="text-xs text-slate-500">
@@ -521,7 +521,7 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
           <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
               <label htmlFor="input-nuit-clickpay" className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <span>NUIT Oficial (ClickPay / Payroll Tech Mz)</span>
+                <span>NUIT Oficial (ClickPay Moçambique)</span>
               </label>
               <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-950 px-2 py-0.5 rounded">
                 Oficial AT: 402302399

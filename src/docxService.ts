@@ -22,7 +22,7 @@ export interface CartaApoioOptions {
 
 export async function gerarCartaApoioDocx(options: CartaApoioOptions = {}): Promise<Buffer> {
   const destinatario = options.destinatario || 'À\nMinistério da Ciência, Tecnologia e Ensino Superior – MCTD\nMaputo, Moçambique';
-  const empresaNome = options.empresaNome || 'ClickPay / Payroll Tech MZ';
+  const empresaNome = options.empresaNome || 'ClickPay Moçambique';
   const dataExtenso = options.dataExtenso || 'Maputo, 27 de Agosto de 2026';
   const representanteNome = options.representanteNome || 'Gerson José Cumbane';
   const cargo = options.cargo || 'Representante / Fundador da Startup';
@@ -32,7 +32,7 @@ export async function gerarCartaApoioDocx(options: CartaApoioOptions = {}): Prom
 
   let logoImageRun: ImageRun | null = null;
   try {
-    const logoPath = path.join(process.cwd(), 'public', 'logo-payroll.png');
+    const logoPath = path.join(process.cwd(), 'public', 'clickpay-logo.png');
     if (fs.existsSync(logoPath)) {
       const logoData = fs.readFileSync(logoPath);
       logoImageRun = new ImageRun({

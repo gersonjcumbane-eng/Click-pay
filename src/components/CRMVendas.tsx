@@ -78,7 +78,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
     condicoes_pagamento: '50% no acto da adjudicação e 50% após entrega final.',
     vendedor: 'Gerson Cumbane',
     itens: [
-      { descricao: 'Licenciamento ERP Payroll Tech Cloud', quantidade: 1, preco_unitario: 150000, taxa_iva: 16, desconto_percentual: 0, total: 150000 }
+      { descricao: 'Licenciamento ERP ClickPay Cloud', quantidade: 1, preco_unitario: 150000, taxa_iva: 16, desconto_percentual: 0, total: 150000 }
     ]
   });
 
@@ -1299,7 +1299,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
             {/* Document Timbre / Header */}
             <div className="border-b-2 border-blue-900 pb-4 flex justify-between items-start">
               <div>
-                <h2 className="text-xl font-black text-blue-900 tracking-tight">{companyData.nome || 'Payroll Tech MZ Cloud ERP'}</h2>
+                <h2 className="text-xl font-black text-blue-900 tracking-tight">{companyData.nome || 'ClickPay Cloud ERP'}</h2>
                 <p className="text-xs text-slate-600 font-medium">{companyData.endereco || 'Avenida 25 de Setembro, Maputo, Moçambique'}</p>
                 <p className="text-xs text-slate-600 font-mono">NUIT: {companyData.nuit || '400123456'}</p>
               </div>
@@ -1377,7 +1377,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
               {/* Bank Coordinates */}
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-1 text-slate-800">
                 <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">
-                  Coordenadas Bancárias para Liquidação (Payroll Tech MZ, Lda):
+                  Coordenadas Bancárias para Liquidação (ClickPay Moçambique, Lda):
                 </span>
                 <div className="grid grid-cols-3 gap-2 font-mono text-[9px] pt-1">
                   <div className="bg-white p-2 rounded border border-blue-150">

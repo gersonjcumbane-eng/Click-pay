@@ -124,7 +124,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
     if (status === 'granted') {
       sendBrowserNotification(
         "🔔 Notificações Ativadas!",
-        "Agora você receberá alertas diretos do Payroll Tech MZ no seu navegador."
+        "Agora você receberá alertas diretos do ClickPay Moçambique no seu navegador."
       );
     }
   };
@@ -793,7 +793,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
                               <div className="p-4 space-y-4">
                                 <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 space-y-2">
                                   <div className="border-b border-slate-100 pb-3 text-xs font-mono space-y-1">
-                                    <p className="text-slate-500"><span className="font-bold text-slate-700">De:</span> Payroll Tech Mz Alerts &lt;no-reply@payrolltech.co.mz&gt;</p>
+                                    <p className="text-slate-500"><span className="font-bold text-slate-700">De:</span> ClickPay Alerts &lt;no-reply@clickpay.co.mz&gt;</p>
                                     <p className="text-slate-500"><span className="font-bold text-slate-700">Para:</span> {item.destinatario}</p>
                                     <p className="text-slate-500"><span className="font-bold text-slate-700">Assunto:</span> {item.assunto}</p>
                                     <p className="text-slate-400 text-[10px] pt-1 flex items-center gap-1.5">

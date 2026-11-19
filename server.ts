@@ -1574,9 +1574,10 @@ async function startServer() {
     });
   });
 
-  // REGISTO COMPLETO VIA ONBOARDING WIZARD (PAYROLL TECH MZ STYLE)
+  // REGISTO COMPLETO VIA CRIAÇÃO DE CONTA / ONBOARDING CLICKPAY
   app.post('/api/auth/register-onboarding', async (req: Request, res: Response) => {
     const {
+      existingCompanyId,
       nome,
       apelido,
       email,
@@ -1597,62 +1598,137 @@ async function startServer() {
       armazemCodigo
     } = req.body;
 
-    if (!email || !password || !nomeEmpresa) {
-      return res.status(400).json({ erro: 'Campos obrigatórios em falta (Email, Senha, Nome da Empresa).' });
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    const cleanEmpresa = String(nomeEmpresa || '').trim();
+    const cleanNuit = String(nuit || '').trim();
+    const cleanPassword = String(password || '').trim();
+
+    if (!cleanEmail || !cleanPassword || !cleanEmpresa) {
+      return res.status(400).json({ erro: 'Campos obrigatórios em falta (Nome da Empresa, E-mail corporativo, NUIT, Senha).' });
     }
 
     try {
-      const companyId = `cli_reg_${Date.now()}`;
-      const nomeCompletoUsuario = `${nome || ''} ${apelido || ''}`.trim() || email.split('@')[0];
+      const selectedPlan = plano || 'Starter';
+      const feeBase =
+        selectedPlan === 'Starter' || selectedPlan === 'Bronze' ? 3500 :
+        selectedPlan === 'Growth' || selectedPlan === 'Silver' ? 6500 :
+        9500;
+      const nomeCompletoUsuario = `${nome || ''} ${apelido || ''}`.trim() || cleanEmpresa;
 
-      // 1. Criar empresa na base de dados
+      // Se já foi criado na Etapa 1 e está a finalizar a configuração na Etapa 3, atualizar a empresa existente
+      if (existingCompanyId) {
+        const existingCompany = baseDadosClientes.find(c => c.id === existingCompanyId);
+        if (existingCompany) {
+          existingCompany.nome = cleanEmpresa;
+          if (cleanNuit) existingCompany.nuit = cleanNuit;
+          if (nuel) existingCompany.nuel = String(nuel).trim();
+          if (endereco) existingCompany.endereco = endereco;
+          if (provincia) existingCompany.provincia = provincia;
+          if (distrito) existingCompany.distrito = distrito;
+          if (regimeIva) existingCompany.regime_iva = regimeIva;
+          if (logo) existingCompany.logo = logo;
+          if (contacto) existingCompany.telefone = contacto;
+          existingCompany.subscription_plan = selectedPlan;
+          existingCompany.fee_base = feeBase;
+
+          selecionarClienteEmpresa(existingCompany.id);
+
+          return res.status(200).json({
+            sucesso: true,
+            mensagem: 'Configuração da empresa atualizada com sucesso na ClickPay!',
+            token: `token_cliente_${existingCompany.id}`,
+            usuario: {
+              id: existingCompany.id,
+              email: existingCompany.email,
+              funcao: 'CLIENTE_EMPRESA',
+              empresa_id: existingCompany.id,
+              nome_empresa: existingCompany.nome,
+              nuit: existingCompany.nuit,
+              nome_usuario: nomeCompletoUsuario,
+              subscription_status: existingCompany.subscription_status || 'ativo',
+              subscription_plan: existingCompany.subscription_plan,
+              next_billing_date: existingCompany.next_billing_date
+            }
+          });
+        }
+      }
+
+      const companyId = `cli_reg_${Date.now()}`;
+      const nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      // 1. Criar empresa na base de dados local do ERP
       const novaEmpresa = adicionarClienteEmpresa({
         id: companyId,
-        nome: nomeEmpresa,
-        nuit: nuit || `400${Math.floor(100000 + Math.random() * 900000)}`,
+        nome: cleanEmpresa,
+        nuit: cleanNuit || `400${Math.floor(100000 + Math.random() * 900000)}`,
         endereco: endereco || 'Av. 25 de Setembro, Maputo',
         provincia: provincia || 'Maputo Cidade',
         distrito: distrito || 'KaMpfumo',
         regime_iva: regimeIva || 'IVA Normal (16%)',
         nuel: nuel || '100123456',
-        email: email,
+        email: cleanEmail,
         telefone: contacto || '+258 84 000 0000',
         logo: logo || '/clickpay-logo.png',
-        password: password,
+        password: cleanPassword,
         subscription_status: 'ativo',
-        subscription_plan: plano || 'Growth',
-        next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        fee_base: plano === 'Starter' ? 3000 : plano === 'Growth' ? 5000 : 6500,
+        subscription_plan: selectedPlan,
+        next_billing_date: nextBillingDate,
+        fee_base: feeBase,
         fee_por_slip: 100
       });
 
-      // 2. Registar utilizador local e sincronizar no Firebase Auth
+      // 2. Registar utilizador local, na gestão de acessos e sincronizar no Firebase Auth
       clientesRegistadosPelosFounders.push({
-        email,
-        password,
+        email: cleanEmail,
+        password: cleanPassword,
         funcao: 'CLIENTE_EMPRESA',
         empresa_id: companyId,
         nome: nomeCompletoUsuario,
-        resellerCode
+        resellerCode: resellerCode || ''
       });
 
-      await syncUserToFirebase(email, password);
+      systemUsersList.unshift({
+        id: `usr_${Date.now()}`,
+        name: cleanEmpresa,
+        email: cleanEmail,
+        passwordMasked: cleanPassword.replace(/./g, '•'),
+        rawPassword: cleanPassword,
+        role: 'CLIENTE_EMPRESA',
+        roleLabel: `Cliente Empresa (${selectedPlan})`,
+        plan: selectedPlan,
+        companyName: cleanEmpresa,
+        phone: contacto || '+258 84 000 0000',
+        status: 'ativo',
+        createdAt: new Date().toISOString().substring(0, 10),
+        lastLogin: 'Registado agora',
+        apiTokenPrefix: `cp_live_${companyId.substring(0, 10)}...`
+      });
+
+      await syncUserToFirebase(cleanEmail, cleanPassword);
+
+      notifyFounder(
+        'Nova Conta Empresarial Criada (ClickPay)',
+        `Empresa "${cleanEmpresa}" (NUIT: ${novaEmpresa.nuit}) registada com o e-mail ${cleanEmail} e sincronizada com o Firebase.`,
+        { userEmail: cleanEmail, nuit: novaEmpresa.nuit, status: 'sucesso' }
+      );
 
       // 3. Selecionar a nova empresa no servidor
       selecionarClienteEmpresa(companyId);
 
       return res.status(201).json({
         sucesso: true,
-        mensagem: 'Conta e empresa criadas com sucesso! Bem-vindo ao ERP.',
+        mensagem: 'Conta e empresa criadas com sucesso! Bem-vindo à ClickPay.',
         token: `token_cliente_${companyId}`,
         usuario: {
-          email: email,
+          id: companyId,
+          email: cleanEmail,
           funcao: 'CLIENTE_EMPRESA',
           empresa_id: companyId,
-          nome_empresa: nomeEmpresa,
+          nome_empresa: cleanEmpresa,
+          nuit: novaEmpresa.nuit,
           nome_usuario: nomeCompletoUsuario,
           subscription_status: 'ativo',
-          subscription_plan: plano || 'Growth',
+          subscription_plan: selectedPlan,
           next_billing_date: novaEmpresa.next_billing_date
         }
       });

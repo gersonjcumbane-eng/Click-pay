@@ -1868,7 +1868,7 @@ export function criarRelatorioAgrupadoERPPDF(
       }
       if (!drawn) {
         try {
-          const pathLogo = path.join(process.cwd(), 'public', 'logo-payroll.png');
+          const pathLogo = path.join(process.cwd(), 'public', 'clickpay-logo.png');
           if (fs.existsSync(pathLogo)) {
             doc.image(pathLogo, 40, 35, { width: 40 });
             textX = 90;
@@ -1876,7 +1876,7 @@ export function criarRelatorioAgrupadoERPPDF(
         } catch (e) {}
       }
 
-      const nomeEmpresa = (dadosEmpresa.nome || 'Payroll Tech Mz Lda').toUpperCase();
+      const nomeEmpresa = (dadosEmpresa.nome || 'ClickPay Moçambique, Lda').toUpperCase();
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a').text(nomeEmpresa, textX, 35);
       doc.fontSize(8).font('Helvetica').fillColor('#475569');
       doc.text(`NUIT: ${dadosEmpresa.nuit || '402302399'}  |  Moçambique  |  Período: ${periodo || 'Geral'}`, textX, 48);
@@ -2211,7 +2211,7 @@ export function criarRelatorioAgrupadoERPPDF(
       // Rodapé
       yLinha += 40;
       doc.fontSize(7).font('Helvetica-Oblique').fillColor('#94a3b8');
-      doc.text(`Relatório oficial emitido electronicamente por PayrollTech ERP Moçambique em ${new Date().toLocaleDateString('pt-MZ')}. Ficheiro auditado conforme regulamento fiscal da AT.`, 40, 780, { align: 'center', width: 515 });
+      doc.text(`Relatório oficial emitido electronicamente por ClickPay ERP Moçambique em ${new Date().toLocaleDateString('pt-MZ')}. Ficheiro auditado conforme regulamento fiscal da AT.`, 40, 780, { align: 'center', width: 515 });
 
       doc.end();
 

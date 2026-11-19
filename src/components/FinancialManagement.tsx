@@ -2075,7 +2075,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                     Guia Prático de Lançamentos Contabilísticos em Moçambique (PGC)
                   </h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    Como o sistema Payroll Tech MZ classifica automaticamente os principais acontecimentos económicos em estrito cumprimento das Partidas Dobradas:
+                    Como o sistema ClickPay classifica automaticamente os principais acontecimentos económicos em estrito cumprimento das Partidas Dobradas:
                   </p>
                 </div>
 
@@ -2775,7 +2775,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
           estadoPagamento={selectedDocA4.estadoPagamento}
           metodoPagamento={selectedDocA4.metodoPagamento}
           empresa={{
-            nome: company.nome || 'PAYROLL TECH MZ, LDA',
+            nome: company.nome || 'CLICKPAY MOÇAMBIQUE, LDA',
             nuit: company.nuit || '400990887',
             endereco: company.endereco || 'Av. Julius Nyerere, Jat V, Maputo',
             email: company.email || 'gersonjcumbane@gmail.com',

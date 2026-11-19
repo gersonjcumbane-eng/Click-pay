@@ -46,8 +46,8 @@ export function sendBrowserNotification(title: string, body: string, options?: N
       // Create options with standard system logo icon if possible
       const defaultOptions: NotificationOptions = {
         body,
-        icon: '/logo-payroll.png', // Main system logo
-        tag: 'payroll-tech-notification',
+        icon: '/clickpay-logo.png', // Main system logo
+        tag: 'clickpay-notification',
         requireInteraction: false,
         ...options
       };

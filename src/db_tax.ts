@@ -937,7 +937,7 @@ export let configuracaoFiscal: ConfigFiscal = {
 };
 
 export let empresaAtual: CompanyData = {
-  nome: "Payroll Tech Mz Lda",
+  nome: "ClickPay Moçambique, Lda",
   nuit: "402302399",
   endereco: "Av. 24 de Julho, nº 1500, 5º Andar, Maputo",
   pais: "Moçambique",
@@ -948,9 +948,9 @@ export let empresaAtual: CompanyData = {
   tamanho_empresa: "Pequena Empresa (6-20 Colaboradores)",
   regime_fiscal_pme: "Regime Geral IVA (16%)",
   nuel: "105086659",
-  email: "admin@payrolltech.co.mz",
+  email: "admin@clickpay.co.mz",
   telefone: "+258 86 139 0061",
-  logo: "logo-payroll.png",
+  logo: "/clickpay-logo.png",
   subscription_status: "ativo",
   subscription_plan: "Platinum",
   next_billing_date: "2026-12-31",
@@ -1495,16 +1495,16 @@ export function seedDemoData() {
   baseDadosContratosGerais.length = 0;
   
   // Restaura os dados da empresa fundadora principal como empresa ativa por defeito
-  empresaAtual.nome = "Payroll Tech Mz Lda";
+  empresaAtual.nome = "ClickPay Moçambique, Lda";
   empresaAtual.nuit = "402302399";
   empresaAtual.endereco = "Av. 24 de Julho, nº 1500, 5º Andar, Maputo";
   empresaAtual.provincia = "Maputo Cidade";
   empresaAtual.distrito = "KaMpfumo";
   empresaAtual.regime_iva = "Geral (16%)";
   empresaAtual.nuel = "105086659";
-  empresaAtual.email = "admin@payrolltech.co.mz";
+  empresaAtual.email = "admin@clickpay.co.mz";
   empresaAtual.telefone = "+258 86 139 0061";
-  empresaAtual.logo = "logo-payroll.png";
+  empresaAtual.logo = "/clickpay-logo.png";
   empresaAtual.subscription_status = "ativo";
   empresaAtual.subscription_plan = "Platinum";
   empresaAtual.next_billing_date = "2026-12-31";
@@ -1612,16 +1612,16 @@ export interface ClienteEmpresaRegisto {
 export let baseDadosClientes: ClienteEmpresaRegisto[] = [
   {
     id: "cli_founders",
-    nome: "Payroll Tech Mz Lda",
+    nome: "ClickPay Moçambique, Lda",
     nuit: "402302399",
     endereco: "Av. 24 de Julho, nº 1500, 5º Andar, Maputo",
     provincia: "Maputo Cidade",
     distrito: "KaMpfumo",
     regime_iva: "Geral (16%)",
     nuel: "105086659",
-    email: "admin@payrolltech.co.mz",
+    email: "admin@clickpay.co.mz",
     telefone: "+258 86 139 0061",
-    logo: "logo-payroll.png",
+    logo: "/clickpay-logo.png",
     fee_base: 0,
     fee_por_slip: 0,
     subscription_status: "ativo",

@@ -948,7 +948,7 @@ export default function EmployeeDirectory({
                   <h3 className="font-bold text-base">
                     {editingEmp ? 'Editar Ficha do Colaborador' : 'Registar Novo Colaborador'}
                   </h3>
-                  <p className="text-[10px] text-slate-400">Payroll Tech Mz - ERP ERP de Gestão</p>
+                  <p className="text-[10px] text-slate-400">ClickPay Moçambique - ERP de Gestão</p>
                 </div>
                 <button 
                   onClick={() => {

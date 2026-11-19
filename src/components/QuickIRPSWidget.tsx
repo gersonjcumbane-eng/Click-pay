@@ -31,7 +31,7 @@ export function QuickIRPSWidget() {
       `----------------------------------------\n` +
       `SALÁRIO LÍQUIDO: ${calc.salarioLiquido.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT\n` +
       `Custo Patronal INSS (4%): ${calc.inssEmpresa.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT\n` +
-      `Calculado por Payroll Tech Mz`;
+      `Calculado por ClickPay Moçambique`;
 
     navigator.clipboard.writeText(texto);
     setCopied(true);

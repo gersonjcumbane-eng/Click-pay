@@ -550,7 +550,7 @@ export default function CorporateSettings({
               Gestão de Acesso, Níveis de Permissão, Tokens de API & OTP (2FA)
             </h4>
             <p className="text-xs text-slate-500">
-              Identificadores Oficiais ClickPayroll (NUIT: 402302399 | NUEL: 105086659), geração automática de credenciais e alertas ao Fundador.
+              Identificadores Oficiais ClickPay (NUIT: 402302399 | NUEL: 105086659), geração automática de credenciais e alertas ao Fundador.
             </p>
           </div>
         </div>
@@ -691,8 +691,8 @@ export default function CorporateSettings({
                 {/* A caixa de preview exibe o logótipo oficial da Fintech como padrão ou a customizada se existir */}
                 <div className="avatar-preview" style={{ width: '80px', height: '80px', border: '1px solid #cbd5e1', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white', overflow: 'hidden' }}>
                   <img 
-                    src={logo || "logo-payroll.png"} 
-                    alt="Logo" 
+                    src={logo || "/clickpay-logo.png"} 
+                    alt="Logo ClickPay" 
                     style={{ width: '70px', height: 'auto', maxHeight: '70px', objectFit: 'contain' }}
                     referrerPolicy="no-referrer"
                   />
@@ -1284,7 +1284,7 @@ export default function CorporateSettings({
 
             <div className="space-y-4">
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                O software <b>Payroll Tech Mz</b> executa <b>salvaguardas automáticas na nuvem</b> sempre que regista novos funcionários ou conclui o processamento salarial dos seus colaboradores.
+                O software <b>ClickPay</b> executa <b>salvaguardas automáticas na nuvem</b> sempre que regista novos funcionários ou conclui o processamento salarial dos seus colaboradores.
               </p>
 
               {/* Step backup indicator */}

@@ -1750,7 +1750,7 @@ export default function FintechPayments({
                 </div>
                 <div>
                   <h3 className="font-bold text-sm">Recarregar Carteira</h3>
-                  <p className="text-[10px] text-blue-200">Adicione fundos à sua conta corporativa Payroll.</p>
+                  <p className="text-[10px] text-blue-200">Adicione fundos à sua conta corporativa ClickPay.</p>
                 </div>
               </div>
               <button 

@@ -17,20 +17,20 @@ export const DEFAULT_BANK_ACCOUNTS: BankAccountDetails[] = [
     conta: '9944-8833-MZ',
     nib: '0001 0000 9944 8833 01',
     swift: 'BIMOMZMA',
-    titular: 'Payroll Tech MZ, Lda'
+    titular: 'ClickPay Moçambique, Lda'
   },
   {
     banco: 'BCI Fomento',
     conta: '1122-3344-MZ',
     nib: '0008 0000 1122 3344 02',
     swift: 'BCIMMZMA',
-    titular: 'Payroll Tech MZ, Lda'
+    titular: 'ClickPay Moçambique, Lda'
   },
   {
     banco: 'Absa Bank Moçambique',
     conta: '5566-7788-MZ',
     nib: '0003 0000 5566 7788 03',
-    titular: 'Payroll Tech MZ, Lda'
+    titular: 'ClickPay Moçambique, Lda'
   }
 ];
 
