@@ -75,36 +75,37 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-3xl p-8 sm:p-12 text-center shadow-md border border-slate-100 max-w-2xl mx-auto my-8 space-y-6"
+      className="bg-white rounded-xl p-8 sm:p-10 text-center border border-slate-200 max-w-2xl mx-auto my-8 space-y-6"
     >
-      <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner animate-pulse">
-        🔒
+      <div className="w-12 h-12 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center mx-auto border border-slate-200">
+        <Lock size={20} />
       </div>
       <div className="space-y-2">
-        <h3 className="text-xl font-black text-slate-950">Módulo Bloqueado: {featureName}</h3>
-        <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+        <h3 className="text-lg font-semibold text-slate-950">Módulo Bloqueado: {featureName}</h3>
+        <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
           {description}
         </p>
       </div>
 
-      <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-left space-y-4">
-        <p className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Requisito de Subscrição</p>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left space-y-3">
+        <p className="text-[11px] font-medium text-slate-500">Requisito de Subscrição</p>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-bold text-slate-800">Plano Necessário:</p>
-            <p className="text-sm font-black text-blue-900">👑 {requiredPlan}</p>
+            <p className="text-xs font-medium text-slate-700">Plano Necessário</p>
+            <p className="text-sm font-semibold text-blue-900">{requiredPlan}</p>
           </div>
           <a
             href="mailto:gersonjcumbane@gmail.com?subject=Solicita%C3%A7%C3%A3o%20de%20Upgrade%20-%20ClickPay%20Mo%C3%A7ambique"
-            className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl text-xs transition-colors shadow-md shadow-blue-900/10 whitespace-nowrap"
+            className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white font-semibold rounded-lg text-xs transition-colors whitespace-nowrap"
           >
-            Fazer Upgrade Agora
+            Solicitar Upgrade
           </a>
         </div>
       </div>
 
-      <p className="text-[10px] text-slate-400">
-        Para dúvidas sobre faturamento ou termos de licença, por favor contacte o Administrador <span className="font-semibold text-slate-600">gersonjcumbane@gmail.com</span>
+      <p className="text-[11px] text-slate-500">
+        Para informações sobre licença ou faturamento, contacte{' '}
+        <span className="font-medium text-slate-700">gersonjcumbane@gmail.com</span>
       </p>
     </motion.div>
   );
@@ -619,22 +620,23 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col font-sans text-black antialiased">
-      {/* Mobile Top Header Trigger (Minimalist & Clean) */}
+    <div className="min-h-screen bg-[#FAFAFB] flex flex-col font-sans text-slate-900 antialiased">
+      {/* Mobile Top Header Trigger */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 lg:hidden">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <button
+            type="button"
             onClick={() => setMobileNavOpen(true)}
-            className="px-3 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-xl font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer shadow-xs"
+            className="px-3 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg font-semibold text-xs flex items-center gap-2 transition-colors cursor-pointer"
             id="mobile-open-left-nav-btn"
             title="Abrir Menu de Módulos"
           >
-            <Layers size={15} strokeWidth={2.2} />
+            <Layers size={14} />
             <span>Módulos ERP</span>
           </button>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs font-extrabold text-black truncate max-w-[170px]">
+            <span className="text-xs font-semibold text-slate-900 truncate max-w-[180px]">
               {company?.nome || 'ClickPay'}
             </span>
           </div>
@@ -642,9 +644,7 @@ export default function App() {
       </header>
 
       {/* Main Container Layout with Left-Side Modules Navigation */}
-      <div className="max-w-7xl mx-auto w-full px-3 sm:px-5 lg:px-6 py-4 flex-1 flex flex-col lg:flex-row gap-5 items-start">
-        
-        {/* Left-Side ERP Modules Navigation Panel & Isolated Logout Window */}
+      <div className="max-w-7xl mx-auto w-full px-3 sm:px-5 lg:px-6 py-5 flex-1 flex flex-col lg:flex-row gap-5 items-start">
         <LeftModuleNav
           activeTab={activeTab}
           financialSubTab={financialSubTab}
@@ -664,28 +664,29 @@ export default function App() {
           onResetCosts={handleResetCosts}
         />
 
-        {/* Dynamic Panel Content Container (Right / Center) */}
-        <main className="flex-1 min-w-0 w-full bg-white">
+        {/* Dynamic Panel Content Container */}
+        <main className="flex-1 min-w-0 w-full">
           {loading ? (
-            <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-12 text-center flex flex-col items-center justify-center space-y-3">
-              <div className="w-8 h-8 border-4 border-blue-900 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-sm font-bold text-black">A iniciar módulos ERP de Moçambique...</p>
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center flex flex-col items-center justify-center space-y-3">
+              <div className="w-7 h-7 border-2 border-blue-900 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-xs font-medium text-slate-700">A carregar módulos ClickPay ERP...</p>
             </div>
           ) : error ? (
-            <div className="bg-red-50 text-red-950 rounded-2xl p-6 border border-red-200 text-center space-y-4">
-              <p className="text-sm font-bold text-red-900">{error}</p>
+            <div className="bg-rose-50 text-rose-950 rounded-xl p-6 border border-rose-200 text-center space-y-4">
+              <p className="text-xs font-semibold text-rose-900">{error}</p>
               <button
+                type="button"
                 onClick={() => {
                   setLoading(true);
                   loadData();
                 }}
-                className="px-4 py-2 bg-red-600 text-white font-bold rounded-xl text-xs cursor-pointer hover:bg-red-700"
+                className="px-4 py-2 bg-rose-700 text-white font-semibold rounded-lg text-xs cursor-pointer hover:bg-rose-800"
               >
                 Tentar Novamente
               </button>
             </div>
           ) : (
-            <div className="relative bg-white">
+            <div className="relative">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={activeTab}
