@@ -6,6 +6,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { GoogleGenAI, Type } from "@google/genai";
 import {
   getMobileGatewayStatuses,
@@ -78,16 +79,23 @@ import {
 import { criarReciboSalarioPDF, criarAvisoPrevioPDF, criarExtratoFintechPDF, criarRelatorioAuditoriaPDF, criarReciboValePDF, criarRelatorioValesPDF, criarMapaSalariosPDF, criarRelatorioHistoricoPDF, criarGuiaRecolhimentoInssPDF, criarGuiaIrpsPDF, criarRelatorioAgrupadoERPPDF } from './src/pdfService';
 import { gerarCartaApoioDocx } from './src/docxService';
 
-async function startServer() {
+export async function createApp(options?: { skipStatic?: boolean }) {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+  const isServerless = Boolean(process.env.VERCEL || options?.skipStatic);
 
   // Carregar configuração do Firebase para sincronização de contas
-  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  const safeDirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+  const configCandidates = [
+    path.join(process.cwd(), 'firebase-applet-config.json'),
+    path.resolve(safeDirname, 'firebase-applet-config.json'),
+    path.resolve(safeDirname, '..', 'firebase-applet-config.json')
+  ];
+  const configPath = configCandidates.find((p) => fs.existsSync(p));
   let firebaseConfig: any = null;
   let isEmailPasswordProviderDisabled = false;
 
-  if (fs.existsSync(configPath)) {
+  if (configPath) {
     try {
       firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       console.log('[Firebase Integration] Configurações de credenciais carregadas com sucesso:', firebaseConfig.projectId);
@@ -182,10 +190,20 @@ async function startServer() {
     ]);
   }
 
-  // Create absolute temp folder for holding PDFs
-  const tmpDir = path.join(process.cwd(), 'tmp');
-  if (!fs.existsSync(tmpDir)) {
-    fs.mkdirSync(tmpDir, { recursive: true });
+  // Create writable temp folder for holding PDFs (os.tmpdir() on Vercel/read-only FS)
+  const preferredTmpDir = isServerless
+    ? path.join(os.tmpdir(), 'clickpay-tmp')
+    : path.join(process.cwd(), 'tmp');
+  let tmpDir = preferredTmpDir;
+  try {
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+  } catch {
+    tmpDir = path.join(os.tmpdir(), 'clickpay-tmp');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
   }
 
   // CREDENCIAIS MESTRE DOS FUNDADORES (ACESSO TOTAL AO ERP)
@@ -3798,7 +3816,7 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
       else if (tipo === 'balanco') dados = getBalancoPatrimonial(periodo);
       else if (tipo === 'dr' || tipo === 'demonstracao_resultados') dados = getDemonstracaoResultados(periodo);
 
-      const tempDir = path.join(process.cwd(), 'temp_pdf');
+      const tempDir = tmpDir;
       if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
       const filePath = path.join(tempDir, `relatorio_${tipo}_${Date.now()}.pdf`);
@@ -6257,28 +6275,30 @@ Host: https://clickpay.co.mz
     res.status(404).json({ erro: `Rota API não encontrada: ${req.method} ${req.path}` });
   });
 
-  // Vite Integration (apenas em desenvolvimento) / Static Dist (produção)
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const cwdDist = path.join(process.cwd(), 'dist');
-    const relDist = path.resolve(__dirname, '..', 'dist');
-    const sameDist = path.resolve(__dirname);
-    const distPath = fs.existsSync(path.join(cwdDist, 'index.html'))
-      ? cwdDist
-      : fs.existsSync(path.join(relDist, 'index.html'))
-      ? relDist
-      : sameDist;
+  // Vite Integration (apenas em desenvolvimento) / Static Dist (produção standalone)
+  if (!isServerless) {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const cwdDist = path.join(process.cwd(), 'dist');
+      const relDist = path.resolve(safeDirname, '..', 'dist');
+      const sameDist = path.resolve(safeDirname);
+      const distPath = fs.existsSync(path.join(cwdDist, 'index.html'))
+        ? cwdDist
+        : fs.existsSync(path.join(relDist, 'index.html'))
+        ? relDist
+        : sameDist;
 
-    app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+      app.use(express.static(distPath));
+      app.get('*', (req: Request, res: Response) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   // Pre-seed mock data on server startup so the portfolio has preloaded details
@@ -6287,7 +6307,7 @@ Host: https://clickpay.co.mz
     console.log('[SERVER] Pre-seeded demo portfolio with default companies and employees successfully.');
 
     // Sincronizar as contas de demonstração padrões com o Firebase Auth em segundo plano
-    if (firebaseConfig && firebaseConfig.apiKey) {
+    if (!isServerless && firebaseConfig && firebaseConfig.apiKey) {
       console.log('[Firebase Sync] Sincronização automática das contas padrão iniciada...');
       syncUserToFirebase("admin@payrolltech.co.mz", "UEM_Finanças_Engenharia_2026!");
       syncUserToFirebase("bronze@payrolltech.co.mz", "bronze2026");
@@ -6298,11 +6318,18 @@ Host: https://clickpay.co.mz
     console.error('[SERVER] Pre-seeding error:', e);
   }
 
+  return { app, PORT };
+}
+
+async function startServer() {
+  const { app, PORT } = await createApp();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Payroll Tech Mz backend active on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer().catch(err => {
-  console.error('[CRITICAL] Server startup crashed:', err);
-});
+if (!process.env.VERCEL && !process.env.CLICKPAY_NO_LISTEN) {
+  startServer().catch(err => {
+    console.error('[CRITICAL] Server startup crashed:', err);
+  });
+}
