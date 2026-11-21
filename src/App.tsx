@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 
 import { Employee, CompanyData, ConfigFiscal, PayrollSummary, PaymentLog } from './types';
+import { getAuthHeaders, isSuperAdminRole } from './lib/authSession';
 import Dashboard from './components/Dashboard';
 import EmployeeDirectory from './components/EmployeeDirectory';
 import TaxSimulator from './components/TaxSimulator';
@@ -48,6 +49,11 @@ import OnboardingWizard from './components/OnboardingWizard';
 import { LeftModuleNav } from './components/LeftModuleNav';
 import { ClickPayBrain } from './components/ClickPayBrain';
 import AccessCredentialManagement from './components/AccessCredentialManagement';
+import SupportTicketModal, {
+  buildSupportMailtoUrl,
+  buildSupportWhatsAppUrl,
+  CLICKPAY_SUPPORT
+} from './components/SupportTicketModal';
 import { 
   updateConfiguracaoFiscal, 
   updateEmpresa, 
@@ -89,23 +95,40 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
 
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left space-y-3">
         <p className="text-[11px] font-medium text-slate-500">Requisito de Subscrição</p>
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="text-xs font-medium text-slate-700">Plano Necessário</p>
             <p className="text-sm font-semibold text-blue-900">{requiredPlan}</p>
           </div>
-          <a
-            href="mailto:gersonjcumbane@gmail.com?subject=Solicita%C3%A7%C3%A3o%20de%20Upgrade%20-%20ClickPay%20Mo%C3%A7ambique"
-            className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white font-semibold rounded-lg text-xs transition-colors whitespace-nowrap"
-          >
-            Solicitar Upgrade
-          </a>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={buildSupportMailtoUrl({
+                subject: `Solicitação de Upgrade (${featureName}) - ClickPay Moçambique`,
+                body: `Olá Equipa ClickPay,\n\nSolicito upgrade para o plano ${requiredPlan} para ativar o módulo ${featureName}.\n`
+              })}
+              className="px-3.5 py-2 bg-blue-900 hover:bg-blue-950 text-white font-semibold rounded-lg text-xs transition-colors whitespace-nowrap"
+            >
+              Solicitar via E-mail
+            </a>
+            <a
+              href={buildSupportWhatsAppUrl({
+                number: CLICKPAY_SUPPORT.whatsappPrimaryNumber,
+                message: `Olá Equipa ClickPay, gostaria de solicitar upgrade para o plano ${requiredPlan} (${featureName}).`
+              })}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1ebe5b] text-white font-semibold rounded-lg text-xs transition-colors whitespace-nowrap"
+            >
+              WhatsApp Suporte
+            </a>
+          </div>
         </div>
       </div>
 
       <p className="text-[11px] text-slate-500">
-        Para informações sobre licença ou faturamento, contacte{' '}
-        <span className="font-medium text-slate-700">gersonjcumbane@gmail.com</span>
+        Suporte comercial e técnico:{' '}
+        <span className="font-medium text-slate-700">{CLICKPAY_SUPPORT.emailPrimary}</span> ·{' '}
+        <span className="font-medium text-slate-700">{CLICKPAY_SUPPORT.whatsappPrimaryDisplay}</span>
       </p>
     </motion.div>
   );
@@ -117,6 +140,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'employees' | 'simulator' | 'sissmo' | 'settings' | 'fintech' | 'contracts' | 'alerts' | 'clients' | 'financial' | 'brain' | 'credentials'>('dashboard');
   const [financialSubTab, setFinancialSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>('conformidade');
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+  const [supportModalOpen, setSupportModalOpen] = useState<boolean>(false);
   const [showLogin, setShowLogin] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   const [selectedPlan, setSelectedPlan] = useState<'Bronze' | 'Silver' | 'Gold' | null>(null);
@@ -149,27 +173,33 @@ export default function App() {
   const [availableCompanies, setAvailableCompanies] = useState<any[]>([]);
 
   const loadCompanies = async () => {
+    if (!isSuperAdminRole()) {
+      setAvailableCompanies([]);
+      return;
+    }
     try {
-      const res = await fetch('/api/clients');
+      const res = await fetch('/api/clients', {
+        headers: getAuthHeaders()
+      });
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        setAvailableCompanies(data);
+        setAvailableCompanies(Array.isArray(data) ? data : []);
       } else {
-        // Fallback local caso esteja rodando em hospedagem estática (ex: Vercel)
-        setAvailableCompanies(baseDadosClientes);
+        setAvailableCompanies([]);
       }
     } catch (err) {
-      console.warn('Usando catálogo local de empresas:', err);
-      setAvailableCompanies(baseDadosClientes);
+      console.warn('Erro ao carregar lista de empresas:', err);
+      setAvailableCompanies([]);
     }
   };
 
   const handleSwitchCompany = async (companyId: string) => {
+    if (!isSuperAdminRole()) return;
     try {
       const res = await fetch('/api/clients/select', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id: companyId })
       });
       const contentType = res.headers.get('content-type') || '';
@@ -181,7 +211,7 @@ export default function App() {
     } catch (err) {
       console.warn('Alternando empresa em modo local:', err);
     }
-    // Fallback local instantâneo
+    // Fallback local instantâneo apenas para Super Admin
     selecionarClienteEmpresa(companyId);
     await loadData();
     await loadCompanies();
@@ -300,7 +330,11 @@ export default function App() {
 
   useEffect(() => {
     loadData();
-    loadCompanies();
+    if (isSuperAdminRole()) {
+      loadCompanies();
+    } else {
+      setAvailableCompanies([]);
+    }
   }, []);
 
   // Monitorar parâmetro 'plano' da URL para roteamento inteligente de novos cadastros
@@ -463,7 +497,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (userRole === 'CLIENTE_EMPRESA' && activeTab === 'clients') {
+    if (!isSuperAdminRole(userRole) && (activeTab === 'clients' || activeTab === 'credentials')) {
       setActiveTab('dashboard');
     }
   }, [userRole, activeTab]);
@@ -566,19 +600,37 @@ export default function App() {
           </p>
 
           <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3.5 text-xs font-semibold text-blue-900 flex flex-col gap-2 items-center">
-            <span>📞 Suporte ClickPay: +258 861390061</span>
-            <span>📧 Administrador: gersonjcumbane@gmail.com</span>
-            <a 
-              href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20solicitar%20suporte%20para%20minha%20conta%20na%20plataforma%20ClickPay%20ERP."
-              target="_blank"
-              rel="noreferrer"
-              className="mt-1 px-4 py-1.5 bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all shadow-xs"
-            >
-              <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
-                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.18 1.449 4.825 1.451 5.436 0 9.86-4.42 9.864-9.864.002-2.637-1.03-5.115-2.906-6.99C16.55 1.87 14.075.841 11.973.841c-5.441 0-9.865 4.422-9.869 9.865-.001 1.761.47 3.473 1.365 4.975l-.991 3.619 3.714-.974zm12.335-7.39c-.316-.158-1.87-.924-2.155-1.027-.285-.104-.492-.158-.7.158-.207.317-.803.104-.984.316-.18.213-.362.213-.678.055-.316-.158-1.334-.491-2.541-1.57C11.533 9.444 10.9 8.01 10.74 7.746c-.158-.317-.017-.488.141-.645.142-.142.316-.369.474-.554.158-.185.21-.317.316-.528.106-.211.053-.396-.026-.554-.079-.158-.7-1.691-.959-2.316-.252-.61-.51-.527-.7-.537-.181-.009-.39-.01-.599-.01-.21 0-.554.079-.844.396-.29.317-1.11 1.083-1.11 2.64 0 1.557 1.133 3.064 1.292 3.275.158.21 2.227 3.4 5.397 4.767.753.325 1.343.52 1.802.666.759.241 1.449.207 1.995.126.608-.091 1.87-.765 2.134-1.466.264-.702.264-1.303.185-1.428-.079-.126-.285-.21-.601-.368z"/>
-              </svg>
-              <span>Suporte via WhatsApp</span>
-            </a>
+            <span>📞 Suporte ClickPay: +258 84 201 4173 · +258 86 139 0061</span>
+            <span>📧 E-mail: {CLICKPAY_SUPPORT.emailPrimary}</span>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
+              <a 
+                href={buildSupportWhatsAppUrl({
+                  number: CLICKPAY_SUPPORT.whatsappPrimaryNumber,
+                  message: `Olá Equipa ClickPay, preciso de suporte para a subscrição da empresa ${company.nome || ''} (NUIT ${company.nuit || ''}).`
+                })}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-1.5 bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all shadow-xs"
+              >
+                <span>Suporte via WhatsApp</span>
+              </a>
+              <a
+                href={buildSupportMailtoUrl({
+                  subject: `Reativação / Suporte Subscrição - ${company.nome || 'ClickPay'}`,
+                  body: `Olá Equipa ClickPay,\n\nSolicito suporte para a conta da empresa ${company.nome || ''} (NUIT ${company.nuit || ''}).\n`
+                })}
+                className="px-4 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-xs font-extrabold transition-all shadow-xs"
+              >
+                Enviar E-mail ({CLICKPAY_SUPPORT.emailPrimary})
+              </a>
+              <button
+                type="button"
+                onClick={() => setSupportModalOpen(true)}
+                className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-blue-200 text-blue-900 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+              >
+                Abrir Ticket
+              </button>
+            </div>
           </div>
 
           <div className="pt-2 flex justify-center gap-3">
@@ -606,6 +658,15 @@ export default function App() {
             </button>
           </div>
         </div>
+        <SupportTicketModal
+          isOpen={supportModalOpen}
+          onClose={() => setSupportModalOpen(false)}
+          canalOrigem="Conta Suspensa ClickPay"
+          defaultEmpresa={company.nome}
+          defaultEmail={company.email}
+          defaultTelefone={company.telefone}
+          defaultAssunto="Reativação de Subscrição & Suporte Técnico"
+        />
       </div>
     );
   }
@@ -615,6 +676,12 @@ export default function App() {
     localStorage.removeItem('paytek_role');
     localStorage.removeItem('paytek_token');
     localStorage.removeItem('paytek_user');
+    localStorage.removeItem('paytek_company_id');
+    localStorage.removeItem('paytek_company_name');
+    localStorage.removeItem('paytek_sub_plan');
+    localStorage.removeItem('paytek_sub_status');
+    localStorage.removeItem('paytek_sub_expire');
+    setAvailableCompanies([]);
     setAuthenticated(false);
     setShowLogin(false);
   };
@@ -662,6 +729,7 @@ export default function App() {
           onLogout={handleLogout}
           onResetDb={handleResetDb}
           onResetCosts={handleResetCosts}
+          onOpenSupport={() => setSupportModalOpen(true)}
         />
 
         {/* Dynamic Panel Content Container */}
@@ -771,11 +839,19 @@ export default function App() {
                     />
                   )}
                   {activeTab === 'credentials' && (
-                    <AccessCredentialManagement
-                      company={company}
-                      onUpdateCompany={(updated) => setCompany(updated)}
-                      userRole={userRole}
-                    />
+                    isSuperAdminRole(userRole) ? (
+                      <AccessCredentialManagement
+                        company={company}
+                        onUpdateCompany={(updated) => setCompany(updated)}
+                        userRole={userRole}
+                      />
+                    ) : (
+                      <div className="bg-white rounded-xl border border-rose-200 p-8 text-center max-w-lg mx-auto my-8 space-y-2">
+                        <Lock size={20} className="mx-auto text-rose-700" />
+                        <h3 className="text-sm font-bold text-slate-900">Acesso Restrito</h3>
+                        <p className="text-xs text-slate-600">Esta secção é reservada ao Administrador Principal do sistema.</p>
+                      </div>
+                    )
                   )}
                   {activeTab === 'fintech' && (
                     company.subscription_plan === 'Bronze' ? (
@@ -823,9 +899,18 @@ export default function App() {
                     )
                   )}
                   {activeTab === 'clients' && (
-                    <ClientManagement
-                      onCompanySwitched={loadData}
-                    />
+                    isSuperAdminRole(userRole) ? (
+                      <ClientManagement
+                        onCompanySwitched={loadData}
+                        userRole={userRole}
+                      />
+                    ) : (
+                      <div className="bg-white rounded-xl border border-rose-200 p-8 text-center max-w-lg mx-auto my-8 space-y-2">
+                        <Lock size={20} className="mx-auto text-rose-700" />
+                        <h3 className="text-sm font-bold text-slate-900">Acesso Restrito</h3>
+                        <p className="text-xs text-slate-600">Esta secção é reservada ao Administrador Principal do sistema.</p>
+                      </div>
+                    )
                   )}
                   {activeTab === 'financial' && (
                     company.subscription_plan === 'Bronze' && financialSubTab === 'compras' ? (
@@ -877,6 +962,15 @@ export default function App() {
           )}
         </main>
       </div>
+
+      <SupportTicketModal
+        isOpen={supportModalOpen}
+        onClose={() => setSupportModalOpen(false)}
+        canalOrigem="Painel Interno ClickPay ERP"
+        defaultEmpresa={company?.nome}
+        defaultEmail={company?.email}
+        defaultTelefone={company?.telefone}
+      />
 
       {/* Simple Professional Footer */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-[11px] text-slate-700 font-medium">

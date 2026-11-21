@@ -177,6 +177,25 @@ service cloud.firestore {
         && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
+    // SupportTicket validator (/support_tickets)
+    function isValidSupportTicket(data) {
+      return data.keys().hasAll(['id', 'nome', 'email', 'telefone', 'assunto', 'prioridade', 'mensagem', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'nome', 'empresa', 'email', 'telefone', 'assunto', 'prioridade', 'mensagem', 'canalOrigem', 'emailDestino', 'whatsappDestino', 'status', 'createdAt'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 256
+        && (!('empresa' in data) || (data.empresa is string && data.empresa.size() <= 256))
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 256
+        && data.telefone is string && data.telefone.size() > 0 && data.telefone.size() <= 64
+        && data.assunto is string && data.assunto.size() > 0 && data.assunto.size() <= 256
+        && data.prioridade in ['Normal', 'Alta', 'Urgente']
+        && data.mensagem is string && data.mensagem.size() > 0 && data.mensagem.size() <= 4000
+        && (!('canalOrigem' in data) || (data.canalOrigem is string && data.canalOrigem.size() <= 64))
+        && (!('emailDestino' in data) || (data.emailDestino is string && data.emailDestino.size() <= 256))
+        && (!('whatsappDestino' in data) || (data.whatsappDestino is string && data.whatsappDestino.size() <= 64))
+        && data.status in ['ABERTO', 'EM_ANALISE', 'RESOLVIDO']
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
     // /admins/{adminId}
     match /admins/{adminId} {
       allow get: if isSignedIn() && request.auth.uid == adminId;
@@ -274,6 +293,14 @@ service cloud.firestore {
       allow create: if isValidId(companyId) && isValidCompanyProfile(incoming());
       allow update: if isValidId(companyId) && isValidCompanyProfile(incoming()) && (isSuperAdmin() || (isSignedIn() && existing().email == request.auth.token.email));
       allow delete: if isSuperAdmin();
+    }
+
+    // /support_tickets/{ticketId}
+    match /support_tickets/{ticketId} {
+      allow get: if isValidId(ticketId) && (isSuperAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
+      allow list: if isVerifiedFounder() || (isSignedIn() && resource.data.email == request.auth.token.email);
+      allow create: if isValidId(ticketId) && isValidSupportTicket(incoming()) && incoming().id == ticketId && incoming().status == 'ABERTO';
+      allow update, delete: if isSuperAdmin();
     }
   }
 }

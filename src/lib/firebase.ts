@@ -123,6 +123,50 @@ export async function syncCredentialRequestToFirestore(reqData: any): Promise<{ 
   }
 }
 
+// Sincronizar pedido de suporte técnico (E-mail + WhatsApp) no Firebase Firestore
+export async function syncSupportTicketToFirestore(ticketData: {
+  id?: string;
+  nome: string;
+  empresa?: string;
+  email: string;
+  telefone: string;
+  assunto: string;
+  prioridade?: 'Normal' | 'Alta' | 'Urgente';
+  mensagem: string;
+  canalOrigem?: string;
+  emailDestino?: string;
+  whatsappDestino?: string;
+}): Promise<{ ok: boolean; id: string; error?: string }> {
+  const safeId = String(ticketData.id || `SUP_${Date.now()}`)
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .substring(0, 128);
+  const prioridade =
+    ticketData.prioridade === 'Alta' || ticketData.prioridade === 'Urgente'
+      ? ticketData.prioridade
+      : 'Normal';
+  try {
+    await setDoc(doc(db, 'support_tickets', safeId), {
+      id: safeId,
+      nome: String(ticketData.nome || 'Utilizador ClickPay').trim().substring(0, 256),
+      empresa: String(ticketData.empresa || 'Empresa Cliente').trim().substring(0, 256),
+      email: String(ticketData.email || '').trim().substring(0, 256),
+      telefone: String(ticketData.telefone || '').trim().substring(0, 64),
+      assunto: String(ticketData.assunto || 'Suporte Técnico').trim().substring(0, 256),
+      prioridade,
+      mensagem: String(ticketData.mensagem || '').trim().substring(0, 4000),
+      canalOrigem: String(ticketData.canalOrigem || 'Web ERP').trim().substring(0, 64),
+      emailDestino: String(ticketData.emailDestino || 'click@payrolltech.co.mz').substring(0, 256),
+      whatsappDestino: String(ticketData.whatsappDestino || '+258 84 201 4173').substring(0, 64),
+      status: 'ABERTO',
+      createdAt: new Date().toISOString()
+    });
+    return { ok: true, id: safeId };
+  } catch (error: any) {
+    console.warn('Sync support ticket to Firestore warning:', error);
+    return { ok: false, id: safeId, error: error?.message || String(error) };
+  }
+}
+
 // Registar e sincronizar conta recém-criada em todas as coleções Firebase da ClickPay
 export async function syncRegisteredAccountToFirestore(params: {
   clientId: string;

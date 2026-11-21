@@ -163,6 +163,27 @@
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["nome", "nuit", "updatedAt"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Technical support request dispatched simultaneously to Email and WhatsApp",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "nome": { "type": "string", "maxLength": 256 },
+        "empresa": { "type": "string", "maxLength": 256 },
+        "email": { "type": "string", "maxLength": 256 },
+        "telefone": { "type": "string", "maxLength": 64 },
+        "assunto": { "type": "string", "maxLength": 256 },
+        "prioridade": { "type": "string", "enum": ["Normal", "Alta", "Urgente"] },
+        "mensagem": { "type": "string", "maxLength": 4000 },
+        "canalOrigem": { "type": "string", "maxLength": 64 },
+        "emailDestino": { "type": "string", "maxLength": 256 },
+        "whatsappDestino": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["ABERTO", "EM_ANALISE", "RESOLVIDO"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "nome", "email", "telefone", "assunto", "prioridade", "mensagem", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -201,6 +222,11 @@
     "/companies/{companyId}": {
       "schema": "CompanyProfile",
       "description": "Corporate fiscal and registration profile documents"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Technical support tickets routed to official Email and WhatsApp channels"
     }
   }
 }
+

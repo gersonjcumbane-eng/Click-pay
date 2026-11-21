@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowRight,
   Building2,
@@ -11,10 +11,16 @@ import {
   Eye,
   Mail,
   MapPin,
+  MessageCircle,
   Phone,
   ShieldCheck,
   Target
 } from 'lucide-react';
+import SupportTicketModal, {
+  buildSupportMailtoUrl,
+  buildSupportWhatsAppUrl,
+  CLICKPAY_SUPPORT
+} from './SupportTicketModal';
 
 interface LandingPageProps {
   onEnterLogin: () => void;
@@ -27,6 +33,8 @@ export default function LandingPage({
   onEnterRegister,
   onEnterPlanDemo
 }: LandingPageProps) {
+  const [supportModalOpen, setSupportModalOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-[#FAFAFB] flex flex-col font-sans text-slate-900 antialiased selection:bg-blue-900 selection:text-white">
       {/* Header — 3 clean zones */}
@@ -374,34 +382,62 @@ export default function LandingPage({
         </div>
       </section>
 
-      {/* Contactos — Telemóveis, E-mail e Endereço Físico */}
+      {/* Contactos — Telemóveis, WhatsApp, E-mail e Endereço Físico */}
       <section id="contacto" className="bg-[#FAFAFB] border-t border-slate-200 py-14 md:py-16">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-8">
-          <div className="space-y-1">
-            <p className="text-[12px] font-medium text-blue-900">Contactos</p>
-            <h2 className="text-xl sm:text-2xl font-semibold text-slate-950 tracking-tight">
-              Fale com a nossa equipa
-            </h2>
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-[12px] font-medium text-blue-900">Contactos</p>
+              <h2 className="text-xl sm:text-2xl font-semibold text-slate-950 tracking-tight">
+                Fale com a nossa equipa
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSupportModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap self-start sm:self-auto"
+            >
+              <MessageCircle size={15} />
+              <span>Abrir Suporte (E-mail &amp; WhatsApp)</span>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Telemóvel */}
+            {/* Telemóvel & WhatsApp */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
               <div className="flex items-center gap-2.5 text-slate-950">
                 <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
                   <Phone size={16} />
                 </div>
-                <span className="text-xs font-semibold">Telemóvel</span>
+                <span className="text-xs font-semibold">Telemóvel &amp; WhatsApp</span>
               </div>
-              <div className="space-y-1.5 text-sm font-mono tabular-nums text-slate-700">
-                <div>
+              <div className="space-y-2 text-sm font-mono tabular-nums text-slate-700">
+                <div className="flex items-center justify-between gap-2">
                   <a href="tel:+258842014173" className="hover:text-blue-900 transition-colors">
                     +258 84 201 4173
                   </a>
+                  <a
+                    href={buildSupportWhatsAppUrl({ number: CLICKPAY_SUPPORT.whatsappPrimaryNumber })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-sans text-[11px] font-semibold transition-colors"
+                  >
+                    <MessageCircle size={12} />
+                    <span>WhatsApp</span>
+                  </a>
                 </div>
-                <div>
+                <div className="flex items-center justify-between gap-2">
                   <a href="tel:+258861390061" className="hover:text-blue-900 transition-colors">
                     +258 86 139 0061
+                  </a>
+                  <a
+                    href={buildSupportWhatsAppUrl({ number: CLICKPAY_SUPPORT.whatsappSecondaryNumber })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-sans text-[11px] font-semibold transition-colors"
+                  >
+                    <MessageCircle size={12} />
+                    <span>WhatsApp</span>
                   </a>
                 </div>
               </div>
@@ -415,13 +451,18 @@ export default function LandingPage({
                 </div>
                 <span className="text-xs font-semibold">E-mail</span>
               </div>
-              <div className="text-sm text-slate-700">
-                <a
-                  href="mailto:click@payrolltech.co.mz"
-                  className="text-blue-900 hover:underline font-medium break-all"
-                >
-                  click@payrolltech.co.mz
-                </a>
+              <div className="space-y-1.5 text-sm text-slate-700">
+                <div>
+                  <a
+                    href={buildSupportMailtoUrl()}
+                    className="text-blue-900 hover:underline font-medium break-all"
+                  >
+                    click@payrolltech.co.mz
+                  </a>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Suporte técnico e atendimento empresarial
+                </p>
               </div>
             </div>
 
@@ -441,6 +482,12 @@ export default function LandingPage({
           </div>
         </div>
       </section>
+
+      <SupportTicketModal
+        isOpen={supportModalOpen}
+        onClose={() => setSupportModalOpen(false)}
+        canalOrigem="Landing Page ClickPay"
+      />
 
       {/* Quiet Footer */}
       <footer className="bg-slate-950 text-slate-400 py-6 border-t border-slate-900 text-xs mt-auto">

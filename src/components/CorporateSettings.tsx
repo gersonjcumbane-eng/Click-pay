@@ -36,6 +36,7 @@ import { useToast } from '../context/ToastContext';
 import EnvironmentMasking from './EnvironmentMasking';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
+import { getAuthHeaders, isSuperAdminRole } from '../lib/authSession';
 
 interface CorporateSettingsProps {
   company: CompanyData;
@@ -63,7 +64,8 @@ export default function CorporateSettings({
   const { showSuccess, showError, showInfo } = useToast();
   const localUserRole = localStorage.getItem('paytek_role');
   const userRole = propUserRole || localUserRole;
-  const isClient = userRole === 'CLIENTE_EMPRESA';
+  const isSuperAdmin = isSuperAdminRole(userRole);
+  const isClient = !isSuperAdmin;
 
   // Company state
   const [nome, setNome] = useState(company.nome || "Sua Empresa Lda");
@@ -110,9 +112,10 @@ export default function CorporateSettings({
   const [exporting, setExporting] = useState<string | null>(null);
 
   const loadBackupHistory = async () => {
+    if (!isSuperAdmin) return;
     setLoadingBackups(true);
     try {
-      const res = await fetch('/api/backup/history');
+      const res = await fetch('/api/backup/history', { headers: getAuthHeaders() });
       const data = await res.json();
       if (Array.isArray(data)) {
         setBackups(data);
@@ -125,6 +128,7 @@ export default function CorporateSettings({
   };
 
   React.useEffect(() => {
+    if (!isSuperAdmin) return;
     loadBackupHistory();
     let unsub: (() => void) | undefined;
     try {
@@ -167,7 +171,7 @@ export default function CorporateSettings({
     try {
       const res = await fetch('/api/backup/trigger', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tipo: 'Manual (Firebase Cloud Sync)' })
       });
       const data = await res.json();
@@ -211,7 +215,8 @@ export default function CorporateSettings({
     setShowRestoreConfirm(null);
     try {
       const res = await fetch(`/api/backup/restore/${id}`, {
-        method: 'POST'
+        method: 'POST',
+        headers: getAuthHeaders()
       });
       const data = await res.json();
       if (data.success) {
@@ -505,7 +510,7 @@ export default function CorporateSettings({
       </div>
 
       {/* SELECIONAR EMPRESA / SWITCH COMPANY (Exclusivo Super Admin) */}
-      {!isClient && availableCompanies && availableCompanies.length > 1 && onSwitchCompany && (
+      {isSuperAdmin && availableCompanies && availableCompanies.length > 1 && onSwitchCompany && (
         <div id="company_switcher_settings" className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-2xl p-6 text-white shadow-sm space-y-4">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-white/10 rounded-xl text-amber-400">
@@ -549,34 +554,38 @@ export default function CorporateSettings({
         </div>
       )}
 
-      {/* ENVIRONMENT MASKING: Proteção de Chaves Mestras e Tokens de Pagamento */}
-      <EnvironmentMasking userRole={userRole} containerId="settings_panel" />
+      {/* ENVIRONMENT MASKING & ACESSO CREDENCIAIS (Exclusivo Super Admin) */}
+      {isSuperAdmin && (
+        <>
+          <EnvironmentMasking userRole={userRole} containerId="settings_panel" />
 
-      {/* BANNER DE ACESSO, OTP & CREDENCIAIS */}
-      <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-blue-900 text-white rounded-xl shadow-xs shrink-0">
-            <KeyRound size={20} />
+          {/* BANNER DE ACESSO, OTP & CREDENCIAIS */}
+          <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-900 text-white rounded-xl shadow-xs shrink-0">
+                <KeyRound size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-950">
+                  Gestão de Acesso, Níveis de Permissão, Tokens de API &amp; OTP (2FA)
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Identificadores Oficiais ClickPay (NUIT: 402302399 | NUEL: 105086659), geração automática de credenciais e alertas ao Fundador.
+                </p>
+              </div>
+            </div>
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('credentials')}
+                className="py-2 px-4 bg-blue-900 hover:bg-blue-950 active:bg-blue-900 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shrink-0 shadow-xs"
+              >
+                Abrir Gestão de Credenciais &amp; OTP →
+              </button>
+            )}
           </div>
-          <div>
-            <h4 className="text-sm font-bold text-slate-950">
-              Gestão de Acesso, Níveis de Permissão, Tokens de API & OTP (2FA)
-            </h4>
-            <p className="text-xs text-slate-500">
-              Identificadores Oficiais ClickPay (NUIT: 402302399 | NUEL: 105086659), geração automática de credenciais e alertas ao Fundador.
-            </p>
-          </div>
-        </div>
-        {onNavigateTab && (
-          <button
-            type="button"
-            onClick={() => onNavigateTab('credentials')}
-            className="py-2 px-4 bg-blue-900 hover:bg-blue-950 active:bg-blue-900 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shrink-0 shadow-xs"
-          >
-            Abrir Gestão de Credenciais & OTP →
-          </button>
-        )}
-      </div>
+        </>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Form Column: Perfil da Empresa (Exactly formatted as specified) */}

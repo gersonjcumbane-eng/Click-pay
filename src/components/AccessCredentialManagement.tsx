@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { useToast, useConfirm } from '../context/ToastContext';
+import { getAuthHeaders, isSuperAdminRole } from '../lib/authSession';
 
 interface AccessCredentialManagementProps {
   company: CompanyData;
@@ -90,6 +91,7 @@ export default function AccessCredentialManagement({
 }: AccessCredentialManagementProps) {
   const { showSuccess, showError, showInfo } = useToast();
   const confirmAction = useConfirm();
+  const isSuperAdmin = isSuperAdminRole(userRole);
 
   // 1. Identificadores Oficiais ClickPayroll
   const [nuit, setNuit] = useState<string>(company.nuit || '402302399');
@@ -135,11 +137,17 @@ export default function AccessCredentialManagement({
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  // Carregar dados gerais do servidor
+  // Carregar dados gerais do servidor (Apenas Super Admin)
   const loadData = async () => {
+    if (!isSuperAdmin) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const res = await fetch('/api/access/overview');
+      const res = await fetch('/api/access/overview', {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.users) setUsers(data.users);
@@ -161,8 +169,12 @@ export default function AccessCredentialManagement({
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (isSuperAdmin) {
+      loadData();
+    } else {
+      setLoading(false);
+    }
+  }, [isSuperAdmin]);
 
   // Salvar NUIT e NUEL globalmente na configuração da empresa
   const handleSaveNuitNuel = async () => {
@@ -174,7 +186,7 @@ export default function AccessCredentialManagement({
     try {
       const res = await fetch('/api/access/update-nuit-nuel', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ nuit, nuel })
       });
       const data = await res.json();
@@ -220,7 +232,7 @@ export default function AccessCredentialManagement({
     try {
       const res = await fetch('/api/access/toggle-otp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ requireOtpOnLogin: nextVal })
       });
       if (res.ok) {
@@ -243,7 +255,7 @@ export default function AccessCredentialManagement({
     try {
       const res = await fetch('/api/access/test-notification', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
       });
       const data = await res.json();
       if (data.sucesso) {
@@ -270,7 +282,7 @@ export default function AccessCredentialManagement({
     try {
       const res = await fetch('/api/access/auto-generate-credential', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           nome: genNome.trim(),
           email: genEmail.trim(),
@@ -308,7 +320,7 @@ export default function AccessCredentialManagement({
     try {
       const res = await fetch('/api/access/tokens', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           name: tokenName.trim(),
           scopes: tokenScopes
@@ -342,7 +354,10 @@ export default function AccessCredentialManagement({
       return;
     }
     try {
-      const res = await fetch(`/api/access/tokens/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/access/tokens/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
       const data = await res.json();
       if (data.sucesso) {
         showSuccess(`Token revogado com sucesso!`);
@@ -392,6 +407,20 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
     document.body.removeChild(link);
     showSuccess('Ficha de credenciais descarregada com sucesso!');
   };
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="max-w-xl mx-auto my-12 bg-white border border-rose-200 rounded-2xl p-8 text-center space-y-3 shadow-xs">
+        <div className="w-12 h-12 mx-auto rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
+          <Lock size={22} />
+        </div>
+        <h2 className="text-lg font-bold text-slate-950">Acesso Restrito</h2>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          As credenciais, chaves de API e configurações de segurança do sistema são exclusivas do Administrador Principal.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16">

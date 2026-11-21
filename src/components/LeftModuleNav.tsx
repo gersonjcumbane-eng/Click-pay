@@ -16,7 +16,8 @@ import {
   RotateCcw,
   Trash2,
   Lock,
-  KeyRound
+  KeyRound,
+  MessageCircle
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { getFormattedCurrentDateLong } from '../db_tax';
@@ -35,6 +36,7 @@ export interface LeftModuleNavProps {
   onLogout: () => void;
   onResetDb?: () => void;
   onResetCosts?: () => void;
+  onOpenSupport?: () => void;
 }
 
 export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
@@ -49,9 +51,10 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   onCloseMobile,
   onLogout,
   onResetDb,
-  onResetCosts
+  onResetCosts,
+  onOpenSupport
 }) => {
-  const isClient = userRole === 'CLIENTE_EMPRESA';
+  const isSuperAdmin = userRole === 'SUPER_ADMIN_PAYROLL';
   const subPlan = company?.subscription_plan || 'Bronze';
   const isBronze = subPlan === 'Bronze';
   const isSilver = subPlan === 'Silver';
@@ -123,7 +126,7 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              {!isClient && availableCompanies && availableCompanies.length > 1 && onSwitchCompany ? (
+              {isSuperAdmin && availableCompanies && availableCompanies.length > 1 && onSwitchCompany ? (
                 <select
                   value={availableCompanies.find((c) => c.isActive)?.id || ''}
                   onChange={(e) => onSwitchCompany(e.target.value)}
@@ -267,7 +270,7 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
                 Vendas &amp; Facturação
               </button>
 
-              {!isClient && (
+              {isSuperAdmin && (
                 <button
                   type="button"
                   onClick={() => {
@@ -567,24 +570,26 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
           </span>
         </button>
 
-        {/* 10. Acesso & Credenciais */}
-        <button
-          type="button"
-          onClick={() => {
-            onSelectTab('credentials');
-            onCloseMobile();
-          }}
-          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
-            activeTab === 'credentials'
-              ? 'bg-blue-900 text-white font-semibold'
-              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
-          }`}
-        >
-          <span className="flex items-center gap-2.5 min-w-0">
-            <KeyRound size={15} className="shrink-0" />
-            <span className="text-xs truncate">Acesso &amp; Credenciais</span>
-          </span>
-        </button>
+        {/* 10. Acesso & Credenciais (Exclusivo Super Admin) */}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => {
+              onSelectTab('credentials');
+              onCloseMobile();
+            }}
+            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+              activeTab === 'credentials'
+                ? 'bg-blue-900 text-white font-semibold'
+                : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
+            }`}
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <KeyRound size={15} className="shrink-0" />
+              <span className="text-xs truncate">Acesso &amp; Credenciais</span>
+            </span>
+          </button>
+        )}
       </nav>
 
       {/* Data Maintenance */}
@@ -620,6 +625,19 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
 
       {/* Session Footer */}
       <div className="pt-3 border-t border-slate-200 space-y-2" id="logout-isolated-red-window">
+        {onOpenSupport && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenSupport();
+              onCloseMobile();
+            }}
+            className="w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-950 border border-blue-200 font-semibold text-xs rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <MessageCircle size={14} className="text-blue-900" />
+            <span>Suporte Técnico</span>
+          </button>
+        )}
         <p className="text-[11px] text-slate-500 px-1 tabular-nums">{liveFormattedDate}</p>
         <button
           type="button"

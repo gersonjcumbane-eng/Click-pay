@@ -5,8 +5,13 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send, MessageCircle } from 'lucide-react';
 import { authenticateClientInFirebase } from '../lib/firebase';
+import SupportTicketModal, {
+  buildSupportMailtoUrl,
+  buildSupportWhatsAppUrl,
+  CLICKPAY_SUPPORT
+} from './SupportTicketModal';
 
 interface LoginProps {
   selectedPlan?: 'Bronze' | 'Silver' | 'Gold' | null;
@@ -33,6 +38,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [supportModalOpen, setSupportModalOpen] = useState(false);
 
   // Estados para Verificação de 2 Fatores (OTP)
   const [otpStep, setOtpStep] = useState(false);
@@ -44,29 +50,6 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [resendingOtp, setResendingOtp] = useState(false);
   const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
   const [pendingFallbackSession, setPendingFallbackSession] = useState<FallbackSession | null>(null);
-  
-  // O botão de chave mestre só é visível para o Gerson (Fundador):
-  // 1. Automaticamente se houver histórico de admin no navegador
-  // 2. Ou se passar '?admin=true' ou '#admin' no URL
-  // 3. Ou dando 3 cliques rápidos no logotipo da ClickPay
-  const [clickCount, setClickCount] = useState(0);
-  const [showMasterShortcut, setShowMasterShortcut] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const urlParams = new URLSearchParams(window.location.search);
-    const hash = window.location.hash;
-    const hasAdminQuery = urlParams.get('admin') === 'true' || urlParams.get('founder') === 'true' || hash === '#admin';
-    const isSavedFounder = localStorage.getItem('paytek_user') === 'gersonjcumbane@gmail.com' || localStorage.getItem('paytek_role') === 'SUPER_ADMIN_PAYROLL';
-    return hasAdminQuery || isSavedFounder;
-  });
-
-  const handleSecretLogoClick = () => {
-    const next = clickCount + 1;
-    setClickCount(next);
-    if (next >= 3) {
-      setShowMasterShortcut(true);
-      setError(null);
-    }
-  };
 
   const persistUserSession = (token: string, usuario: any, fallbackEmail: string) => {
     localStorage.setItem('paytek_auth', 'true');
@@ -93,101 +76,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const authenticateViaCloudFallback = async (cleanEmail: string, cleanPassword: string): Promise<FallbackSession | null> => {
     const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    // 1. Contas Fundador / Admin
-    const masterEmails = ['gersonjcumbane@gmail.com', 'admin@clickpay.co.mz', 'admin@payrolltech.co.mz'];
-    const masterPasswords = ['ClickPay2026!', 'admin2026', '123456', 'admin', 'UEM_Finanças_Engenharia_2026!'];
-    if (masterEmails.includes(cleanEmail) && masterPasswords.includes(cleanPassword)) {
-      return {
-        token: 'token_mestre_super_admin_payroll_tech',
-        usuario: {
-          email: cleanEmail,
-          funcao: 'SUPER_ADMIN_PAYROLL',
-          empresa_id: 'cli_founders',
-          nome_empresa: 'ClickPay Moçambique Lda',
-          subscription_status: 'ativo',
-          subscription_plan: 'Platinum',
-          next_billing_date: defaultExp
-        }
-      };
-    }
-
-    // 2. Contas internas de demonstração e equipa
-    const builtInAccounts: Record<string, { passwords: string[]; role: string; companyId: string; companyName: string; plan: string }> = {
-      'rh@clickpay.co.mz': {
-        passwords: ['rh_clickpay2026'],
-        role: 'GESTOR_RH',
-        companyId: 'cli_founders',
-        companyName: 'ClickPay Moçambique Lda',
-        plan: 'Gold'
-      },
-      'contabilidade@clickpay.co.mz': {
-        passwords: ['contab_pgc2026'],
-        role: 'CONTABILISTA',
-        companyId: 'cli_founders',
-        companyName: 'ClickPay Moçambique Lda',
-        plan: 'Gold'
-      },
-      'construcao@payrolltech.co.mz': {
-        passwords: ['bronze2026', 'construcao2026'],
-        role: 'CLIENTE_EMPRESA',
-        companyId: 'cli_bronze',
-        companyName: 'Construtora & Obras do Limpopo Lda',
-        plan: 'Bronze'
-      },
-      'bronze@payrolltech.co.mz': {
-        passwords: ['bronze2026', 'construcao2026'],
-        role: 'CLIENTE_EMPRESA',
-        companyId: 'cli_bronze',
-        companyName: 'Construtora & Obras do Limpopo Lda',
-        plan: 'Bronze'
-      },
-      'educacao@payrolltech.co.mz': {
-        passwords: ['silver2026', 'educacao2026'],
-        role: 'CLIENTE_EMPRESA',
-        companyId: 'cli_silver',
-        companyName: 'Instituto de Ensino & Formação do Rovuma Lda',
-        plan: 'Silver'
-      },
-      'silver@payrolltech.co.mz': {
-        passwords: ['silver2026', 'educacao2026'],
-        role: 'CLIENTE_EMPRESA',
-        companyId: 'cli_silver',
-        companyName: 'Instituto de Ensino & Formação do Rovuma Lda',
-        plan: 'Silver'
-      },
-      'servicos@payrolltech.co.mz': {
-        passwords: ['gold2026', 'servicos2026'],
-        role: 'CLIENTE_EMPRESA',
-        companyId: 'cli_gold',
-        companyName: 'Kuvanga Tecnologias & Consultoria Lda',
-        plan: 'Gold'
-      },
-      'gold@payrolltech.co.mz': {
-        passwords: ['gold2026', 'servicos2026'],
-        role: 'CLIENTE_EMPRESA',
-        companyId: 'cli_gold',
-        companyName: 'Kuvanga Tecnologias & Consultoria Lda',
-        plan: 'Gold'
-      }
-    };
-
-    const builtIn = builtInAccounts[cleanEmail];
-    if (builtIn && builtIn.passwords.includes(cleanPassword)) {
-      return {
-        token: `token_cliente_${builtIn.companyId}`,
-        usuario: {
-          email: cleanEmail,
-          funcao: builtIn.role,
-          empresa_id: builtIn.companyId,
-          nome_empresa: builtIn.companyName,
-          subscription_status: 'ativo',
-          subscription_plan: builtIn.plan,
-          next_billing_date: defaultExp
-        }
-      };
-    }
-
-    // 3. Verificar contas registadas no Firebase Firestore (saas_clients) e Firebase Auth
+    // Autenticar apenas contas empresariais registadas no Firebase Firestore / Firebase Auth (nunca credenciais de sistema)
     const fbAuth = await authenticateClientInFirebase(cleanEmail, cleanPassword);
     if (fbAuth.ok && fbAuth.client) {
       return {
@@ -297,7 +186,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     setVerifyingOtp(true);
 
     const completeLocalOtp = () => {
-      if (cleanCode === debugOtpCode || cleanCode === '123456' || cleanCode === '000000') {
+      if (debugOtpCode && cleanCode === debugOtpCode) {
         if (pendingFallbackSession) {
           persistUserSession(pendingFallbackSession.token, pendingFallbackSession.usuario, email.toLowerCase().trim());
           onLoginSuccess();
@@ -403,11 +292,10 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
            transition={{ duration: 0.4, ease: 'easeOut' }}
            className="bg-white p-8 sm:p-10 rounded-2xl shadow-xl shadow-slate-200/60 border border-slate-100 space-y-6 w-full"
         >
-          {/* Header Logo Area com gatilho secreto de 3 cliques para o Fundador */}
+          {/* Header Logo Area */}
           <div 
-            className="text-center mb-5 select-none cursor-pointer" 
+            className="text-center mb-5 select-none" 
             id="login_logo_area"
-            onClick={handleSecretLogoClick}
             title="ClickPay"
           >
             <img 
@@ -653,27 +541,6 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                   </button>
                 </div>
               </div>
-
-              {/* Acesso Rápido de Fundador / Administrador Mestre (SÓ APARECE PARA O GERSON) */}
-              {showMasterShortcut && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  className="pt-1.5"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('gersonjcumbane@gmail.com');
-                      setPassword('ClickPay2026!');
-                      if (onSelectPlan) onSelectPlan(null);
-                    }}
-                    className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
-                  >
-                    🔑 Acesso Mestre Exclusivo (Gerson Cumbane)
-                  </button>
-                </motion.div>
-              )}
             </form>
           )}
 
@@ -687,30 +554,62 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
             </button>
           ) : (
             <a 
-              href="mailto:gersonjcumbane@gmail.com?subject=Solicita%C3%A7%C3%A3o%20de%20Registo%20-%20ClickPay%20MZ" 
-              target="_blank" 
-              rel="noopener noreferrer"
+              href={buildSupportMailtoUrl({
+                subject: 'Solicitação de Registo - ClickPay Moçambique',
+                body: 'Olá Equipa ClickPay,\n\nGostaria de solicitar o registo e credenciais de acesso para a minha empresa.\n\nEmpresa:\nNUIT:\nContacto WhatsApp:\n'
+              })}
               className="block text-center py-3 px-4 border-2 border-dashed border-blue-900 hover:border-blue-950 hover:bg-blue-50 text-blue-900 hover:text-blue-950 font-extrabold rounded-xl text-[11px] tracking-wide transition-all cursor-pointer"
             >
               ✉️ NÃO TEM CONTA? SOLICITAR REGISTO POR E-MAIL
             </a>
           )}
 
-          <div className="text-center pt-2 border-t border-slate-100">
-            <div className="text-xs text-slate-500">
-              Esqueceu-se da senha?{' '}
+          <div className="text-center pt-3 border-t border-slate-100 space-y-2">
+            <p className="text-xs text-slate-600 font-medium">
+              Precisa de recuperar acesso ou apoio técnico?
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <a
-                href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20preciso%20de%20apoio%20para%20recuperar%20o%20acesso%20ao%20ClickPay%20ERP."
+                href={buildSupportWhatsAppUrl({
+                  number: CLICKPAY_SUPPORT.whatsappPrimaryNumber,
+                  message: 'Olá Equipa ClickPay, preciso de apoio técnico / recuperação de acesso ao ClickPay ERP.'
+                })}
                 target="_blank"
-                rel="noreferrer"
-                className="text-blue-900 hover:underline font-bold inline-flex items-center gap-0.5"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#1ebe5b] text-white text-[11px] font-semibold transition-colors"
               >
-                Contactar suporte técnico
+                <MessageCircle size={13} />
+                <span>WhatsApp (+258 84 201 4173)</span>
               </a>
+              <a
+                href={buildSupportMailtoUrl({
+                  subject: 'Recuperação de Acesso / Suporte Técnico - ClickPay ERP',
+                  body: 'Olá Equipa ClickPay,\n\nPreciso de apoio técnico / recuperação de acesso na plataforma.\n\nEmpresa:\nE-mail da Conta:\nTelemóvel:\n'
+                })}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-900 hover:bg-blue-950 text-white text-[11px] font-semibold transition-colors"
+              >
+                <Mail size={13} />
+                <span>{CLICKPAY_SUPPORT.emailPrimary}</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => setSupportModalOpen(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 text-[11px] font-semibold cursor-pointer transition-colors"
+              >
+                Abrir Ticket
+              </button>
             </div>
           </div>
         </motion.div>
       </div>
+
+      <SupportTicketModal
+        isOpen={supportModalOpen}
+        onClose={() => setSupportModalOpen(false)}
+        canalOrigem="Página de Login ClickPay"
+        defaultEmail={email}
+        defaultAssunto="Recuperação de Acesso / Suporte Técnico"
+      />
 
       {/* Regulatory Footer */}
       <div className="mt-8 text-center text-[10px] text-slate-400 max-w-sm px-4">

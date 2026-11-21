@@ -28,6 +28,7 @@ import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
 import { hashPassword } from '../lib/security';
+import { getAuthHeaders, isSuperAdminRole } from '../lib/authSession';
 
 interface ClientCompany {
   id: string;
@@ -129,11 +130,13 @@ function numeroParaExtenso(num: number): string {
 
 interface ClientManagementProps {
   onCompanySwitched: () => void;
+  userRole?: string | null;
 }
 
-export default function ClientManagement({ onCompanySwitched }: ClientManagementProps) {
+export default function ClientManagement({ onCompanySwitched, userRole }: ClientManagementProps) {
   const { showSuccess, showError } = useToast();
   const confirmAction = useConfirm();
+  const isSuperAdmin = isSuperAdminRole(userRole);
   const [clients, setClients] = useState<ClientCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -198,9 +201,10 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   };
 
   const fetchFbUsers = async () => {
+    if (!isSuperAdmin) return;
     try {
       setLoadingFbUsers(true);
-      const res = await fetch('/api/firebase-auth/users');
+      const res = await fetch('/api/firebase-auth/users', { headers: getAuthHeaders() });
       if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         if (data && typeof data === 'object' && 'users' in data) {
@@ -221,27 +225,29 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   };
 
   const fetchClients = async () => {
+    if (!isSuperAdmin) {
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const res = await fetch('/api/clients');
+      const res = await fetch('/api/clients', { headers: getAuthHeaders() });
       const isJson = res.ok && (res.headers.get('content-type') || '').includes('application/json');
-      const data = isJson ? await res.json() : baseDadosClientes;
-      setClients(data);
+      const data = isJson ? await res.json() : [];
+      setClients(Array.isArray(data) ? data : []);
       setError(null);
       
-      // If there's an active client and no invoice client selected, select the active one by default
-      const active = data.find((c: ClientCompany) => c.isActive);
+      const active = (Array.isArray(data) ? data : []).find((c: ClientCompany) => c.isActive);
       if (active && !selectedInvoiceClient) {
         selectInvoiceClientAndSync(active);
       } else if (selectedInvoiceClient) {
-        // Refresh currently selected client details too
-        const updatedSelected = data.find((c: ClientCompany) => c.id === selectedInvoiceClient.id);
+        const updatedSelected = (Array.isArray(data) ? data : []).find((c: ClientCompany) => c.id === selectedInvoiceClient.id);
         if (updatedSelected) {
           selectInvoiceClientAndSync(updatedSelected);
         }
       }
     } catch (err: any) {
-      setClients(baseDadosClientes as any);
+      setClients([]);
       setError(null);
     } finally {
       setLoading(false);
@@ -249,8 +255,9 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   };
 
   const fetchCredentialRequests = async () => {
+    if (!isSuperAdmin) return;
     try {
-      const res = await fetch('/api/admin/credential-requests');
+      const res = await fetch('/api/admin/credential-requests', { headers: getAuthHeaders() });
       if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         if (Array.isArray(data)) {
@@ -269,6 +276,10 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   };
 
   useEffect(() => {
+    if (!isSuperAdmin) {
+      setLoading(false);
+      return;
+    }
     fetchClients();
     fetchFbUsers();
     fetchCredentialRequests();
@@ -367,7 +378,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     try {
       const res = await fetch('/api/firebase-auth/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           email: newFbEmail,
           password: newFbPassword,
@@ -407,7 +418,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     try {
       const res = await fetch('/api/firebase-auth/users', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           email,
           password: editingUserPassword
@@ -455,7 +466,8 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     }
     try {
       const res = await fetch(`/api/firebase-auth/users/${encodeURIComponent(email)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       if (!res.ok) throw new Error('Erro ao apagar registo.');
       showSuccess(`Utilizador ${email} removido do Firebase Auth com sucesso!`);
@@ -470,7 +482,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     try {
       const res = await fetch('/api/clients/select', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ id })
       });
       if (!res.ok) throw new Error('Erro ao alternar para esta empresa cliente.');
@@ -498,7 +510,8 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     }
     try {
       const res = await fetch(`/api/clients/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       if (!res.ok) throw new Error('Não foi possível eliminar o cliente.');
       const data = await res.json();
@@ -524,7 +537,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
     try {
       const res = await fetch('/api/clients', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           nome,
           nuit,
@@ -601,7 +614,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       setUpdatingSubscription(true);
       const res = await fetch('/api/clients/update-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           id: selectedInvoiceClient.id,
           status: editStatus,
@@ -642,6 +655,20 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
   const handlePrint = () => {
     window.print();
   };
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="max-w-xl mx-auto my-12 bg-white border border-rose-200 rounded-2xl p-8 text-center space-y-3 shadow-xs">
+        <div className="w-12 h-12 mx-auto rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
+          <Lock size={22} />
+        </div>
+        <h2 className="text-lg font-bold text-slate-950">Acesso Restrito</h2>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          O painel multi-cliente e gestão de contas é exclusivo do Administrador Principal da plataforma.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 print:p-0" id="client-management-portal">

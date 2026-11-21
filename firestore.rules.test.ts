@@ -68,6 +68,7 @@ async function runSecurityTests() {
   const rulesText = fs.readFileSync('firestore.rules', 'utf8');
   assert.equal(/allow\s+read\s*,\s*write\s*:\s*if\s+true\s*;/.test(rulesText), false, 'firestore.rules must never allow read, write: if true');
   assert.equal(/isValidId\(/.test(rulesText), true, 'firestore.rules must enforce isValidId');
+  assert.equal(/isValidSupportTicket\(/.test(rulesText), true, 'firestore.rules must enforce isValidSupportTicket');
 
   console.log('ALL SECURITY & ANTIVIRUS CHECKS PASSED.');
 }

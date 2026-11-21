@@ -23,7 +23,7 @@ export default function EnvironmentMasking({
 }: EnvironmentMaskingProps) {
   const localRole = typeof window !== 'undefined' ? localStorage.getItem('paytek_role') : null;
   const effectiveRole = propUserRole || localRole;
-  const isAdmin = effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'ADMIN';
+  const isAdmin = effectiveRole === 'SUPER_ADMIN_PAYROLL';
 
   const [revealedIds, setRevealedIds] = useState<Record<string, boolean>>({});
   const [globalReveal, setGlobalReveal] = useState(false);
@@ -47,7 +47,7 @@ export default function EnvironmentMasking({
         envKey: 'PAYTEK_MASTER_ENCRYPTION_KEY',
         category: 'MASTER_KEY',
         provider: 'ClickPay Core Security',
-        value: 'pk_master_mz_9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c'
+        value: 'CONFIGURADO_NO_SERVIDOR_ENV'
       },
       {
         id: 'tok_mpesa_b2c',
@@ -55,7 +55,7 @@ export default function EnvironmentMasking({
         envKey: 'MPESA_API_BEARER_TOKEN',
         category: 'PAYMENT_TOKEN',
         provider: 'Vodacom M-Pesa API',
-        value: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.mpesa_live_9001823'
+        value: 'CONFIGURADO_NO_SERVIDOR_ENV'
       },
       {
         id: 'tok_emola_b2c',
@@ -63,7 +63,7 @@ export default function EnvironmentMasking({
         envKey: 'EMOLA_MERCHANT_SECRET_TOKEN',
         category: 'PAYMENT_TOKEN',
         provider: 'Movitel e-Mola Gateway',
-        value: 'emola_sec_live_77482910485729103847'
+        value: 'CONFIGURADO_NO_SERVIDOR_ENV'
       },
       {
         id: 'wh_sissmo_at',
@@ -71,7 +71,7 @@ export default function EnvironmentMasking({
         envKey: 'AT_SISSMO_SIGNING_SECRET',
         category: 'WEBHOOK_SECRET',
         provider: 'Autoridade Tributária MZ',
-        value: 'whsec_sissmo_mz_44581920394857612300'
+        value: 'CONFIGURADO_NO_SERVIDOR_ENV'
       }
     ];
   });
@@ -80,6 +80,7 @@ export default function EnvironmentMasking({
 
   // Deteta automaticamente campos de chaves mestras e tokens no DOM do painel de configurações
   useEffect(() => {
+    if (!isAdmin) return;
     const applyDomMasking = () => {
       const root = document.getElementById(containerId) || document;
       const inputs = root.querySelectorAll<HTMLInputElement>('input[data-env-sensitive="true"], input[name], input[placeholder], input[id]');
@@ -125,6 +126,10 @@ export default function EnvironmentMasking({
       observerRef.current?.disconnect();
     };
   }, [containerId, autoMaskActive, globalReveal, revealedIds, isAdmin, envSecrets.length]);
+
+  if (!isAdmin) {
+    return null;
+  }
 
   const formatAsterisks = (val: string) => {
     if (!val) return '••••••••••••••••';

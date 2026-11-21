@@ -7,6 +7,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import crypto from 'crypto';
 import { GoogleGenAI, Type } from "@google/genai";
 import {
   getMobileGatewayStatuses,
@@ -315,20 +316,109 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   }
 
-  // CREDENCIAIS MESTRE DOS FUNDADORES (ACESSO TOTAL AO ERP)
+  // =========================================================================
+  // TOKEN DE SESSÃO CRIPTOGRÁFICO (HMAC-SHA256) & CONTROLO DE ACESSO (RBAC)
+  // =========================================================================
+  interface AuthSessionPayload {
+    email: string;
+    role: string;
+    empresa_id: string;
+    exp: number;
+  }
+
+  const SESSION_SIGNING_SECRET =
+    process.env.SESSION_SECRET ||
+    crypto
+      .createHash('sha256')
+      .update(`${process.env.FOUNDER_ADMIN_PASSWORD || ''}|${firebaseConfig?.apiKey || ''}|${process.cwd()}|clickpay-mz-session-key`)
+      .digest('hex');
+
+  function signSessionToken(payload: { email: string; role: string; empresa_id?: string }, ttlMs = 7 * 24 * 60 * 60 * 1000): string {
+    const body: AuthSessionPayload = {
+      email: String(payload.email || '').toLowerCase().trim(),
+      role: String(payload.role || 'CLIENTE_EMPRESA'),
+      empresa_id: String(payload.empresa_id || 'cli_bronze'),
+      exp: Date.now() + ttlMs
+    };
+    const bodyB64 = Buffer.from(JSON.stringify(body), 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', SESSION_SIGNING_SECRET).update(bodyB64).digest('base64url');
+    return `cp1.${bodyB64}.${sig}`;
+  }
+
+  function extractSessionFromRequest(req: Request): AuthSessionPayload | null {
+    const authHeader = String(req.headers.authorization || '');
+    let token = '';
+    if (authHeader.toLowerCase().startsWith('bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if (typeof req.headers['x-clickpay-token'] === 'string') {
+      token = req.headers['x-clickpay-token'].trim();
+    }
+    if (!token || !token.startsWith('cp1.')) return null;
+
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [, bodyB64, sig] = parts;
+    const expectedSig = crypto.createHmac('sha256', SESSION_SIGNING_SECRET).update(bodyB64).digest('base64url');
+
+    const sigBuf = Buffer.from(sig, 'utf8');
+    const expBuf = Buffer.from(expectedSig, 'utf8');
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(Buffer.from(bodyB64, 'base64url').toString('utf8')) as AuthSessionPayload;
+      if (!parsed || typeof parsed.exp !== 'number' || parsed.exp <= Date.now()) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  const requireAuthenticated = (req: Request, res: Response, next: any) => {
+    const session = extractSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({
+        erro: 'Sessão inválida ou expirada. Inicie sessão novamente.',
+        error: 'Unauthorized'
+      });
+    }
+    (req as any).authSession = session;
+    next();
+  };
+
+  const requireSuperAdmin = (req: Request, res: Response, next: any) => {
+    const session = extractSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({
+        erro: 'Autenticação obrigatória para aceder às credenciais e administração do sistema.',
+        error: 'Unauthorized'
+      });
+    }
+    if (session.role !== 'SUPER_ADMIN_PAYROLL') {
+      return res.status(403).json({
+        erro: 'Acesso Proibido: Apenas o Administrador Principal do sistema tem permissão para aceder a estas credenciais.',
+        error: 'Forbidden'
+      });
+    }
+    (req as any).authSession = session;
+    next();
+  };
+
+  // CREDENCIAIS MESTRE DOS FUNDADORES (EXCLUSIVAS NO SERVIDOR)
   const CREDENCIAIS_FOUNDERS = {
     email: "gersonjcumbane@gmail.com",
-    password: "ClickPay2026!",
+    password: process.env.FOUNDER_ADMIN_PASSWORD || "ClickPay2026!",
     emails: [
       "gersonjcumbane@gmail.com",
       "admin@clickpay.co.mz",
       "admin@payrolltech.co.mz"
     ],
-    // Aceita qualquer uma destas senhas mestres para facilitar o seu acesso imediato:
     passwords: [
+      ...(process.env.FOUNDER_ADMIN_PASSWORD ? [process.env.FOUNDER_ADMIN_PASSWORD] : []),
       "ClickPay2026!",
-      "admin2026",
-      "123456",
       "UEM_Finanças_Engenharia_2026!"
     ]
   };
@@ -866,8 +956,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         CREDENCIAIS_FOUNDERS.password === passwordClean ||
         CREDENCIAIS_FOUNDERS.passwords.includes(passwordClean) ||
         CREDENCIAIS_FOUNDERS.passwords.includes(passwordRaw) ||
-        passwordClean === 'admin' ||
-        passwordClean === '123456' ||
         isFirebaseAuthed;
 
       if (isCorrectPassword) {
@@ -880,7 +968,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         const sessionPayload = {
           sucesso: true,
           mensagem: "Acesso de Fundador Autorizado com Sucesso!",
-          token: "token_mestre_super_admin_payroll_tech",
+          token: signSessionToken({ email: emailNorm, role: "SUPER_ADMIN_PAYROLL", empresa_id: "cli_founders" }),
           usuario: {
             nome: "Gerson Cumbane (Fundador ClickPay)",
             email: emailNorm,
@@ -947,7 +1035,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         const sessionPayload = {
           sucesso: true,
           mensagem: `Sessão iniciada como ${systemUser.roleLabel || systemUser.role}`,
-          token: `token_sistema_${systemUser.id}`,
+          token: signSessionToken({ email: systemUser.email, role: systemUser.role, empresa_id: targetCompanyId }),
           usuario: {
             nome: systemUser.name,
             email: systemUser.email,
@@ -984,7 +1072,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         const sessionPayload = {
           sucesso: true,
           mensagem: "Acesso Cliente Autorizado!",
-          token: `token_cliente_${clienteEncontrado.empresa_id}`,
+          token: signSessionToken({
+            email: clienteEncontrado.email,
+            role: clienteEncontrado.funcao || "CLIENTE_EMPRESA",
+            empresa_id: clienteEncontrado.empresa_id
+          }),
           usuario: {
             email: clienteEncontrado.email,
             funcao: clienteEncontrado.funcao || "CLIENTE_EMPRESA",
@@ -1095,13 +1187,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           syncUserToFirebase(emailNorm, clienteErp.password || passwordClean);
         }
         selecionarClienteEmpresa(clienteErp.id);
+        const resolvedRole = clienteErp.id === 'cli_founders' ? "SUPER_ADMIN_PAYROLL" : "CLIENTE_EMPRESA";
         const sessionPayload = {
           sucesso: true,
           mensagem: `Sessão iniciada como Administrador de ${clienteErp.nome}`,
-          token: `token_cliente_${clienteErp.id}`,
+          token: signSessionToken({ email: clienteErp.email, role: resolvedRole, empresa_id: clienteErp.id }),
           usuario: {
             email: clienteErp.email,
-            funcao: clienteErp.id === 'cli_founders' ? "SUPER_ADMIN_PAYROLL" : "CLIENTE_EMPRESA",
+            funcao: resolvedRole,
             empresa_id: clienteErp.id,
             nome_empresa: clienteErp.nome,
             subscription_status: clienteErp.subscription_status || 'ativo',
@@ -1191,7 +1284,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               const sessionPayload = {
                 sucesso: true,
                 mensagem: `Sessão restaurada com sucesso para ${companyName}`,
-                token: `token_cliente_${restored.id}`,
+                token: signSessionToken({ email: emailNorm, role: 'CLIENTE_EMPRESA', empresa_id: restored.id }),
                 usuario: {
                   email: emailNorm,
                   funcao: 'CLIENTE_EMPRESA',
@@ -1220,7 +1313,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const sessionPayload = {
         sucesso: true,
         mensagem: "Sessão autenticada via Firebase Auth!",
-        token: `token_firebase_${Date.now()}`,
+        token: signSessionToken({ email: emailNorm, role: "CLIENTE_EMPRESA", empresa_id: "cli_bronze" }),
         usuario: {
           email: emailNorm,
           funcao: "CLIENTE_EMPRESA",
@@ -1280,8 +1373,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.status(400).json({ erro: 'Código OTP expirou (limite de 5 minutos). Solicite um novo código.' });
     }
 
-    // Aceita o código gerado ou código mestre de contingência de sandbox
-    const isValid = attempt.code === cleanCode || cleanCode === '123456' || cleanCode === '000000';
+    // Valida estritamente o código OTP gerado para esta sessão
+    const isValid = attempt.code === cleanCode;
 
     if (!isValid) {
       attempt.failedAttempts = (attempt.failedAttempts || 0) + 1;
@@ -1311,44 +1404,31 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     return res.json(attempt.authPayload);
   });
 
-  // REENVIO DE CÓDIGO OTP
+  // REENVIO DE CÓDIGO OTP (Exige desafio pendente válido)
   app.post('/api/auth/resend-otp', (req: Request, res: Response) => {
     const { tentativaId, email } = req.body;
     const emailNorm = (email || '').toLowerCase().trim();
-    const newOtp = String(Math.floor(100000 + Math.random() * 900000));
 
-    const existing = pendingOtpRequests.find(p => 
-      (tentativaId && p.tentativaId === tentativaId) || 
-      (emailNorm && p.email === emailNorm)
+    const existing = pendingOtpRequests.find(p =>
+      (tentativaId && p.tentativaId === tentativaId) ||
+      (!tentativaId && emailNorm && p.email === emailNorm)
     );
 
-    if (existing) {
-      existing.code = newOtp;
-      existing.expiresAt = Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000);
-    } else {
-      pendingOtpRequests.push({
-        tentativaId: tentativaId || `otp_${Date.now()}`,
-        email: emailNorm || "gersonjcumbane@gmail.com",
-        code: newOtp,
-        expiresAt: Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000),
-        authPayload: {
-          sucesso: true,
-          mensagem: "Acesso Autorizado com Sucesso via Reenvio OTP!",
-          token: "token_mestre_super_admin_payroll_tech",
-          usuario: {
-            nome: "Gerson Cumbane (Fundador ClickPay)",
-            email: emailNorm || "gersonjcumbane@gmail.com",
-            funcao: "SUPER_ADMIN_PAYROLL",
-            subscription_plan: "Platinum"
-          }
-        }
+    if (!existing) {
+      return res.status(400).json({
+        erro: 'Sessão de verificação OTP expirada ou inválida. Volte a iniciar sessão com e-mail e palavra-passe.'
       });
     }
 
+    const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+    existing.code = newOtp;
+    existing.expiresAt = Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000);
+    existing.failedAttempts = 0;
+
     notifyFounder(
       'Reenvio de Código de Segurança OTP',
-      `Novo código OTP ${newOtp} emitido para ${emailNorm || 'utilizador'}. Notificação enviada para gersonjcumbane@gmail.com.`,
-      { userEmail: emailNorm, otpCode: newOtp, status: 'pendente' }
+      `Novo código OTP ${newOtp} emitido para ${existing.email}. Notificação enviada para gersonjcumbane@gmail.com.`,
+      { userEmail: existing.email, otpCode: newOtp, status: 'pendente' }
     );
 
     return res.json({
@@ -1359,17 +1439,23 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // =========================================================================
-  // ENDPOINTS DE GESTÃO DE ACESSO, TOKENS DE API & IDENTIFICADORES FISCAIS
+  // ENDPOINTS DE GESTÃO DE ACESSO, TOKENS DE API & IDENTIFICADORES FISCAIS (EXCLUSIVO SUPER ADMIN)
   // =========================================================================
 
-  // Visão Geral Completa de Acessos (sem expor senhas em texto limpo)
-  app.get('/api/access/overview', (req: Request, res: Response) => {
+  // Visão Geral Completa de Acessos (sem expor senhas nem tokens completos em texto limpo)
+  app.get('/api/access/overview', requireSuperAdmin, (req: Request, res: Response) => {
     try {
-      const sanitizedUsers = systemUsersList.map(({ rawPassword: _rp, ...rest }) => rest);
+      const sanitizedUsers = systemUsersList.map(({ rawPassword: _rp, apiToken: _at, ...rest }) => rest);
+      const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, ...rest }) => rest);
+      const sanitizedLogs = accessAuditLogs.map(({ meta, ...rest }) => {
+        if (!meta) return rest;
+        const { otpCode: _otp, ...safeMeta } = meta;
+        return { ...rest, meta: safeMeta };
+      });
       res.json({
         users: sanitizedUsers,
-        tokens: activeApiTokens,
-        auditLogs: accessAuditLogs,
+        tokens: sanitizedTokens,
+        auditLogs: sanitizedLogs,
         securityConfig: otpSecurityConfig,
         nuitNuel: {
           nuit: empresaAtual.nuit,
@@ -1382,7 +1468,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // Gerar Automaticamente Credenciais para Novo Usuário
-  app.post('/api/access/auto-generate-credential', async (req: Request, res: Response) => {
+  app.post('/api/access/auto-generate-credential', requireSuperAdmin, async (req: Request, res: Response) => {
     const { nome, email, role, plan, phone, companyName } = req.body;
     if (!nome || !email) {
       return res.status(400).json({ erro: 'Nome e E-mail são obrigatórios para gerar credenciais.' });
@@ -1473,19 +1559,20 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     });
   });
 
-  // Gestão de Tokens de API: Listar
-  app.get('/api/access/tokens', (req: Request, res: Response) => {
-    res.json({ tokens: activeApiTokens });
+  // Gestão de Tokens de API: Listar (mascarado)
+  app.get('/api/access/tokens', requireSuperAdmin, (req: Request, res: Response) => {
+    const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, ...rest }) => rest);
+    res.json({ tokens: sanitizedTokens });
   });
 
   // Gestão de Tokens de API: Criar Novo
-  app.post('/api/access/tokens', (req: Request, res: Response) => {
+  app.post('/api/access/tokens', requireSuperAdmin, (req: Request, res: Response) => {
     const { name, scopes } = req.body;
     if (!name) {
       return res.status(400).json({ erro: 'O nome de identificação do token é obrigatório.' });
     }
 
-    const generatedKey = `cp_live_${Math.random().toString(36).substring(2, 12)}_${Math.random().toString(36).substring(2, 12)}`;
+    const generatedKey = `cp_live_${crypto.randomBytes(12).toString('hex')}`;
     const newToken = {
       id: `tok_${Date.now()}`,
       name: String(name).trim(),
@@ -1510,7 +1597,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // Gestão de Tokens de API: Revogar
-  app.delete('/api/access/tokens/:id', (req: Request, res: Response) => {
+  app.delete('/api/access/tokens/:id', requireSuperAdmin, (req: Request, res: Response) => {
     const { id } = req.params;
     const token = activeApiTokens.find(t => t.id === id);
     if (token) {
@@ -1526,7 +1613,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // Atualizar Configuração de OTP (Ligar/Desligar)
-  app.post('/api/access/toggle-otp', (req: Request, res: Response) => {
+  app.post('/api/access/toggle-otp', requireSuperAdmin, (req: Request, res: Response) => {
     const { requireOtpOnLogin } = req.body;
     if (typeof requireOtpOnLogin === 'boolean') {
       otpSecurityConfig.requireOtpOnLogin = requireOtpOnLogin;
@@ -1540,7 +1627,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // Atualizar NUIT e NUEL Globalmente na Empresa
-  app.post('/api/access/update-nuit-nuel', (req: Request, res: Response) => {
+  app.post('/api/access/update-nuit-nuel', requireSuperAdmin, (req: Request, res: Response) => {
     const { nuit, nuel } = req.body;
     if (!nuit && !nuel) {
       return res.status(400).json({ erro: 'Por favor forneça o NUIT ou NUEL para atualização.' });
@@ -1574,12 +1661,17 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // Histórico de Logs de Auditoria
-  app.get('/api/access/audit-logs', (req: Request, res: Response) => {
-    res.json({ logs: accessAuditLogs });
+  app.get('/api/access/audit-logs', requireSuperAdmin, (req: Request, res: Response) => {
+    const sanitizedLogs = accessAuditLogs.map(({ meta, ...rest }) => {
+      if (!meta) return rest;
+      const { otpCode: _otp, ...safeMeta } = meta;
+      return { ...rest, meta: safeMeta };
+    });
+    res.json({ logs: sanitizedLogs });
   });
 
   // Disparo de Teste de Notificação & OTP
-  app.post('/api/access/test-notification', (req: Request, res: Response) => {
+  app.post('/api/access/test-notification', requireSuperAdmin, (req: Request, res: Response) => {
     const testOtp = String(Math.floor(100000 + Math.random() * 900000));
     const log = notifyFounder(
       'Disparo de Teste de Notificação & OTP',
@@ -1596,7 +1688,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // ENDPOINTS PARA GERENCIAR LOGINS DO FIREBASE
-  app.get('/api/firebase-auth/users', (req: Request, res: Response) => {
+  app.get('/api/firebase-auth/users', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const usersList: any[] = [];
       
@@ -1647,7 +1739,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.post('/api/firebase-auth/users', async (req: Request, res: Response) => {
+  app.post('/api/firebase-auth/users', requireSuperAdmin, async (req: Request, res: Response) => {
     const { email, password, role, companyId } = req.body;
     if (!email || !password || !role) {
       return res.status(400).json({ error: 'Dados insuficientes para criar utilizador no Firebase.' });
@@ -1681,17 +1773,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.put('/api/firebase-auth/users', async (req: Request, res: Response) => {
+  app.put('/api/firebase-auth/users', requireSuperAdmin, async (req: Request, res: Response) => {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email e nova senha são obrigatórios.' });
     }
 
     try {
-      // No REST API sem admin SDK, para alterar a senha de forma infalível sem saber a antiga:
-      // Criamos/Sincronizamos novamente no Firebase Auth! Se já existir, a API do REST pode bloquear ou podemos simplesmente
-      // chamar o endpoint de atualização se tivermos o token, mas para simplificar, atualizamos localmente e sincronizamos
-      // na próxima tentativa de login ou forçamos a criação.
       const superAdmin = email === CREDENCIAIS_FOUNDERS.email;
       if (superAdmin) {
         CREDENCIAIS_FOUNDERS.password = password;
@@ -1714,7 +1802,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.delete('/api/firebase-auth/users/:email', (req: Request, res: Response) => {
+  app.delete('/api/firebase-auth/users/:email', requireSuperAdmin, (req: Request, res: Response) => {
     const { email } = req.params;
     try {
       const indexFounders = clientesRegistadosPelosFounders.findIndex(u => u.email === email);
@@ -1736,7 +1824,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // ROTA EXCLUSIVA PARA OS FOUNDERS REGISTAREM NOVOS CLIENTES
-  app.post('/api/payroll-admin/registar-cliente', async (req: Request, res: Response) => {
+  app.post('/api/payroll-admin/registar-cliente', requireSuperAdmin, async (req: Request, res: Response) => {
     const { novoEmailCliente, senhaProvisoria, idNovaEmpresa } = req.body;
 
     if (!novoEmailCliente || !senhaProvisoria || !idNovaEmpresa) {
@@ -1884,7 +1972,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           return res.status(200).json({
             sucesso: true,
             mensagem: 'Configuração da empresa atualizada com sucesso na ClickPay!',
-            token: `token_cliente_${existingCompany.id}`,
+            token: signSessionToken({
+              email: existingCompany.email || cleanEmail,
+              role: 'CLIENTE_EMPRESA',
+              empresa_id: existingCompany.id
+            }),
             usuario: {
               id: existingCompany.id,
               email: existingCompany.email,
@@ -1966,7 +2058,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.status(201).json({
         sucesso: true,
         mensagem: 'Conta e empresa criadas com sucesso! Bem-vindo à ClickPay.',
-        token: `token_cliente_${companyId}`,
+        token: signSessionToken({ email: cleanEmail, role: 'CLIENTE_EMPRESA', empresa_id: companyId }),
         usuario: {
           id: companyId,
           email: cleanEmail,
@@ -1987,20 +2079,17 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // =========================================================================
-  // GESTÃO MULTI-CLIENTE (API ENDPOINTS)
+  // GESTÃO MULTI-CLIENTE (EXCLUSIVO SUPER ADMIN)
   // =========================================================================
 
-  app.get('/api/clients', (req: Request, res: Response) => {
+  app.get('/api/clients', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       // Calculate current stats on-the-fly for rich representation
       const listagem = baseDadosClientes.map(c => {
-        // If it is the active company, use current in-memory arrays
         const isActive = c.nuit === empresaAtual.nuit;
         const currentEmployees = isActive ? employees : c.employees;
         const count = currentEmployees.length;
         const payrollTotal = currentEmployees.reduce((sum, emp) => sum + emp.salario_base, 0);
-        
-        // Billing calculation: Base Fee + Slip Fee * Count
         const billingFee = c.fee_base + (c.fee_por_slip * count);
 
         return {
@@ -2029,7 +2118,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.post('/api/clients/select', (req: Request, res: Response) => {
+  app.post('/api/clients/select', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const { id } = req.body;
       if (!id) {
@@ -2041,12 +2130,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         return res.status(404).json({ error: 'Cliente não encontrado.' });
       }
 
-      // Automatically reset card balance state based on selected company
-      if (id === 'cli_bronze') {
-        carteiraEmpresaFintech.saldo_disponivel_mz = 0.00;
-      } else if (id === 'cli_silver') {
-        carteiraEmpresaFintech.saldo_disponivel_mz = 0.00;
-      } else if (id === 'cli_gold') {
+      if (id === 'cli_bronze' || id === 'cli_silver' || id === 'cli_gold') {
         carteiraEmpresaFintech.saldo_disponivel_mz = 0.00;
       }
 
@@ -2063,7 +2147,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.post('/api/clients', (req: Request, res: Response) => {
+  app.post('/api/clients', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const { nome, nuit, endereco, provincia, distrito, regime_iva, nuel, email, telefone, logo, fee_base, fee_por_slip, password, subscription_status, subscription_plan, next_billing_date } = req.body;
       if (!nome || !nuit) {
@@ -2085,21 +2169,22 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         logo: logo || '/clickpay-logo.png',
         fee_base: Number(fee_base) || 3000.00,
         fee_por_slip: Number(fee_por_slip) || 150.00,
-        password: password || 'senha123',
+        password: password || crypto.randomBytes(8).toString('hex'),
         subscription_status: subscription_status || 'ativo',
         subscription_plan: subscription_plan || 'Bronze',
         next_billing_date: next_billing_date || getDefaultNextBillingDate()
       });
 
       enviarEmailAlertaAssinatura(novoCliente);
-      res.status(201).json({ success: true, cliente: novoCliente });
+      const { password: _pwd, ...safeCliente } = novoCliente as any;
+      res.status(201).json({ success: true, cliente: safeCliente });
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao criar registo de empresa cliente.' });
     }
   });
 
   // UPDATE CLIENT SUBSCRIPTION DETAILS (Platform Owner Control)
-  app.post('/api/clients/update-subscription', (req: Request, res: Response) => {
+  app.post('/api/clients/update-subscription', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const { id, status, plan, fee_base, fee_por_slip, next_billing_date, password } = req.body;
       if (!id) {
@@ -2119,13 +2204,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       if (password !== undefined && password !== '') cliente.password = password;
 
       enviarEmailAlertaAssinatura(cliente);
-      res.json({ success: true, mensagem: `Assinatura de ${cliente.nome} atualizada com sucesso!`, cliente });
+      const { password: _pwd, ...safeCliente } = cliente as any;
+      res.json({ success: true, mensagem: `Assinatura de ${cliente.nome} atualizada com sucesso!`, cliente: safeCliente });
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao atualizar dados da assinatura do cliente.' });
     }
   });
 
-  app.delete('/api/clients/:id', (req: Request, res: Response) => {
+  app.delete('/api/clients/:id', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const index = baseDadosClientes.findIndex(c => c.id === id);
@@ -5593,13 +5679,44 @@ Host: https://clickpay.co.mz
     }
   ];
 
-  async function enviarEmailServicoExterno(destinatario: string, assunto: string, corpo_html: string) {
+  function escapeHtmlForSupport(value: string): string {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  async function enviarEmailServicoExterno(
+    destinatario: string | string[],
+    assunto: string,
+    corpo_html: string,
+    cc?: string[]
+  ) {
+    const toList = Array.from(
+      new Set(
+        (Array.isArray(destinatario) ? destinatario : [destinatario])
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    const ccList = Array.from(
+      new Set(
+        (cc || [])
+          .map((e) => String(e || '').trim().toLowerCase())
+          .filter((e) => e && !toList.includes(e))
+      )
+    );
+
     const resendApiKey = process.env.RESEND_API_KEY;
+    const resendFrom = process.env.RESEND_FROM_EMAIL || 'ClickPay Suporte <onboarding@resend.dev>';
     const emailjsServiceId = process.env.EMAILJS_SERVICE_ID;
     const emailjsTemplateId = process.env.EMAILJS_TEMPLATE_ID;
     const emailjsUserId = process.env.EMAILJS_USER_ID;
+    const supportEmailWebhook = process.env.SUPPORT_EMAIL_WEBHOOK_URL;
 
-    console.log(`[EMAIL INTEGRATION] Tentando enviar email para ${destinatario} - Assunto: "${assunto}"`);
+    console.log(`[EMAIL INTEGRATION] Tentando enviar email para ${toList.join(', ')}${ccList.length ? ` (CC: ${ccList.join(', ')})` : ''} - Assunto: "${assunto}"`);
 
     if (resendApiKey) {
       try {
@@ -5610,8 +5727,9 @@ Host: https://clickpay.co.mz
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            from: 'Payroll Tech Mz <onboarding@resend.dev>',
-            to: [destinatario],
+            from: resendFrom,
+            to: toList,
+            ...(ccList.length > 0 ? { cc: ccList } : {}),
             subject: assunto,
             html: corpo_html
           })
@@ -5619,15 +5737,15 @@ Host: https://clickpay.co.mz
         if (response.ok) {
           const data = await response.json();
           console.log(`[EMAIL INTEGRATION] Sucesso via Resend:`, data);
-          return { sucesso: true, gateway: 'Resend', detalhes: JSON.stringify(data) };
+          return { sucesso: true, gateway: 'Resend', detalhes: JSON.stringify(data), to: toList, cc: ccList };
         } else {
           const errorText = await response.text();
           console.error(`[EMAIL INTEGRATION] Erro do gateway Resend: ${errorText}`);
-          return { sucesso: false, error: `Erro Resend: ${errorText}`, gateway: 'Resend' };
+          return { sucesso: false, error: `Erro Resend: ${errorText}`, gateway: 'Resend', to: toList, cc: ccList };
         }
       } catch (err: any) {
         console.error(`[EMAIL INTEGRATION] Exceção ao enviar via Resend:`, err);
-        return { sucesso: false, error: err.message, gateway: 'Resend' };
+        return { sucesso: false, error: err.message, gateway: 'Resend', to: toList, cc: ccList };
       }
     } else if (emailjsServiceId && emailjsTemplateId && emailjsUserId) {
       try {
@@ -5641,7 +5759,8 @@ Host: https://clickpay.co.mz
             template_id: emailjsTemplateId,
             user_id: emailjsUserId,
             template_params: {
-              to_email: destinatario,
+              to_email: toList.join(','),
+              cc_email: ccList.join(','),
               subject: assunto,
               message_html: corpo_html,
               html_content: corpo_html
@@ -5650,20 +5769,122 @@ Host: https://clickpay.co.mz
         });
         if (response.ok) {
           console.log(`[EMAIL INTEGRATION] Sucesso via EmailJS`);
-          return { sucesso: true, gateway: 'EmailJS', detalhes: 'Enviado com sucesso' };
+          return { sucesso: true, gateway: 'EmailJS', detalhes: 'Enviado com sucesso', to: toList, cc: ccList };
         } else {
           const errorText = await response.text();
           console.error(`[EMAIL INTEGRATION] Erro do gateway EmailJS: ${errorText}`);
-          return { sucesso: false, error: `Erro EmailJS: ${errorText}`, gateway: 'EmailJS' };
+          return { sucesso: false, error: `Erro EmailJS: ${errorText}`, gateway: 'EmailJS', to: toList, cc: ccList };
         }
       } catch (err: any) {
         console.error(`[EMAIL INTEGRATION] Exceção ao enviar via EmailJS:`, err);
-        return { sucesso: false, error: err.message, gateway: 'EmailJS' };
+        return { sucesso: false, error: err.message, gateway: 'EmailJS', to: toList, cc: ccList };
+      }
+    } else if (supportEmailWebhook) {
+      try {
+        const response = await fetch(supportEmailWebhook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: toList,
+            cc: ccList,
+            subject: assunto,
+            html: corpo_html,
+            timestamp: new Date().toISOString()
+          })
+        });
+        if (response.ok) {
+          return { sucesso: true, gateway: 'Webhook', detalhes: 'Encaminhado via Email Webhook', to: toList, cc: ccList };
+        }
+        const errorText = await response.text();
+        return { sucesso: false, error: `Erro Email Webhook: ${errorText}`, gateway: 'Webhook', to: toList, cc: ccList };
+      } catch (err: any) {
+        return { sucesso: false, error: err.message, gateway: 'Webhook', to: toList, cc: ccList };
       }
     } else {
-      console.log(`[EMAIL INTEGRATION] Sem chaves de API configuradas. Envio simulado com sucesso (modo de testes).`);
-      return { sucesso: true, gateway: 'Simulado', detalhes: 'Modo demonstração ativo.' };
+      console.log(`[EMAIL INTEGRATION] Fila local ativa (sem API externa configurada). Destinatários: ${toList.join(', ')}`);
+      return { sucesso: true, gateway: 'DirectMailtoAndAudit', detalhes: 'Registado e pronto para envio direto por e-mail.', to: toList, cc: ccList };
     }
+  }
+
+  async function enviarWhatsAppServicoExterno(
+    telefoneDestino: string,
+    mensagemTexto: string,
+    metadata?: Record<string, any>
+  ) {
+    const cleanDigits = String(telefoneDestino || '258842014173').replace(/[^0-9]/g, '') || '258842014173';
+    const whatsappUrl = `https://wa.me/${cleanDigits}?text=${encodeURIComponent(mensagemTexto)}`;
+
+    const waCloudToken = process.env.WHATSAPP_CLOUD_TOKEN;
+    const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const waWebhookUrl = process.env.WHATSAPP_WEBHOOK_URL;
+    const callmebotKey = process.env.CALLMEBOT_API_KEY;
+
+    if (waCloudToken && waPhoneId) {
+      try {
+        const response = await fetch(`https://graph.facebook.com/v21.0/${waPhoneId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${waCloudToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: cleanDigits,
+            type: 'text',
+            text: { body: mensagemTexto }
+          })
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return { sucesso: true, gateway: 'WhatsAppCloudAPI', whatsappUrl, detalhes: JSON.stringify(data) };
+        }
+        const errText = await response.text();
+        return { sucesso: false, gateway: 'WhatsAppCloudAPI', whatsappUrl, error: errText };
+      } catch (err: any) {
+        return { sucesso: false, gateway: 'WhatsAppCloudAPI', whatsappUrl, error: err.message };
+      }
+    } else if (waWebhookUrl) {
+      try {
+        const response = await fetch(waWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: `+${cleanDigits}`,
+            phone: cleanDigits,
+            message: mensagemTexto,
+            whatsappUrl,
+            ...(metadata || {}),
+            timestamp: new Date().toISOString()
+          })
+        });
+        if (response.ok) {
+          return { sucesso: true, gateway: 'WhatsAppWebhook', whatsappUrl, detalhes: 'Enviado via WhatsApp Webhook.' };
+        }
+        const errText = await response.text();
+        return { sucesso: false, gateway: 'WhatsAppWebhook', whatsappUrl, error: errText };
+      } catch (err: any) {
+        return { sucesso: false, gateway: 'WhatsAppWebhook', whatsappUrl, error: err.message };
+      }
+    } else if (callmebotKey) {
+      try {
+        const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent('+' + cleanDigits)}&text=${encodeURIComponent(mensagemTexto)}&apikey=${encodeURIComponent(callmebotKey)}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          return { sucesso: true, gateway: 'CallMeBot', whatsappUrl, detalhes: 'Enviado via CallMeBot WhatsApp.' };
+        }
+        const errText = await response.text();
+        return { sucesso: false, gateway: 'CallMeBot', whatsappUrl, error: errText };
+      } catch (err: any) {
+        return { sucesso: false, gateway: 'CallMeBot', whatsappUrl, error: err.message };
+      }
+    }
+
+    return {
+      sucesso: true,
+      gateway: 'WhatsAppDirectLink',
+      whatsappUrl,
+      detalhes: 'Link oficial WhatsApp ClickPay gerado com os dados do pedido.'
+    };
   }
 
   async function enviarEmailAlertaColaborador(funcionario: any) {
@@ -5875,8 +6096,10 @@ Host: https://clickpay.co.mz
 
       credentialRequestsList.unshift(novaSolicitacao);
 
-      // Disparar notificação imediata para o Administrador (gersonjcumbane@gmail.com)
-      const adminEmail = alertConfig.email_destino || 'gersonjcumbane@gmail.com';
+      // Disparar notificação imediata para o Suporte & Administrador (click@payrolltech.co.mz + gersonjcumbane@gmail.com)
+      const supportEmailPrimary = process.env.SUPPORT_EMAIL_PRIMARY || 'click@payrolltech.co.mz';
+      const adminEmail = alertConfig.email_destino || process.env.SUPPORT_EMAIL_CC || 'gersonjcumbane@gmail.com';
+      const supportWhatsAppPrimary = process.env.SUPPORT_WHATSAPP_PRIMARY || '258842014173';
       const assunto = `🔑 NOVA SOLICITAÇÃO DE CREDENCIAIS - ${novaSolicitacao.empresa} (Plano ${novaSolicitacao.plano})`;
       const conteudo_html = `<div style="font-family: sans-serif; color: #1e293b; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin: 0 auto; background: #ffffff;">
         <div style="background-color: #1e3a8a; padding: 24px; text-align: center; color: white;">
@@ -5884,32 +6107,37 @@ Host: https://clickpay.co.mz
           <p style="margin: 4px 0 0 0; font-size: 11px; color: #93c5fd; font-weight: 600; text-transform: uppercase;">ALERTA DE SOLICITAÇÃO DE CREDENCIAIS DE ACESSO</p>
         </div>
         <div style="padding: 24px; line-height: 1.6;">
-          <p style="margin-top: 0; font-size: 15px; font-weight: bold; color: #0f172a;">Olá Administrador,</p>
+          <p style="margin-top: 0; font-size: 15px; font-weight: bold; color: #0f172a;">Olá Equipa ClickPay,</p>
           <p style="font-size: 13.5px; color: #475569;">Um novo cliente acaba de solicitar credenciais de acesso ao sistema ClickPay ERP:</p>
           <div style="background-color: #f0f9ff; border-left: 4px solid #1e3a8a; padding: 16px; border-radius: 6px; margin: 20px 0;">
             <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
-              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold; width: 140px;">Empresa:</td><td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${novaSolicitacao.empresa}</td></tr>
-              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Responsável:</td><td style="padding: 6px 0; color: #0f172a;">${novaSolicitacao.responsavel}</td></tr>
-              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">NUIT:</td><td style="padding: 6px 0; color: #0f172a;">${novaSolicitacao.nuit}</td></tr>
-              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">E-mail:</td><td style="padding: 6px 0; color: #1e3a8a; font-weight: bold;">${novaSolicitacao.email}</td></tr>
-              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Telefone/WhatsApp:</td><td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${novaSolicitacao.telefone}</td></tr>
-              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Pacote Escolhido:</td><td style="padding: 6px 0; color: #059669; font-weight: bold;">${novaSolicitacao.plano}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold; width: 140px;">Empresa:</td><td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${escapeHtmlForSupport(novaSolicitacao.empresa)}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Responsável:</td><td style="padding: 6px 0; color: #0f172a;">${escapeHtmlForSupport(novaSolicitacao.responsavel)}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">NUIT:</td><td style="padding: 6px 0; color: #0f172a;">${escapeHtmlForSupport(novaSolicitacao.nuit)}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">E-mail:</td><td style="padding: 6px 0; color: #1e3a8a; font-weight: bold;">${escapeHtmlForSupport(novaSolicitacao.email)}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Telefone/WhatsApp:</td><td style="padding: 6px 0; color: #0f172a; font-weight: bold;">${escapeHtmlForSupport(novaSolicitacao.telefone)}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Pacote Escolhido:</td><td style="padding: 6px 0; color: #059669; font-weight: bold;">${escapeHtmlForSupport(novaSolicitacao.plano)}</td></tr>
             </table>
           </div>
           <p style="font-size: 12.5px; color: #475569;">Esta solicitação também foi gravada em tempo real na base de dados Firebase Firestore (coleção <b>credential_requests</b>) e está visível no Painel de Gestão de Clientes.</p>
         </div>
       </div>`;
 
-      enviarEmailServicoExterno(adminEmail, assunto, conteudo_html).then(resultadoEnvio => {
+      const waCredMsg = `🔑 *NOVO PEDIDO DE CREDENCIAIS CLICKPAY*\nEmpresa: ${novaSolicitacao.empresa}\nResponsável: ${novaSolicitacao.responsavel}\nNUIT: ${novaSolicitacao.nuit}\nE-mail: ${novaSolicitacao.email}\nContacto: ${novaSolicitacao.telefone}\nPlano: ${novaSolicitacao.plano}`;
+
+      Promise.all([
+        enviarEmailServicoExterno([supportEmailPrimary, adminEmail], assunto, conteudo_html),
+        enviarWhatsAppServicoExterno(supportWhatsAppPrimary, waCredMsg, { requestId: novaSolicitacao.id })
+      ]).then(([resultadoEnvio]) => {
         alertHistory.unshift({
           id: `al_cred_${Date.now()}`,
           data_envio: new Date().toISOString(),
           tipo_alerta: "SOLICITACAO_CREDENCIAIS",
-          destinatario: adminEmail,
+          destinatario: `${supportEmailPrimary}, ${adminEmail}`,
           assunto,
           status: resultadoEnvio.sucesso ? "ENVIADO" : "FALHA",
           conteudo_html,
-          detalhes_sucesso: `Notificação de pedido de credenciais enviada (${resultadoEnvio.gateway}).`
+          detalhes_sucesso: `Notificação enviada para E-mail & WhatsApp (${resultadoEnvio.gateway}).`
         });
       }).catch(() => {});
 
@@ -5919,8 +6147,157 @@ Host: https://clickpay.co.mz
     }
   });
 
-  app.get('/api/admin/credential-requests', (req: Request, res: Response) => {
+  app.get('/api/admin/credential-requests', requireSuperAdmin, (req: Request, res: Response) => {
     res.json(credentialRequestsList);
+  });
+
+  // =========================================================================
+  // SUPORTE TÉCNICO MULTI-CANAL (E-MAIL + WHATSAPP CLICKPAY MOÇAMBIQUE)
+  // =========================================================================
+  const supportTicketsList: any[] = [];
+
+  app.post('/api/support/ticket', async (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const nome = String(body.nome || '').trim().substring(0, 256);
+      const empresa = String(body.empresa || 'Empresa Cliente').trim().substring(0, 256);
+      const email = String(body.email || '').trim().toLowerCase().substring(0, 256);
+      const telefone = String(body.telefone || '').trim().substring(0, 64);
+      const assunto = String(body.assunto || 'Pedido de Suporte Técnico').trim().substring(0, 256);
+      const prioridadeRaw = String(body.prioridade || 'Normal').trim();
+      const prioridade: 'Normal' | 'Alta' | 'Urgente' =
+        prioridadeRaw === 'Alta' || prioridadeRaw === 'Urgente' ? prioridadeRaw : 'Normal';
+      const mensagem = String(body.mensagem || '').trim().substring(0, 4000);
+      const canalOrigem = String(body.canalOrigem || 'Plataforma ClickPay').trim().substring(0, 64);
+
+      if (!nome || !email || !telefone || !mensagem) {
+        return res.status(400).json({
+          erro: 'Preencha Nome, E-mail, Telefone/WhatsApp e Mensagem para abrir o pedido de suporte.'
+        });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ erro: 'Indique um endereço de e-mail válido.' });
+      }
+
+      const supportEmailPrimary = process.env.SUPPORT_EMAIL_PRIMARY || 'click@payrolltech.co.mz';
+      const supportEmailCc = process.env.SUPPORT_EMAIL_CC || 'gersonjcumbane@gmail.com';
+      const whatsappPrimary = (process.env.SUPPORT_WHATSAPP_PRIMARY || '258842014173').replace(/[^0-9]/g, '') || '258842014173';
+      const whatsappSecondary = (process.env.SUPPORT_WHATSAPP_SECONDARY || '258861390061').replace(/[^0-9]/g, '') || '258861390061';
+
+      const ticketId = `SUP_${Date.now()}`;
+      const createdAt = new Date().toISOString();
+
+      const ticket = {
+        id: ticketId,
+        nome,
+        empresa,
+        email,
+        telefone,
+        assunto,
+        prioridade,
+        mensagem,
+        canalOrigem,
+        emailDestino: supportEmailPrimary,
+        emailCopia: supportEmailCc,
+        whatsappDestino: `+${whatsappPrimary}`,
+        status: 'ABERTO',
+        createdAt
+      };
+
+      const emailSubject = `[Suporte ClickPay #${ticketId}] (${prioridade}) ${assunto} — ${empresa}`;
+      const emailHtml = `<div style="font-family: Inter, -apple-system, sans-serif; color: #0f172a; max-width: 620px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin: 0 auto; background: #ffffff;">
+        <div style="background-color: #1e3a8a; padding: 22px 24px; color: #ffffff;">
+          <p style="margin: 0; font-size: 11px; color: #93c5fd; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;">ClickPay Moçambique · Suporte Técnico</p>
+          <h2 style="margin: 6px 0 0 0; font-size: 18px; font-weight: 700;">Ticket #${escapeHtmlForSupport(ticketId)} · Prioridade ${escapeHtmlForSupport(prioridade)}</h2>
+        </div>
+        <div style="padding: 24px; line-height: 1.6;">
+          <table style="width: 100%; font-size: 13px; border-collapse: collapse; margin-bottom: 18px;">
+            <tr><td style="padding: 6px 0; color: #64748b; width: 145px;"><strong>Solicitante:</strong></td><td style="padding: 6px 0; color: #0f172a;">${escapeHtmlForSupport(nome)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;"><strong>Empresa:</strong></td><td style="padding: 6px 0; color: #0f172a;">${escapeHtmlForSupport(empresa)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;"><strong>E-mail Cliente:</strong></td><td style="padding: 6px 0; color: #1e3a8a;">${escapeHtmlForSupport(email)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;"><strong>Telemóvel / WhatsApp:</strong></td><td style="padding: 6px 0; color: #0f172a;">${escapeHtmlForSupport(telefone)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;"><strong>Origem:</strong></td><td style="padding: 6px 0; color: #0f172a;">${escapeHtmlForSupport(canalOrigem)}</td></tr>
+            <tr><td style="padding: 6px 0; color: #64748b;"><strong>Assunto:</strong></td><td style="padding: 6px 0; color: #0f172a;"><strong>${escapeHtmlForSupport(assunto)}</strong></td></tr>
+          </table>
+          <div style="background: #f8fafc; border-left: 4px solid #1e3a8a; border-radius: 6px; padding: 14px 16px; font-size: 13.5px; color: #1e293b; white-space: pre-wrap;">${escapeHtmlForSupport(mensagem)}</div>
+        </div>
+        <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 14px 24px; font-size: 11px; color: #64748b;">
+          Recebido em ${escapeHtmlForSupport(createdAt)} · Bairro São Dâmaso, Machava Q4 · ClickPay ERP
+        </div>
+      </div>`;
+
+      const whatsappText = [
+        `*SUPORTE TÉCNICO CLICKPAY (#${ticketId})*`,
+        `Prioridade: *${prioridade}*`,
+        `Empresa: ${empresa}`,
+        `Nome: ${nome}`,
+        `E-mail: ${email}`,
+        `Contacto: ${telefone}`,
+        `Assunto: *${assunto}*`,
+        ``,
+        `Mensagem:`,
+        mensagem
+      ].join('\n');
+
+      const [emailDelivery, whatsappDelivery] = await Promise.all([
+        enviarEmailServicoExterno([supportEmailPrimary], emailSubject, emailHtml, [supportEmailCc]),
+        enviarWhatsAppServicoExterno(whatsappPrimary, whatsappText, { ticketId, email, empresa, prioridade })
+      ]);
+
+      supportTicketsList.unshift(ticket);
+      if (supportTicketsList.length > 200) supportTicketsList.length = 200;
+
+      alertHistory.unshift({
+        id: `al_sup_${Date.now()}`,
+        data_envio: createdAt,
+        tipo_alerta: 'SUPORTE_TECNICO',
+        destinatario: `${supportEmailPrimary} | +${whatsappPrimary}`,
+        assunto: emailSubject,
+        status: emailDelivery.sucesso || whatsappDelivery.sucesso ? 'ENVIADO' : 'FALHA',
+        conteudo_html: emailHtml,
+        detalhes_sucesso: `E-mail (${emailDelivery.gateway}) + WhatsApp (${whatsappDelivery.gateway})`
+      });
+
+      notifyFounder(
+        'Novo Pedido de Suporte Técnico',
+        `${nome} (${empresa}) abriu o ticket ${ticketId}: "${assunto}". Encaminhado para ${supportEmailPrimary} e WhatsApp +${whatsappPrimary}.`,
+        { ticketId, email, telefone, prioridade }
+      );
+
+      const mailtoBody = [
+        `Ticket: ${ticketId}`,
+        `Prioridade: ${prioridade}`,
+        `Empresa: ${empresa}`,
+        `Nome: ${nome}`,
+        `E-mail: ${email}`,
+        `Telefone/WhatsApp: ${telefone}`,
+        ``,
+        mensagem
+      ].join('\n');
+
+      const whatsappPrimaryUrl = `https://wa.me/${whatsappPrimary}?text=${encodeURIComponent(whatsappText)}`;
+      const whatsappSecondaryUrl = `https://wa.me/${whatsappSecondary}?text=${encodeURIComponent(whatsappText)}`;
+      const mailtoUrl = `mailto:${supportEmailPrimary}?cc=${encodeURIComponent(supportEmailCc)}&subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(mailtoBody)}`;
+
+      return res.status(201).json({
+        sucesso: true,
+        ticket,
+        emailDelivery,
+        whatsappDelivery,
+        links: {
+          whatsappPrimaryUrl,
+          whatsappSecondaryUrl,
+          mailtoUrl
+        }
+      });
+    } catch (err: any) {
+      console.error('[SUPPORT] Erro ao processar pedido de suporte:', err);
+      return res.status(500).json({ erro: 'Erro ao processar pedido de suporte técnico.' });
+    }
+  });
+
+  app.get('/api/support/tickets', requireSuperAdmin, (_req: Request, res: Response) => {
+    res.json(supportTicketsList);
   });
 
   app.get('/api/alerts/config', (req: Request, res: Response) => {
@@ -6256,9 +6633,9 @@ Host: https://clickpay.co.mz
     res.json(paymentLogs);
   });
 
-  // --- API BACKUP ENDPOINTS ---
-  // 1. Get cloud backups history for active company
-  app.get('/api/backup/history', (req: Request, res: Response) => {
+  // --- API BACKUP ENDPOINTS (EXCLUSIVO SUPER ADMIN) ---
+  // 1. Get cloud backups history
+  app.get('/api/backup/history', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const activeCompany = baseDadosClientes.find(c => c.nuit === empresaAtual.nuit);
       const companyId = activeCompany ? activeCompany.id : 'cli_bronze';
@@ -6270,7 +6647,7 @@ Host: https://clickpay.co.mz
   });
 
   // 2. Trigger manual or automated cloud backup
-  app.post('/api/backup/trigger', (req: Request, res: Response) => {
+  app.post('/api/backup/trigger', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const { tipo } = req.body;
       const activeCompany = baseDadosClientes.find(c => c.nuit === empresaAtual.nuit);
@@ -6329,7 +6706,7 @@ Host: https://clickpay.co.mz
   });
 
   // 3. Download backup JSON snapshot
-  app.get('/api/backup/download/:id', (req: Request, res: Response) => {
+  app.get('/api/backup/download/:id', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const backup = baseDadosBackups.find(b => b.id === req.params.id);
       if (!backup) {
@@ -6368,7 +6745,7 @@ Host: https://clickpay.co.mz
   });
 
   // 4. Restore backup snapshot
-  app.post('/api/backup/restore/:id', (req: Request, res: Response) => {
+  app.post('/api/backup/restore/:id', requireSuperAdmin, (req: Request, res: Response) => {
     try {
       const backup = baseDadosBackups.find(b => b.id === req.params.id);
       if (!backup) {
