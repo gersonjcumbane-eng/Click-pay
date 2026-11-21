@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   ArrowRight,
+  Building2,
   Check,
+  Eye,
   Mail,
   MapPin,
-  MessageSquare,
   Phone,
-  X
+  ShieldCheck,
+  Target
 } from 'lucide-react';
-import { db, doc, setDoc } from '../lib/firebase';
-import { useToast } from '../context/ToastContext';
 
 interface LandingPageProps {
   onEnterLogin: () => void;
@@ -27,66 +27,6 @@ export default function LandingPage({
   onEnterRegister,
   onEnterPlanDemo
 }: LandingPageProps) {
-  const { showError } = useToast();
-  const [showContactModal, setShowContactModal] = useState<boolean>(false);
-  const [selectedPlanForContact, setSelectedPlanForContact] = useState<string>('Geral');
-
-  const [reqEmpresa, setReqEmpresa] = useState<string>('');
-  const [reqResponsavel, setReqResponsavel] = useState<string>('');
-  const [reqEmail, setReqEmail] = useState<string>('');
-  const [reqTelefone, setReqTelefone] = useState<string>('');
-  const [reqSubmitting, setReqSubmitting] = useState<boolean>(false);
-  const [reqSuccess, setReqSuccess] = useState<boolean>(false);
-
-  const handleOpenContact = (planName: string) => {
-    setSelectedPlanForContact(planName);
-    setReqSuccess(false);
-    setShowContactModal(true);
-  };
-
-  const handleSubmitRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reqEmpresa.trim() || !reqEmail.trim() || !reqTelefone.trim()) return;
-
-    setReqSubmitting(true);
-    const reqId = `REQ-${Date.now()}`;
-    const payload = {
-      id: reqId,
-      empresa: reqEmpresa.trim(),
-      responsavel: reqResponsavel.trim(),
-      email: reqEmail.trim(),
-      telefone: reqTelefone.trim(),
-      plano: selectedPlanForContact,
-      status: 'PENDENTE',
-      createdAt: new Date().toISOString()
-    };
-
-    try {
-      const apiPromise = fetch('/api/auth/request-credentials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-        .then((r) => r.ok)
-        .catch(() => false);
-
-      const firestorePromise = setDoc(doc(db, 'credential_requests', reqId), payload, {
-        merge: true
-      })
-        .then(() => true)
-        .catch(() => false);
-
-      const [apiOk, firestoreOk] = await Promise.all([apiPromise, firestorePromise]);
-      if (!apiOk && !firestoreOk) {
-        showError('Não foi possível registar o pedido. Tente via WhatsApp.');
-        return;
-      }
-      setReqSuccess(true);
-    } finally {
-      setReqSubmitting(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-[#FAFAFB] flex flex-col font-sans text-slate-900 antialiased selection:bg-blue-900 selection:text-white">
       {/* Header — 3 clean zones */}
@@ -113,22 +53,10 @@ export default function LandingPage({
 
           <nav className="hidden md:flex items-center gap-8 text-[13px] font-medium text-slate-600">
             <a
-              href="#planos"
-              className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
-            >
-              Planos
-            </a>
-            <a
               href="#sobre"
               className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
             >
               Sobre Nós
-            </a>
-            <a
-              href="#contacto"
-              className="hover:text-slate-950 transition-colors whitespace-nowrap shrink-0"
-            >
-              Contactos
             </a>
           </nav>
 
@@ -193,9 +121,7 @@ export default function LandingPage({
       {/* Plans & Pricing */}
       <section id="planos" className="py-16 md:py-20 max-w-6xl mx-auto px-4 sm:px-6 w-full">
         <div className="max-w-2xl space-y-2 mb-10">
-          <p className="text-[12px] font-medium text-blue-900">
-            Planos em Meticais
-          </p>
+          <p className="text-[12px] font-medium text-blue-900">Planos em Meticais</p>
           <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight text-balance">
             Escolha o plano adequado à sua empresa
           </h2>
@@ -209,9 +135,7 @@ export default function LandingPage({
           <div className="bg-white rounded-xl p-6 border border-slate-200 flex flex-col justify-between space-y-6">
             <div className="space-y-4">
               <div>
-                <p className="text-[12px] font-semibold text-slate-500">
-                  Starter · Microempresa
-                </p>
+                <p className="text-[12px] font-semibold text-slate-500">Starter · Microempresa</p>
                 <p className="text-xs text-slate-500 mt-1">
                   Para negócios em início de atividade e prestadores de serviços.
                 </p>
@@ -366,15 +290,18 @@ export default function LandingPage({
         </div>
       </section>
 
-      {/* Sobre Nós, Missão, Visão, Valores & Contactos */}
+      {/* Sobre Nós, Localização, Missão, Visão e Valores */}
       <section id="sobre" className="bg-white border-t border-slate-200 py-16 md:py-20">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-12">
-          <div id="contacto" className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
-            {/* Sobre Nós */}
-            <div className="lg:col-span-7 space-y-4">
-              <p className="text-[12px] font-medium text-blue-900">
-                Sobre Nós
-              </p>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+            {/* Resumo do que fazemos */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <Building2 size={16} />
+                </div>
+                <p className="text-[12px] font-semibold text-blue-900">Sobre Nós</p>
+              </div>
               <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight text-balance">
                 ClickPay Moçambique
               </h2>
@@ -386,98 +313,120 @@ export default function LandingPage({
               </p>
             </div>
 
-            {/* Contactos */}
-            <div className="lg:col-span-5 bg-[#FAFAFB] rounded-xl border border-slate-200 p-6 space-y-4">
-              <p className="text-[12px] font-semibold text-blue-900">
-                Contactos
-              </p>
-
-              <div className="divide-y divide-slate-200 text-xs">
-                <div className="pb-3 flex items-start gap-3">
-                  <MapPin size={15} className="text-slate-500 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold text-slate-900">Maputo · Moçambique</p>
-                    <p className="text-slate-600 mt-0.5">Seg – Sex: 08:00 – 17:00 | Sáb: 08:00 – 12:00</p>
-                  </div>
+            {/* Localização */}
+            <div className="lg:col-span-4 bg-[#FAFAFB] rounded-xl border border-slate-200 p-5 space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <MapPin size={16} />
                 </div>
-
-                <div className="py-3 flex items-start gap-3">
-                  <Phone size={15} className="text-slate-500 shrink-0 mt-0.5" />
-                  <div className="space-y-0.5">
-                    <p className="font-semibold text-slate-900">Telefone &amp; WhatsApp</p>
-                    <p className="font-mono tabular-nums text-slate-700">+258 84 201 4173</p>
-                    <p className="font-mono tabular-nums text-slate-700">+258 86 139 0061</p>
-                  </div>
-                </div>
-
-                <div className="pt-3 flex items-start gap-3">
-                  <Mail size={15} className="text-slate-500 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold text-slate-900">E-mail</p>
-                    <a
-                      href="mailto:gersonjcumbane@gmail.com"
-                      className="text-blue-900 hover:underline font-medium"
-                    >
-                      gersonjcumbane@gmail.com
-                    </a>
-                  </div>
-                </div>
+                <p className="text-xs font-semibold text-slate-950">Localização</p>
               </div>
-
-              <div className="pt-2 flex flex-wrap gap-2.5">
-                <a
-                  href="https://wa.me/258842014173?text=Ol%C3%A1%2C%20gostaria%20de%20entrar%20em%20contacto%20com%20a%20ClickPay%20Mo%C3%A7ambique."
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-950 text-white font-medium rounded-lg text-xs inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
-                >
-                  <MessageSquare size={13} />
-                  <span>WhatsApp</span>
-                </a>
-                <button
-                  type="button"
-                  onClick={() => handleOpenContact('Geral')}
-                  className="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 font-medium rounded-lg text-xs inline-flex items-center gap-2 cursor-pointer transition-colors whitespace-nowrap shrink-0"
-                >
-                  <Mail size={13} />
-                  <span>Enviar Mensagem</span>
-                </button>
+              <div className="space-y-1 text-[13px] text-slate-600 leading-relaxed">
+                <p className="font-medium text-slate-900">Bairro São Dâmaso, Machava Q4</p>
+                <p className="text-xs text-slate-500">Matola · Moçambique</p>
               </div>
             </div>
           </div>
 
           {/* Missão, Visão e Valores */}
           <div className="pt-10 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="space-y-2">
-              <p className="text-[12px] font-semibold text-blue-900">
-                Missão
-              </p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <Target size={16} />
+                </div>
+                <p className="text-xs font-semibold text-slate-950">Missão</p>
+              </div>
               <p className="text-[13px] text-slate-600 leading-relaxed">
                 Simplificar e automatizar a gestão salarial, fiscal e financeira das empresas em
                 Moçambique, garantindo rigor legal e agilidade operacional no dia a dia.
               </p>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-[12px] font-semibold text-blue-900">
-                Visão
-              </p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <Eye size={16} />
+                </div>
+                <p className="text-xs font-semibold text-slate-950">Visão</p>
+              </div>
               <p className="text-[13px] text-slate-600 leading-relaxed">
                 Ser a plataforma de referência em gestão empresarial e pagamentos digitais em
                 Moçambique, reconhecida pela fiabilidade e conformidade contínua.
               </p>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-[12px] font-semibold text-blue-900">
-                Valores
-              </p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <ShieldCheck size={16} />
+                </div>
+                <p className="text-xs font-semibold text-slate-950">Valores</p>
+              </div>
               <ul className="text-[13px] text-slate-600 space-y-1.5 leading-relaxed">
                 <li>• Rigor na conformidade fiscal e laboral</li>
                 <li>• Transparência de preços em Meticais</li>
                 <li>• Segurança e integridade da informação</li>
                 <li>• Inovação prática em carteiras móveis</li>
               </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Contactos — Apenas Telemóvel e E-mails */}
+      <section id="contacto" className="bg-[#FAFAFB] border-t border-slate-200 py-14 md:py-16">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-6">
+          <div className="space-y-1">
+            <p className="text-[12px] font-medium text-blue-900">Contactos</p>
+            <h2 className="text-xl sm:text-2xl font-semibold text-slate-950 tracking-tight">
+              Fale com a nossa equipa
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-3xl">
+            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Phone size={15} className="text-blue-900 shrink-0" />
+                <span className="text-xs font-semibold">Telemóvel</span>
+              </div>
+              <div className="space-y-1.5 text-sm font-mono tabular-nums text-slate-700">
+                <div>
+                  <a href="tel:+258842014173" className="hover:text-blue-900 transition-colors">
+                    +258 84 201 4173
+                  </a>
+                </div>
+                <div>
+                  <a href="tel:+258861390061" className="hover:text-blue-900 transition-colors">
+                    +258 86 139 0061
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+              <div className="flex items-center gap-2 text-slate-900">
+                <Mail size={15} className="text-blue-900 shrink-0" />
+                <span className="text-xs font-semibold">E-mail</span>
+              </div>
+              <div className="space-y-1.5 text-sm text-slate-700">
+                <div>
+                  <a
+                    href="mailto:click@payrolltech.co.mz"
+                    className="text-blue-900 hover:underline font-medium"
+                  >
+                    click@payrolltech.co.mz
+                  </a>
+                </div>
+                <div>
+                  <a
+                    href="mailto:gersonjcumbane@gmail.com"
+                    className="text-blue-900 hover:underline font-medium"
+                  >
+                    gersonjcumbane@gmail.com
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -492,102 +441,6 @@ export default function LandingPage({
           </p>
         </div>
       </footer>
-
-      {/* Credential Request Modal */}
-      {showContactModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
-          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200 relative space-y-4">
-            <button
-              type="button"
-              onClick={() => setShowContactModal(false)}
-              aria-label="Fechar janela"
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-            >
-              <X size={18} />
-            </button>
-
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold text-slate-950">Entrar em Contacto</h3>
-              <p className="text-xs text-slate-500">
-                Indique os dados da sua empresa para receber contacto da equipa ClickPay.
-              </p>
-            </div>
-
-            {reqSuccess ? (
-              <div className="p-4 bg-slate-50 border border-slate-200 text-slate-900 rounded-lg text-xs space-y-2">
-                <p className="font-semibold text-emerald-800">Pedido registado com sucesso</p>
-                <p className="text-slate-600">
-                  A solicitação da empresa <b>{reqEmpresa}</b> foi enviada à nossa equipa.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowContactModal(false)}
-                  className="mt-2 w-full py-2 bg-slate-900 hover:bg-slate-950 text-white rounded-lg font-semibold cursor-pointer"
-                >
-                  Fechar
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmitRequest} className="space-y-3 text-xs">
-                <div>
-                  <label className="font-medium text-slate-700 block mb-1">Nome da Empresa *</label>
-                  <input
-                    type="text"
-                    required
-                    value={reqEmpresa}
-                    onChange={(e) => setReqEmpresa(e.target.value)}
-                    placeholder="Ex: Comercial Limpopo Lda"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="font-medium text-slate-700 block mb-1">
-                    Nome do Responsável
-                  </label>
-                  <input
-                    type="text"
-                    value={reqResponsavel}
-                    onChange={(e) => setReqResponsavel(e.target.value)}
-                    placeholder="Nome completo"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="font-medium text-slate-700 block mb-1">E-mail *</label>
-                  <input
-                    type="email"
-                    required
-                    value={reqEmail}
-                    onChange={(e) => setReqEmail(e.target.value)}
-                    placeholder="email@empresa.co.mz"
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="font-medium text-slate-700 block mb-1">
-                    Telefone / WhatsApp *
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={reqTelefone}
-                    onChange={(e) => setReqTelefone(e.target.value)}
-                    placeholder="+258 84..."
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={reqSubmitting}
-                  className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 disabled:opacity-60 text-white font-semibold rounded-lg transition-colors cursor-pointer"
-                >
-                  {reqSubmitting ? 'A enviar...' : 'Enviar Pedido'}
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
