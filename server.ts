@@ -160,11 +160,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       'Content-Security-Policy',
       [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.googleapis.com",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.googleapis.com https://accounts.google.com",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' data: https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
-        "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://firestore.googleapis.com wss://*.firebaseio.com",
+        "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com wss://*.firebaseio.com",
+        "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
         "object-src 'none'",
         "base-uri 'self'"
       ].join('; ')
@@ -330,7 +331,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     process.env.SESSION_SECRET ||
     crypto
       .createHash('sha256')
-      .update(`${process.env.FOUNDER_ADMIN_PASSWORD || ''}|${firebaseConfig?.apiKey || ''}|${process.cwd()}|clickpay-mz-session-key`)
+      .update(`${process.env.FOUNDER_ADMIN_PASSWORD || ''}|${firebaseConfig?.projectId || 'future-charter-96ppv'}|${firebaseConfig?.apiKey || ''}|clickpay-mz-session-key`)
       .digest('hex');
 
   function signSessionToken(payload: { email: string; role: string; empresa_id?: string }, ttlMs = 7 * 24 * 60 * 60 * 1000): string {
@@ -408,17 +409,17 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   };
 
   // CREDENCIAIS MESTRE DOS FUNDADORES (EXCLUSIVAS NO SERVIDOR)
+  const INITIAL_FOUNDER_PASSWORD = process.env.FOUNDER_ADMIN_PASSWORD || "ClickPay@2026MZ!";
   const CREDENCIAIS_FOUNDERS = {
     email: "gersonjcumbane@gmail.com",
-    password: process.env.FOUNDER_ADMIN_PASSWORD || "ClickPay2026!",
+    password: INITIAL_FOUNDER_PASSWORD,
     emails: [
       "gersonjcumbane@gmail.com",
       "admin@clickpay.co.mz",
       "admin@payrolltech.co.mz"
     ],
     passwords: [
-      ...(process.env.FOUNDER_ADMIN_PASSWORD ? [process.env.FOUNDER_ADMIN_PASSWORD] : []),
-      "ClickPay2026!",
+      INITIAL_FOUNDER_PASSWORD,
       "UEM_Finanças_Engenharia_2026!"
     ]
   };
@@ -561,15 +562,69 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     return logEntry;
   }
 
+  const usedOtpChallengeIds = new Set<string>();
+
+  interface StatelessOtpPayload {
+    id: string;
+    email: string;
+    salt: string;
+    codeHash: string;
+    exp: number;
+    authPayload: any;
+  }
+
+  function createStatelessOtpToken(email: string, otpCode: string, authPayload: any): { tentativaId: string; id: string; expiresAt: number } {
+    const id = `otp_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const salt = crypto.randomBytes(8).toString('hex');
+    const codeHash = crypto.createHash('sha256').update(`${otpCode}:${email}:${salt}`).digest('hex');
+    const expiresAt = Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000);
+    const payload: StatelessOtpPayload = {
+      id,
+      email,
+      salt,
+      codeHash,
+      exp: expiresAt,
+      authPayload
+    };
+    const bodyB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const sig = crypto.createHmac('sha256', SESSION_SIGNING_SECRET).update(bodyB64).digest('base64url');
+    return {
+      tentativaId: `otp1.${bodyB64}.${sig}`,
+      id,
+      expiresAt
+    };
+  }
+
+  function verifyStatelessOtpToken(token: string): StatelessOtpPayload | null {
+    if (!token || !token.startsWith('otp1.')) return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [, bodyB64, sig] = parts;
+    const expectedSig = crypto.createHmac('sha256', SESSION_SIGNING_SECRET).update(bodyB64).digest('base64url');
+    const sigBuf = Buffer.from(sig, 'utf8');
+    const expBuf = Buffer.from(expectedSig, 'utf8');
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return null;
+    }
+    try {
+      return JSON.parse(Buffer.from(bodyB64, 'base64url').toString('utf8')) as StatelessOtpPayload;
+    } catch {
+      return null;
+    }
+  }
+
   function issueOtpChallenge(email: string, authPayload: any, res: Response) {
     const otpCode = String(Math.floor(100000 + Math.random() * 900000));
-    const tentativaId = `otp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const { tentativaId, expiresAt } = createStatelessOtpToken(email, otpCode, authPayload);
 
+    if (pendingOtpRequests.length > 500) {
+      pendingOtpRequests.shift();
+    }
     pendingOtpRequests.push({
       tentativaId,
       email,
       code: otpCode,
-      expiresAt: Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000),
+      expiresAt,
       authPayload
     });
 
@@ -597,7 +652,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Gerson Cumbane",
       email: "gersonjcumbane@gmail.com",
       passwordMasked: "••••••••••••",
-      rawPassword: "ClickPay2026!",
+      rawPassword: INITIAL_FOUNDER_PASSWORD,
       role: "SUPER_ADMIN_PAYROLL",
       roleLabel: "Super Admin (Fundador)",
       plan: "Platinum",
@@ -613,7 +668,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Dra. Amina Patel",
       email: "rh@clickpay.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "rh_clickpay2026",
+      rawPassword: "Rh@ClickPay2026!",
       role: "GESTOR_RH",
       roleLabel: "Gestor de Recursos Humanos & Folha",
       plan: "Gold",
@@ -629,7 +684,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Dr. Carlos Mondlane",
       email: "contabilidade@clickpay.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "contab_pgc2026",
+      rawPassword: "Pgc@ClickPay2026!",
       role: "CONTABILISTA",
       roleLabel: "Contabilista Certificado (PGC & AT)",
       plan: "Gold",
@@ -1344,7 +1399,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     });
   });
 
-  // VALIDAÇÃO DE CÓDIGO OTP (2FA)
+  // VALIDAÇÃO DE CÓDIGO OTP (2FA) - Compatível com múltiplas instâncias & Serverless
   app.post('/api/auth/verify-otp', (req: Request, res: Response) => {
     const { tentativaId, code, email } = req.body;
     if (!code) {
@@ -1354,6 +1409,60 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     const cleanCode = String(code).trim();
     const emailNorm = email ? String(email).toLowerCase().trim() : '';
 
+    // 1. Verificar desafio stateless assinado por HMAC (funciona entre reinícios e containers Serverless/Cloud Run)
+    const statelessPayload = tentativaId ? verifyStatelessOtpToken(String(tentativaId)) : null;
+    if (statelessPayload) {
+      if (usedOtpChallengeIds.has(statelessPayload.id)) {
+        return res.status(400).json({
+          erro: 'Este código OTP já foi utilizado. Por favor inicie sessão novamente se precisar de um novo acesso.'
+        });
+      }
+      if (Date.now() > statelessPayload.exp) {
+        return res.status(400).json({ erro: 'Código OTP expirou (limite de 5 minutos). Solicite um novo código.' });
+      }
+      const candidateHash = crypto
+        .createHash('sha256')
+        .update(`${cleanCode}:${statelessPayload.email}:${statelessPayload.salt}`)
+        .digest('hex');
+
+      const attemptEntry = pendingOtpRequests.find(p => p.tentativaId === tentativaId);
+
+      if (candidateHash !== statelessPayload.codeHash) {
+        if (attemptEntry) {
+          attemptEntry.failedAttempts = (attemptEntry.failedAttempts || 0) + 1;
+          if (attemptEntry.failedAttempts >= 5) {
+            usedOtpChallengeIds.add(statelessPayload.id);
+            const idx = pendingOtpRequests.indexOf(attemptEntry);
+            if (idx !== -1) pendingOtpRequests.splice(idx, 1);
+            return res.status(429).json({
+              erro: 'Demasiadas tentativas de OTP incorretas. A sessão temporária foi cancelada por segurança.'
+            });
+          }
+        }
+        notifyFounder(
+          'Falha na Validação de OTP',
+          `Código OTP incorreto digitado para a conta ${statelessPayload.email}.`,
+          { userEmail: statelessPayload.email, status: 'bloqueado' }
+        );
+        return res.status(401).json({ erro: 'Código OTP incorreto. Verifique o código enviado e tente novamente.' });
+      }
+
+      // Código válido!
+      if (usedOtpChallengeIds.size > 5000) usedOtpChallengeIds.clear();
+      usedOtpChallengeIds.add(statelessPayload.id);
+      const idx = pendingOtpRequests.findIndex(p => p.tentativaId === tentativaId);
+      if (idx !== -1) pendingOtpRequests.splice(idx, 1);
+
+      notifyFounder(
+        'Login Concluído com Sucesso via OTP (2FA)',
+        `Autenticação em 2 passos concluída com sucesso para ${statelessPayload.email}. Sessão segura iniciada no ERP.`,
+        { userEmail: statelessPayload.email, status: 'sucesso' }
+      );
+
+      return res.json(statelessPayload.authPayload);
+    }
+
+    // 2. Fallback em memória caso tentativaId legado seja enviado
     const attemptIndex = pendingOtpRequests.findIndex(p => {
       if (tentativaId && p.tentativaId === tentativaId) return true;
       if (emailNorm && p.email === emailNorm) return true;
@@ -1373,7 +1482,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.status(400).json({ erro: 'Código OTP expirou (limite de 5 minutos). Solicite um novo código.' });
     }
 
-    // Valida estritamente o código OTP gerado para esta sessão
     const isValid = attempt.code === cleanCode;
 
     if (!isValid) {
@@ -1392,7 +1500,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.status(401).json({ erro: 'Código OTP incorreto. Verifique o código enviado e tente novamente.' });
     }
 
-    // Código validado com sucesso!
     pendingOtpRequests.splice(attemptIndex, 1);
 
     notifyFounder(
@@ -1404,10 +1511,41 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     return res.json(attempt.authPayload);
   });
 
-  // REENVIO DE CÓDIGO OTP (Exige desafio pendente válido)
+  // REENVIO DE CÓDIGO OTP (Stateless HMAC ou memória)
   app.post('/api/auth/resend-otp', (req: Request, res: Response) => {
     const { tentativaId, email } = req.body;
     const emailNorm = (email || '').toLowerCase().trim();
+
+    const statelessPayload = tentativaId ? verifyStatelessOtpToken(String(tentativaId)) : null;
+    if (statelessPayload && !usedOtpChallengeIds.has(statelessPayload.id) && Date.now() <= statelessPayload.exp + 10 * 60 * 1000) {
+      const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+      const { tentativaId: newTentativaId, expiresAt } = createStatelessOtpToken(
+        statelessPayload.email,
+        newOtp,
+        statelessPayload.authPayload
+      );
+      usedOtpChallengeIds.add(statelessPayload.id);
+      pendingOtpRequests.push({
+        tentativaId: newTentativaId,
+        email: statelessPayload.email,
+        code: newOtp,
+        expiresAt,
+        authPayload: statelessPayload.authPayload
+      });
+
+      notifyFounder(
+        'Reenvio de Código de Segurança OTP',
+        `Novo código OTP ${newOtp} emitido para ${statelessPayload.email}. Notificação enviada para gersonjcumbane@gmail.com.`,
+        { userEmail: statelessPayload.email, otpCode: newOtp, status: 'pendente' }
+      );
+
+      return res.json({
+        sucesso: true,
+        tentativaId: newTentativaId,
+        mensagem: "Novo código OTP de 6 dígitos gerado e enviado com sucesso!",
+        debugOtpCode: newOtp
+      });
+    }
 
     const existing = pendingOtpRequests.find(p =>
       (tentativaId && p.tentativaId === tentativaId) ||
@@ -1421,8 +1559,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
 
     const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+    const { tentativaId: newTentativaId, expiresAt } = createStatelessOtpToken(
+      existing.email,
+      newOtp,
+      existing.authPayload
+    );
+    existing.tentativaId = newTentativaId;
     existing.code = newOtp;
-    existing.expiresAt = Date.now() + (otpSecurityConfig.otpExpiryMinutes * 60 * 1000);
+    existing.expiresAt = expiresAt;
     existing.failedAttempts = 0;
 
     notifyFounder(
@@ -1433,9 +1577,176 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     return res.json({
       sucesso: true,
+      tentativaId: newTentativaId,
       mensagem: "Novo código OTP de 6 dígitos gerado e enviado com sucesso!",
       debugOtpCode: newOtp
     });
+  });
+
+  // AUTENTICAÇÃO VIA CONTA GOOGLE / FIREBASE ID TOKEN
+  app.post('/api/auth/google-firebase', async (req: Request, res: Response) => {
+    const { idToken } = req.body || {};
+    if (!idToken || typeof idToken !== 'string' || idToken.length < 20) {
+      return res.status(400).json({ erro: 'Token Google/Firebase inválido ou ausente.' });
+    }
+    if (!firebaseConfig || !firebaseConfig.apiKey) {
+      return res.status(503).json({ erro: 'Configuração Firebase indisponível neste servidor.' });
+    }
+
+    try {
+      const lookupRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken })
+        }
+      );
+      const lookupData: any = await lookupRes.json().catch(() => ({}));
+      const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
+      if (!lookupRes.ok || !fbUser || !fbUser.email) {
+        return res.status(401).json({ erro: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' });
+      }
+      if (fbUser.disabled) {
+        return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
+      }
+      if (fbUser.emailVerified !== true) {
+        return res.status(403).json({ erro: 'O e-mail da conta Google não está verificado.' });
+      }
+
+      const emailNorm = String(fbUser.email).toLowerCase().trim();
+
+      // 1. Fundador (Super Admin)
+      if (CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm)) {
+        selecionarClienteEmpresa("cli_founders");
+        const sessionPayload = {
+          sucesso: true,
+          mensagem: "Acesso de Fundador autenticado via Conta Google Verificada!",
+          token: signSessionToken({ email: emailNorm, role: "SUPER_ADMIN_PAYROLL", empresa_id: "cli_founders" }),
+          usuario: {
+            nome: fbUser.displayName || "Gerson Cumbane (Fundador ClickPay)",
+            email: emailNorm,
+            funcao: "SUPER_ADMIN_PAYROLL",
+            area_visualizacao: "Painel Executivo Global",
+            nome_empresa: empresaAtual.nome || "ClickPay Moçambique Lda",
+            subscription_status: "ativo",
+            subscription_plan: "Platinum"
+          }
+        };
+        notifyFounder(
+          'Login do Fundador via Google Auth',
+          `Autenticação direta concluída com conta Google verificada: ${emailNorm}.`,
+          { userEmail: emailNorm, status: 'sucesso' }
+        );
+        return res.json(sessionPayload);
+      }
+
+      // 2. Utilizador interno do sistema
+      const sysUser = systemUsersList.find(u => String(u.email || '').toLowerCase().trim() === emailNorm);
+      if (sysUser) {
+        if (sysUser.status === 'inativo') {
+          return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
+        }
+        const targetCompanyId = sysUser.role === 'CLIENTE_EMPRESA' ? 'cli_bronze' : 'cli_founders';
+        selecionarClienteEmpresa(targetCompanyId);
+        sysUser.lastLogin = 'Agora (Google Auth)';
+        const sessionPayload = {
+          sucesso: true,
+          mensagem: `Sessão iniciada via Google como ${sysUser.roleLabel || sysUser.role}`,
+          token: signSessionToken({ email: emailNorm, role: sysUser.role, empresa_id: targetCompanyId }),
+          usuario: {
+            nome: sysUser.name,
+            email: emailNorm,
+            funcao: sysUser.role,
+            empresa_id: targetCompanyId,
+            nome_empresa: sysUser.companyName || empresaAtual.nome,
+            subscription_status: 'ativo',
+            subscription_plan: sysUser.plan || 'Gold',
+            next_billing_date: getDefaultNextBillingDate()
+          }
+        };
+        notifyFounder('Login via Google Auth', `Acesso autorizado para ${emailNorm} (${sysUser.role}).`, { userEmail: emailNorm, status: 'sucesso' });
+        return res.json(sessionPayload);
+      }
+
+      // 3. Cliente empresarial (memória ou Firestore saas_clients)
+      let clienteErp = baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm);
+      if (!clienteErp && firebaseConfig.projectId) {
+        const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+        const queryUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
+        const fsRes = await fetch(queryUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            structuredQuery: {
+              from: [{ collectionId: 'saas_clients' }],
+              where: {
+                fieldFilter: {
+                  field: { fieldPath: 'email' },
+                  op: 'EQUAL',
+                  value: { stringValue: emailNorm }
+                }
+              },
+              limit: 1
+            }
+          })
+        }).catch(() => null);
+        if (fsRes && fsRes.ok) {
+          const fsRows: any = await fsRes.json().catch(() => []);
+          const matchedDoc = Array.isArray(fsRows) ? fsRows.find((r: any) => r?.document?.fields) : null;
+          if (matchedDoc) {
+            const f = matchedDoc.document.fields;
+            const docId = f.id?.stringValue || matchedDoc.document.name?.split('/').pop() || `cli_fs_${Date.now()}`;
+            clienteErp = adicionarClienteEmpresa({
+              id: docId,
+              nome: f.companyName?.stringValue || f.tradeName?.stringValue || 'Empresa ClickPay',
+              nuit: f.nuit?.stringValue || '400000000',
+              endereco: f.address?.stringValue || 'Maputo, Moçambique',
+              provincia: 'Maputo Cidade',
+              distrito: 'KaMpfumo',
+              regime_iva: 'Geral (16%)',
+              nuel: '100000000',
+              email: emailNorm,
+              telefone: f.phone?.stringValue || '+258 84 000 0000',
+              logo: '/clickpay-logo.png',
+              password: '',
+              subscription_status: (String(f.status?.stringValue || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo') as any,
+              subscription_plan: (f.plan?.stringValue || 'Bronze') as any,
+              next_billing_date: getDefaultNextBillingDate(),
+              fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || 3500),
+              fee_por_slip: 100
+            });
+          }
+        }
+      }
+
+      if (clienteErp) {
+        selecionarClienteEmpresa(clienteErp.id);
+        const sessionPayload = {
+          sucesso: true,
+          mensagem: `Sessão iniciada via Google para ${clienteErp.nome}`,
+          token: signSessionToken({ email: emailNorm, role: 'CLIENTE_EMPRESA', empresa_id: clienteErp.id }),
+          usuario: {
+            email: emailNorm,
+            funcao: 'CLIENTE_EMPRESA',
+            empresa_id: clienteErp.id,
+            nome_empresa: clienteErp.nome,
+            subscription_status: clienteErp.subscription_status || 'ativo',
+            subscription_plan: clienteErp.subscription_plan || 'Bronze',
+            next_billing_date: clienteErp.next_billing_date || getDefaultNextBillingDate()
+          }
+        };
+        notifyFounder('Login de Cliente via Google Auth', `Acesso autorizado para ${clienteErp.nome} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
+        return res.json(sessionPayload);
+      }
+
+      return res.status(403).json({
+        erro: `A conta Google (${emailNorm}) não está associada a nenhuma empresa registada no ClickPay ERP.`
+      });
+    } catch (err: any) {
+      console.error('[Google Auth Error]:', err);
+      return res.status(500).json({ erro: 'Erro ao validar a autenticação Google.' });
+    }
   });
 
   // =========================================================================
@@ -1773,30 +2084,108 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
+  // Rotação / Atualização Segura de Credenciais de Acesso (Super Admin)
+  app.post('/api/access/update-credentials', requireSuperAdmin, async (req: Request, res: Response) => {
+    const { targetEmail, newPassword, newEmail } = req.body || {};
+    const emailNorm = String(targetEmail || CREDENCIAIS_FOUNDERS.email).toLowerCase().trim();
+    const cleanNewPass = String(newPassword || '').trim();
+    const cleanNewEmail = newEmail ? String(newEmail).toLowerCase().trim() : '';
+
+    if (!cleanNewPass || cleanNewPass.length < 8) {
+      return res.status(400).json({
+        erro: 'A nova palavra-passe deve ter no mínimo 8 caracteres.'
+      });
+    }
+
+    const isFounderTarget = CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm);
+    if (isFounderTarget) {
+      CREDENCIAIS_FOUNDERS.password = cleanNewPass;
+      CREDENCIAIS_FOUNDERS.passwords = [cleanNewPass];
+      if (cleanNewEmail && !CREDENCIAIS_FOUNDERS.emails.includes(cleanNewEmail)) {
+        CREDENCIAIS_FOUNDERS.emails.push(cleanNewEmail);
+      }
+    }
+
+    let updatedAny = isFounderTarget;
+    systemUsersList.forEach(u => {
+      if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+        u.rawPassword = cleanNewPass;
+        u.passwordMasked = cleanNewPass.replace(/./g, '•');
+        if (cleanNewEmail) u.email = cleanNewEmail;
+        updatedAny = true;
+      }
+    });
+
+    clientesRegistadosPelosFounders.forEach(u => {
+      if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+        u.password = cleanNewPass;
+        if (cleanNewEmail) u.email = cleanNewEmail;
+        updatedAny = true;
+      }
+    });
+
+    baseDadosClientes.forEach(c => {
+      if (String(c.email || '').toLowerCase().trim() === emailNorm) {
+        c.password = cleanNewPass;
+        if (cleanNewEmail) c.email = cleanNewEmail;
+        updatedAny = true;
+      }
+    });
+
+    if (!updatedAny) {
+      return res.status(404).json({ erro: `Utilizador "${emailNorm}" não encontrado.` });
+    }
+
+    if (firebaseConfig && firebaseConfig.apiKey) {
+      await syncUserToFirebase(cleanNewEmail || emailNorm, cleanNewPass);
+    }
+
+    notifyFounder(
+      'Credenciais de Acesso Atualizadas',
+      `A palavra-passe da conta "${emailNorm}" foi atualizada com sucesso pelo Administrador Principal.`,
+      { userEmail: cleanNewEmail || emailNorm, status: 'sucesso' }
+    );
+
+    return res.json({
+      sucesso: true,
+      mensagem: `Credenciais de acesso para ${cleanNewEmail || emailNorm} atualizadas com sucesso!`
+    });
+  });
+
   app.put('/api/firebase-auth/users', requireSuperAdmin, async (req: Request, res: Response) => {
     const { email, password } = req.body;
-    if (!email || !password) {
+    const emailNorm = String(email || '').toLowerCase().trim();
+    const cleanPass = String(password || '').trim();
+    if (!emailNorm || !cleanPass) {
       return res.status(400).json({ error: 'Email e nova senha são obrigatórios.' });
     }
 
     try {
-      const superAdmin = email === CREDENCIAIS_FOUNDERS.email;
+      const superAdmin = CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm);
       if (superAdmin) {
-        CREDENCIAIS_FOUNDERS.password = password;
+        CREDENCIAIS_FOUNDERS.password = cleanPass;
+        CREDENCIAIS_FOUNDERS.passwords = [cleanPass];
       }
 
+      systemUsersList.forEach(u => {
+        if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+          u.rawPassword = cleanPass;
+          u.passwordMasked = cleanPass.replace(/./g, '•');
+        }
+      });
+
       clientesRegistadosPelosFounders.forEach(u => {
-        if (u.email === email) u.password = password;
+        if (String(u.email || '').toLowerCase().trim() === emailNorm) u.password = cleanPass;
       });
 
       baseDadosClientes.forEach(c => {
-        if (c.email === email) c.password = password;
+        if (String(c.email || '').toLowerCase().trim() === emailNorm) c.password = cleanPass;
       });
 
       // Sincronizar de forma forçada no Firebase Auth
-      await syncUserToFirebase(email, password);
+      await syncUserToFirebase(emailNorm, cleanPass);
 
-      res.json({ success: true, mensagem: `Senha do utilizador ${email} atualizada com sucesso no Firebase!` });
+      res.json({ success: true, mensagem: `Senha do utilizador ${emailNorm} atualizada com sucesso no Firebase!` });
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao atualizar senha no Firebase.' });
     }
@@ -6864,10 +7253,11 @@ Host: https://clickpay.co.mz
     seedDemoData();
     console.log('[SERVER] Pre-seeded demo portfolio with default companies and employees successfully.');
 
-    // Sincronizar as contas de demonstração padrões com o Firebase Auth em segundo plano
+    // Sincronizar as contas padrões com o Firebase Auth em segundo plano
     if (!isServerless && firebaseConfig && firebaseConfig.apiKey) {
       console.log('[Firebase Sync] Sincronização automática das contas padrão iniciada...');
-      syncUserToFirebase("admin@payrolltech.co.mz", "UEM_Finanças_Engenharia_2026!");
+      syncUserToFirebase("gersonjcumbane@gmail.com", CREDENCIAIS_FOUNDERS.password);
+      syncUserToFirebase("admin@payrolltech.co.mz", CREDENCIAIS_FOUNDERS.password);
       syncUserToFirebase("bronze@payrolltech.co.mz", "bronze2026");
       syncUserToFirebase("silver@payrolltech.co.mz", "silver2026");
       syncUserToFirebase("gold@payrolltech.co.mz", "gold2026");

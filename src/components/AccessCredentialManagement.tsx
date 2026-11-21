@@ -127,7 +127,15 @@ export default function AccessCredentialManagement({
   const [tokenScopes, setTokenScopes] = useState<string[]>(['payroll:read', 'invoicing:write']);
   const [creatingToken, setCreatingToken] = useState<boolean>(false);
 
-  // 6. Clipboard Feedback
+  // 6. Modal de Atualização / Rotação de Credenciais de Acesso
+  const [showUpdateCredModal, setShowUpdateCredModal] = useState<boolean>(false);
+  const [updateTargetEmail, setUpdateTargetEmail] = useState<string>('gersonjcumbane@gmail.com');
+  const [updateNewPassword, setUpdateNewPassword] = useState<string>('');
+  const [updateConfirmPassword, setUpdateConfirmPassword] = useState<string>('');
+  const [showNewPwd, setShowNewPwd] = useState<boolean>(false);
+  const [updatingCreds, setUpdatingCreds] = useState<boolean>(false);
+
+  // 7. Clipboard Feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const copyToClipboard = (text: string, key: string, label: string = 'Texto') => {
@@ -342,6 +350,65 @@ export default function AccessCredentialManagement({
     }
   };
 
+  const openUpdateCredentialsFor = (targetEmail: string) => {
+    setUpdateTargetEmail(targetEmail);
+    setUpdateNewPassword('');
+    setUpdateConfirmPassword('');
+    setShowNewPwd(false);
+    setShowUpdateCredModal(true);
+  };
+
+  const generateStrongPassword = () => {
+    const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#$!';
+    const arr = new Uint32Array(12);
+    crypto.getRandomValues(arr);
+    let pwd = 'CP!';
+    for (let i = 0; i < arr.length; i++) {
+      pwd += charset[arr[i] % charset.length];
+    }
+    setUpdateNewPassword(pwd);
+    setUpdateConfirmPassword(pwd);
+    setShowNewPwd(true);
+  };
+
+  const handleUpdateCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanPwd = updateNewPassword.trim();
+    if (cleanPwd.length < 8) {
+      showError('A nova palavra-passe deve ter pelo menos 8 caracteres.');
+      return;
+    }
+    if (cleanPwd !== updateConfirmPassword.trim()) {
+      showError('As palavras-passe digitadas não coincidem.');
+      return;
+    }
+    setUpdatingCreds(true);
+    try {
+      const res = await fetch('/api/access/update-credentials', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          targetEmail: updateTargetEmail.trim(),
+          newPassword: cleanPwd
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.sucesso) {
+        showSuccess(data.mensagem || 'Credenciais atualizadas com sucesso!');
+        setShowUpdateCredModal(false);
+        setUpdateNewPassword('');
+        setUpdateConfirmPassword('');
+        loadData();
+      } else {
+        showError(data.erro || 'Não foi possível atualizar as credenciais.');
+      }
+    } catch {
+      showError('Erro de conexão ao atualizar credenciais.');
+    } finally {
+      setUpdatingCreds(false);
+    }
+  };
+
   // Revogar token
   const handleRevokeToken = async (id: string, name: string) => {
     const confirmed = await confirmAction({
@@ -443,6 +510,13 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <button
+              onClick={() => openUpdateCredentialsFor(founderEmail)}
+              className="py-2.5 px-4 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            >
+              <KeyRound size={16} />
+              <span>Actualizar Minha Senha</span>
+            </button>
             <button
               onClick={() => setShowGenModal(true)}
               className="py-2.5 px-4 bg-blue-900 hover:bg-blue-950 active:bg-blue-900 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
@@ -784,6 +858,13 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => openUpdateCredentialsFor(u.email)}
+                          className="p-1.5 text-blue-900 hover:text-blue-950 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          title="Actualizar palavra-passe deste utilizador"
+                        >
+                          <KeyRound size={14} />
+                        </button>
                         <button
                           onClick={() => copyToClipboard(u.email, `email_${u.id}`, 'E-mail')}
                           className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
@@ -1272,6 +1353,117 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                   >
                     {creatingToken ? <RefreshCw size={15} className="animate-spin" /> : <KeyRound size={15} />}
                     <span>Gerar Token</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL: Actualizar Credenciais de Acesso */}
+      <AnimatePresence>
+        {showUpdateCredModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-5"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-blue-900 text-white rounded-xl">
+                    <KeyRound size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-950">
+                      Actualizar Credenciais de Acesso
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Define uma nova palavra-passe sincronizada com o servidor e Firebase Auth.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowUpdateCredModal(false)}
+                  className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateCredentials} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800">Conta / E-mail Alvo</label>
+                  <input
+                    type="email"
+                    required
+                    value={updateTargetEmail}
+                    onChange={(e) => setUpdateTargetEmail(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-blue-900"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800">Nova Palavra-Passe</label>
+                    <button
+                      type="button"
+                      onClick={generateStrongPassword}
+                      className="text-[11px] font-bold text-blue-900 hover:underline cursor-pointer"
+                    >
+                      Gerar Senha Forte
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showNewPwd ? 'text' : 'password'}
+                      required
+                      minLength={8}
+                      value={updateNewPassword}
+                      onChange={(e) => setUpdateNewPassword(e.target.value)}
+                      placeholder="Mínimo 8 caracteres"
+                      className="w-full px-3.5 py-2 pr-10 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPwd((v) => !v)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    >
+                      {showNewPwd ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-800">Confirmar Nova Palavra-Passe</label>
+                  <input
+                    type={showNewPwd ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    value={updateConfirmPassword}
+                    onChange={(e) => setUpdateConfirmPassword(e.target.value)}
+                    placeholder="Repita a nova palavra-passe"
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowUpdateCredModal(false)}
+                    className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={updatingCreds}
+                    className="py-2.5 px-5 bg-blue-900 hover:bg-blue-950 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    {updatingCreds ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                    <span>Guardar Nova Senha</span>
                   </button>
                 </div>
               </form>

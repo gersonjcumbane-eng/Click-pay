@@ -6,7 +6,11 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send, MessageCircle } from 'lucide-react';
-import { authenticateClientInFirebase } from '../lib/firebase';
+import {
+  authenticateClientInFirebase,
+  signInWithGoogleAccount,
+  lookupClientByEmailInFirebase
+} from '../lib/firebase';
 import SupportTicketModal, {
   buildSupportMailtoUrl,
   buildSupportWhatsAppUrl,
@@ -38,6 +42,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [supportModalOpen, setSupportModalOpen] = useState(false);
 
   // Estados para Verificação de 2 Fatores (OTP)
@@ -270,6 +275,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       }
       const data = await response.json();
       if (data.sucesso) {
+        if (data.tentativaId) setTentativaId(data.tentativaId);
         if (data.debugOtpCode) setDebugOtpCode(data.debugOtpCode);
         setOtpSuccessMessage('Novo código OTP de 6 dígitos gerado e enviado ao Fundador!');
         setTimeout(() => setOtpSuccessMessage(null), 4000);
@@ -280,6 +286,85 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       generateLocalOtp();
     } finally {
       setResendingOtp(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setGoogleLoading(true);
+    try {
+      const gRes = await signInWithGoogleAccount();
+      if (!gRes.ok || !gRes.idToken || !gRes.email) {
+        setError(gRes.error || 'Falha na autenticação com Google.');
+        return;
+      }
+
+      const completeStaticGoogleFallback = async (): Promise<boolean> => {
+        if (gRes.email === 'gersonjcumbane@gmail.com' && gRes.emailVerified) {
+          persistUserSession(
+            `token_google_${Date.now()}`,
+            {
+              email: gRes.email,
+              funcao: 'SUPER_ADMIN_PAYROLL',
+              empresa_id: 'cli_founders',
+              nome_empresa: 'ClickPay Moçambique Lda',
+              subscription_status: 'ativo',
+              subscription_plan: 'Platinum'
+            },
+            gRes.email
+          );
+          onLoginSuccess();
+          return true;
+        }
+        const lookup = await lookupClientByEmailInFirebase(gRes.email!);
+        if (lookup.found && lookup.client) {
+          persistUserSession(
+            `token_google_${lookup.client.id}`,
+            {
+              email: lookup.client.email,
+              funcao: 'CLIENTE_EMPRESA',
+              empresa_id: lookup.client.id,
+              nome_empresa: lookup.client.companyName,
+              subscription_status: lookup.client.status,
+              subscription_plan: lookup.client.plan
+            },
+            gRes.email!
+          );
+          onLoginSuccess();
+          return true;
+        }
+        return false;
+      };
+
+      try {
+        const res = await fetch('/api/auth/google-firebase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: gRes.idToken })
+        });
+        const isJson = isJsonResponse(res);
+        if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
+          const ok = await completeStaticGoogleFallback();
+          if (!ok) {
+            setError(`A conta Google (${gRes.email}) não está associada a nenhuma empresa registada no sistema.`);
+          }
+          return;
+        }
+        const data = await res.json();
+        if (res.ok && data.sucesso) {
+          persistUserSession(data.token, data.usuario, gRes.email);
+          onLoginSuccess();
+          return;
+        }
+        setError(data.erro || 'Conta Google não autorizada neste portal.');
+      } catch {
+        const ok = await completeStaticGoogleFallback();
+        if (!ok) {
+          setError(`Não foi possível autenticar a conta Google (${gRes.email}).`);
+        }
+      }
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -475,7 +560,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || googleLoading}
                 className="w-full py-3 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-bold rounded-xl shadow-md cursor-pointer text-xs flex items-center justify-center gap-2 transition-colors mt-2"
               >
                 {loading ? (
@@ -487,6 +572,50 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                   <>
                     CONTINUAR PARA O ERP
                     <ChevronRight size={14} />
+                  </>
+                )}
+              </button>
+
+              <div className="relative flex items-center py-1">
+                <div className="flex-grow border-t border-slate-200" />
+                <span className="shrink mx-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  ou acesso verificado
+                </span>
+                <div className="flex-grow border-t border-slate-200" />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={loading || googleLoading}
+                className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold rounded-xl text-xs flex items-center justify-center gap-2.5 transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {googleLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
+                    <span>A validar Conta Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        fill="#4285F4"
+                        d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                      />
+                    </svg>
+                    <span>ENTRAR COM CONTA GOOGLE</span>
                   </>
                 )}
               </button>

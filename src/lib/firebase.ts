@@ -1,5 +1,11 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup
+} from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { hashPassword, isHashedPassword, verifyPassword } from './security';
@@ -392,6 +398,88 @@ export async function authenticateClientInFirebase(
   }
 
   return { ok: false };
+}
+
+export async function signInWithGoogleAccount(): Promise<{
+  ok: boolean;
+  idToken?: string;
+  email?: string;
+  emailVerified?: boolean;
+  displayName?: string;
+  error?: string;
+}> {
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
+    const idToken = await user.getIdToken();
+    return {
+      ok: true,
+      idToken,
+      email: (user.email || '').toLowerCase().trim(),
+      emailVerified: Boolean(user.emailVerified),
+      displayName: user.displayName || ''
+    };
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return { ok: false, error: 'Janela de autenticação Google fechada antes de concluir.' };
+    }
+    if (code === 'auth/unauthorized-domain') {
+      return {
+        ok: false,
+        error: 'Este domínio ainda não está autorizado no Firebase Auth. Use e-mail e palavra-passe ou autorize o domínio na consola Firebase.'
+      };
+    }
+    return { ok: false, error: 'Não foi possível concluir a autenticação com a Conta Google.' };
+  }
+}
+
+export async function lookupClientByEmailInFirebase(email: string): Promise<{
+  found: boolean;
+  client?: {
+    id: string;
+    email: string;
+    companyName: string;
+    plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+    status: 'ativo' | 'suspenso';
+  };
+}> {
+  const emailNorm = String(email || '').toLowerCase().trim();
+  if (!emailNorm) return { found: false };
+  const mapPlan = (p?: string): 'Bronze' | 'Silver' | 'Gold' | 'Platinum' => {
+    if (!p) return 'Bronze';
+    if (p === 'Starter' || p === 'Bronze') return 'Bronze';
+    if (p === 'Growth' || p === 'Silver' || p === 'Profissional') return 'Silver';
+    if (p === 'Business' || p === 'Gold' || p === 'Empresarial') return 'Gold';
+    if (p === 'Platinum') return 'Platinum';
+    return 'Bronze';
+  };
+  const path = 'saas_clients';
+  try {
+    const q = query(collection(db, path), where('email', '==', emailNorm));
+    const snap = await getDocs(q);
+    for (const d of snap.docs) {
+      const data: any = d.data();
+      return {
+        found: true,
+        client: {
+          id: data.id || d.id,
+          email: emailNorm,
+          companyName: data.companyName || data.tradeName || 'Empresa ClickPay',
+          plan: mapPlan(data.plan),
+          status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo'
+        }
+      };
+    }
+    return { found: false };
+  } catch (error) {
+    if (error instanceof Error && error.message.toLowerCase().includes('permission')) {
+      handleFirestoreError(error, OperationType.GET, path);
+    }
+    return { found: false };
+  }
 }
 
 // Test Connection to Firestore as per requirements
