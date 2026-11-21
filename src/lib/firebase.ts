@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { hashPassword, isHashedPassword, verifyPassword } from './security';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
@@ -59,13 +60,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 export async function syncClientToFirestore(clientData: any): Promise<{ ok: boolean; error?: string }> {
   try {
     const safeId = String(clientData.id || `cli_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
+    const hashedSecret = clientData.password ? await hashPassword(String(clientData.password)) : '';
     await setDoc(doc(db, 'erp_clients', safeId), {
       id: safeId,
       nome: String(clientData.nome || '').substring(0, 256),
       nuit: String(clientData.nuit || '').substring(0, 32),
       email: String(clientData.email || '').substring(0, 256),
       telefone: String(clientData.telefone || '+258 84 000 0000').substring(0, 64),
-      passwordHash: String(clientData.password || '••••••••').substring(0, 256),
+      passwordHash: (hashedSecret || '••••••••').substring(0, 256),
       subscription_plan: clientData.subscription_plan || 'Starter',
       subscription_status: clientData.subscription_status || 'ativo',
       fee_base: Number(clientData.fee_base) || 3500,
@@ -179,8 +181,9 @@ export async function syncRegisteredAccountToFirestore(params: {
   if (erpRes.ok) syncedCollections.push('erp_clients');
   else if (erpRes.error) errors.push(`erp_clients: ${erpRes.error}`);
 
-  // 3. Gravar na coleção saas_clients (listagem em tempo real)
+  // 3. Gravar na coleção saas_clients (listagem em tempo real, com palavra-passe encriptada/hashed)
   try {
+    const hashedAdminPass = await hashPassword(String(params.password));
     await setDoc(doc(db, 'saas_clients', safeId), {
       id: safeId,
       companyName: String(params.nomeEmpresa).substring(0, 256),
@@ -193,7 +196,7 @@ export async function syncRegisteredAccountToFirestore(params: {
       monthlyFee: feeBase,
       status: 'Ativo',
       adminName: String(params.nomeEmpresa).substring(0, 256),
-      adminPassword: String(params.password).substring(0, 256),
+      adminPassword: hashedAdminPass.substring(0, 256),
       createdAt: now,
       updatedAt: now
     }, { merge: true });
@@ -301,7 +304,19 @@ export async function authenticateClientInFirebase(
     for (const d of snap.docs) {
       const data: any = d.data();
       const storedPass = String(data.adminPassword || '');
-      if (firebaseAuthOk || storedPass === passTrim || storedPass === passRaw) {
+      const passMatches =
+        firebaseAuthOk ||
+        (await verifyPassword(passTrim, storedPass)) ||
+        (await verifyPassword(passRaw, storedPass));
+      if (passMatches) {
+        // Migração automática para hash seguro caso o documento antigo ainda estivesse em texto limpo
+        if (storedPass && !isHashedPassword(storedPass)) {
+          hashPassword(passTrim)
+            .then((upgraded) =>
+              setDoc(doc(db, 'saas_clients', d.id), { adminPassword: upgraded, updatedAt: new Date().toISOString() }, { merge: true })
+            )
+            .catch(() => {});
+        }
         return {
           ok: true,
           client: {

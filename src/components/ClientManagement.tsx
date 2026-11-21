@@ -27,6 +27,7 @@ import {
 import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
+import { hashPassword } from '../lib/security';
 
 interface ClientCompany {
   id: string;
@@ -377,9 +378,10 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       if (!res.ok) throw new Error('Erro ao sincronizar com o Firebase Auth.');
 
       try {
+        const hashedPass = await hashPassword(newFbPassword);
         await setDoc(doc(db, 'saas_clients', targetCompanyId), {
           email: newFbEmail,
-          adminPassword: newFbPassword,
+          adminPassword: hashedPass,
           role: newFbRole,
           updatedAt: new Date().toISOString()
         }, { merge: true });
@@ -416,9 +418,10 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       try {
         const comp = clients.find(c => c.email === email);
         if (comp) {
+          const hashedPass = await hashPassword(editingUserPassword);
           await setDoc(doc(db, 'saas_clients', comp.id), {
             email,
-            adminPassword: editingUserPassword,
+            adminPassword: hashedPass,
             updatedAt: new Date().toISOString()
           }, { merge: true });
         }
@@ -547,6 +550,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
       const createdId = resData.cliente?.id || `cli_${Date.now()}`;
 
       try {
+        const hashedNewPass = newPassword ? await hashPassword(newPassword) : '';
         await setDoc(doc(db, 'saas_clients', createdId), {
           id: createdId,
           companyName: nome,
@@ -559,7 +563,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
           monthlyFee: Number(feeBase),
           status: subStatus === 'ativo' ? 'Ativo' : subStatus === 'suspenso' ? 'Suspenso' : 'Pendente',
           adminName: nome,
-          adminPassword: newPassword,
+          adminPassword: hashedNewPass,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (fbErr) {
@@ -620,7 +624,7 @@ export default function ClientManagement({ onCompanySwitched }: ClientManagement
           nextBillingDate: editNextBillingDate,
           updatedAt: new Date().toISOString()
         };
-        if (editPassword) fbUpdate.adminPassword = editPassword;
+        if (editPassword) fbUpdate.adminPassword = await hashPassword(editPassword);
         await setDoc(doc(db, 'saas_clients', selectedInvoiceClient.id), fbUpdate, { merge: true });
       } catch (fbErr) {
         console.warn('Aviso ao atualizar assinatura no Firebase:', fbErr);

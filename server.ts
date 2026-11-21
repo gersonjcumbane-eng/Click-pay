@@ -78,6 +78,12 @@ import {
 } from './src/db_tax';
 import { criarReciboSalarioPDF, criarAvisoPrevioPDF, criarExtratoFintechPDF, criarRelatorioAuditoriaPDF, criarReciboValePDF, criarRelatorioValesPDF, criarMapaSalariosPDF, criarRelatorioHistoricoPDF, criarGuiaRecolhimentoInssPDF, criarGuiaIrpsPDF, criarRelatorioAgrupadoERPPDF } from './src/pdfService';
 import { gerarCartaApoioDocx } from './src/docxService';
+import {
+  verifyPassword,
+  scanFileForMalware,
+  inspectPayloadForThreats,
+  sanitizeObjectDeep
+} from './src/lib/security';
 
 export async function createApp(options?: { skipStatic?: boolean }) {
   const app = express();
@@ -137,12 +143,31 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   }
 
-  // 1. Cabeçalhos de Segurança HTTP Padrão
+  // 1. Cabeçalhos de Segurança HTTP Padrão & Proteção Cibernética (CSP / HSTS / Permissions-Policy)
+  app.set('trust proxy', 1);
   app.use((req: Request, res: Response, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.googleapis.com",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://firestore.googleapis.com wss://*.firebaseio.com",
+        "object-src 'none'",
+        "base-uri 'self'"
+      ].join('; ')
+    );
     res.removeHeader('X-Powered-By');
     next();
   });
@@ -151,12 +176,96 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
+  // 2. Limitador de Taxa Anti-Brute-Force / Anti-DDoS e Firewall WAF contra XSS/SQLi/NoSQLi
+  const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+  function consumeRateLimit(key: string, maxRequests: number, windowMs: number): { allowed: boolean; retryAfterSec: number } {
+    const now = Date.now();
+    if (rateLimitBuckets.size > 5000) {
+      for (const [k, v] of rateLimitBuckets.entries()) {
+        if (v.resetAt <= now) rateLimitBuckets.delete(k);
+      }
+    }
+    const current = rateLimitBuckets.get(key);
+    if (!current || current.resetAt <= now) {
+      rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return { allowed: true, retryAfterSec: 0 };
+    }
+    if (current.count >= maxRequests) {
+      return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((current.resetAt - now) / 1000)) };
+    }
+    current.count += 1;
+    return { allowed: true, retryAfterSec: 0 };
+  }
+
+  app.use('/api', (req: Request, res: Response, next) => {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const clientIp = forwarded || req.ip || 'unknown';
+    const pathLower = req.path.toLowerCase();
+
+    // Limites estritos em autenticação e proteção contra força bruta
+    if (pathLower.startsWith('/auth/')) {
+      const authLimit = consumeRateLimit(`auth:${clientIp}:${pathLower}`, 30, 5 * 60 * 1000);
+      if (!authLimit.allowed) {
+        res.setHeader('Retry-After', String(authLimit.retryAfterSec));
+        return res.status(429).json({
+          erro: 'Muitas tentativas em curto intervalo. Aguarde alguns minutos por segurança.',
+          retryAfterSec: authLimit.retryAfterSec
+        });
+      }
+    } else if (pathLower === '/employees/upload-parse' || pathLower.startsWith('/brain/')) {
+      const uploadLimit = consumeRateLimit(`upload:${clientIp}`, 40, 5 * 60 * 1000);
+      if (!uploadLimit.allowed) {
+        res.setHeader('Retry-After', String(uploadLimit.retryAfterSec));
+        return res.status(429).json({
+          error: 'Limite temporário de processamento atingido. Tente novamente em breve.'
+        });
+      }
+    } else {
+      const apiLimit = consumeRateLimit(`api:${clientIp}`, 360, 60 * 1000);
+      if (!apiLimit.allowed) {
+        res.setHeader('Retry-After', String(apiLimit.retryAfterSec));
+        return res.status(429).json({
+          erro: 'Taxa de pedidos excedida. A proteção anti-DDoS bloqueou temporariamente este IP.'
+        });
+      }
+    }
+
+    // Sanitização contra Prototype Pollution & Null Bytes
+    if (req.body && typeof req.body === 'object') {
+      req.body = sanitizeObjectDeep(req.body);
+    }
+
+    // Inspeção WAF de ameaças cibernéticas (XSS, SQLi, NoSQLi, JNDI)
+    const queryCheck = inspectPayloadForThreats(req.query, 'query');
+    if (!queryCheck.safe) {
+      return res.status(403).json({
+        erro: queryCheck.reason || 'Pedido bloqueado pela firewall de segurança ClickPay.',
+        code: queryCheck.threatType
+      });
+    }
+
+    const bodyCheck = inspectPayloadForThreats(req.body, 'body');
+    if (!bodyCheck.safe) {
+      return res.status(403).json({
+        erro: bodyCheck.reason || 'Conteúdo bloqueado pela firewall de segurança ClickPay.',
+        code: bodyCheck.threatType
+      });
+    }
+
+    next();
+  });
+
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({
       ok: true,
       service: 'clickpay-erp',
       env: process.env.NODE_ENV || 'development',
       port: PORT,
+      security: {
+        waf: 'active',
+        antivirus: 'active',
+        rateLimiter: 'active'
+      },
       timestamp: new Date().toISOString()
     });
   });
@@ -308,6 +417,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     email: string;
     code: string;
     expiresAt: number;
+    failedAttempts?: number;
     authPayload: any;
   }> = [];
 
@@ -1044,7 +1154,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             const docNuit = f.nuit?.stringValue || '400000000';
             const docFee = Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || 3500);
 
-            if (docPassword === passwordClean || docPassword === passwordRaw || isFirebaseAuthed) {
+            const passwordMatches =
+              isFirebaseAuthed ||
+              (await verifyPassword(passwordClean, docPassword)) ||
+              (await verifyPassword(passwordRaw, docPassword));
+            if (passwordMatches) {
               const planMapped =
                 docPlan === 'Starter' ? 'Bronze' :
                 docPlan === 'Growth' ? 'Silver' :
@@ -1170,11 +1284,18 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     const isValid = attempt.code === cleanCode || cleanCode === '123456' || cleanCode === '000000';
 
     if (!isValid) {
+      attempt.failedAttempts = (attempt.failedAttempts || 0) + 1;
       notifyFounder(
         'Falha na Validação de OTP',
-        `Código OTP incorreto digitado para a conta ${attempt.email}. Código recebido: ${cleanCode}`,
+        `Código OTP incorreto digitado para a conta ${attempt.email} (tentativa ${attempt.failedAttempts}/5).`,
         { userEmail: attempt.email, status: 'bloqueado' }
       );
+      if (attempt.failedAttempts >= 5) {
+        pendingOtpRequests.splice(attemptIndex, 1);
+        return res.status(429).json({
+          erro: 'Demasiadas tentativas de OTP incorretas. A sessão temporária foi cancelada por segurança.'
+        });
+      }
       return res.status(401).json({ erro: 'Código OTP incorreto. Verifique o código enviado e tente novamente.' });
     }
 
@@ -1241,11 +1362,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // ENDPOINTS DE GESTÃO DE ACESSO, TOKENS DE API & IDENTIFICADORES FISCAIS
   // =========================================================================
 
-  // Visão Geral Completa de Acessos
+  // Visão Geral Completa de Acessos (sem expor senhas em texto limpo)
   app.get('/api/access/overview', (req: Request, res: Response) => {
     try {
+      const sanitizedUsers = systemUsersList.map(({ rawPassword: _rp, ...rest }) => rest);
       res.json({
-        users: systemUsersList,
+        users: sanitizedUsers,
         tokens: activeApiTokens,
         auditLogs: accessAuditLogs,
         securityConfig: otpSecurityConfig,
@@ -2074,6 +2196,24 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const { base64, mimeType, fileName } = req.body;
       if (!base64 || !mimeType) {
         return res.status(400).json({ error: 'Os dados do ficheiro (base64) e o tipo MIME são obrigatórios.' });
+      }
+
+      const avScan = await scanFileForMalware({
+        base64: String(base64),
+        mimeType: String(mimeType),
+        fileName: fileName ? String(fileName) : undefined,
+        maxBytes: 15 * 1024 * 1024
+      });
+      if (!avScan.safe) {
+        notifyFounder(
+          'Ameaça Bloqueada pelo Antivírus ClickPay',
+          `Upload rejeitado em /api/employees/upload-parse (${fileName || mimeType}): ${avScan.threatName} — ${avScan.reason}`,
+          { status: 'bloqueado', threatName: avScan.threatName, sha256Prefix: avScan.sha256Prefix }
+        );
+        return res.status(422).json({
+          error: `Ficheiro bloqueado pelo antivírus ClickPay: ${avScan.reason}`,
+          threatName: avScan.threatName
+        });
       }
 
       const ai = getGeminiClient();
@@ -3489,9 +3629,29 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // Assistente 1: Leitura & Auditoria Fiscal de Facturas (AP)
   app.post('/api/brain/invoice-ocr', async (req: Request, res: Response) => {
     try {
-      const { base64, mimeType, autoSave } = req.body;
+      const { base64, mimeType, fileName, autoSave } = req.body;
       if (!base64 || !mimeType) {
         return res.status(400).json({ error: 'Ficheiro (base64) e tipo MIME são obrigatórios.' });
+      }
+
+      if (base64 !== 'demo_base64_invoice') {
+        const avScan = await scanFileForMalware({
+          base64: String(base64),
+          mimeType: String(mimeType),
+          fileName: fileName ? String(fileName) : undefined,
+          maxBytes: 12 * 1024 * 1024
+        });
+        if (!avScan.safe) {
+          notifyFounder(
+            'Ameaça Bloqueada pelo Antivírus ClickPay',
+            `Upload rejeitado em /api/brain/invoice-ocr: ${avScan.threatName} — ${avScan.reason}`,
+            { status: 'bloqueado', threatName: avScan.threatName }
+          );
+          return res.status(422).json({
+            error: `Documento bloqueado pelo antivírus ClickPay: ${avScan.reason}`,
+            threatName: avScan.threatName
+          });
+        }
       }
 
       let parsedData: any = null;
@@ -5041,13 +5201,34 @@ Host: https://clickpay.co.mz
   // =========================================================================
   // 4. ATUALIZAR PERFIL FISCAL DA EMPRESA
   // =========================================================================
-  app.post('/api/empresa/atualizar-perfil', (req: Request, res: Response) => {
+  app.post('/api/empresa/atualizar-perfil', async (req: Request, res: Response) => {
     try {
       const { nome, pais, provincia, distrito, regime_iva, sector_negocio, tamanho_empresa, regime_fiscal_pme, nuel, nuit, email, telefone, logo } = req.body;
 
       // Validação mínima obrigatória
       if (!nome) {
         return res.status(400).json({ erro: 'O nome da empresa é obrigatório.' });
+      }
+
+      // Antivírus para upload de logótipo em base64 data URI
+      if (typeof logo === 'string' && logo.startsWith('data:')) {
+        const match = logo.match(/^data:([^;]+);base64,(.+)$/s);
+        if (!match) {
+          return res.status(400).json({ erro: 'Formato de logótipo inválido.' });
+        }
+        const avLogo = await scanFileForMalware({
+          base64: match[2],
+          mimeType: match[1],
+          maxBytes: 2 * 1024 * 1024
+        });
+        if (!avLogo.safe) {
+          notifyFounder(
+            'Logótipo Suspeito Bloqueado pelo Antivírus',
+            `Upload de logótipo rejeitado (${match[1]}): ${avLogo.threatName}`,
+            { status: 'bloqueado' }
+          );
+          return res.status(422).json({ erro: `Imagem bloqueada por segurança: ${avLogo.reason}` });
+        }
       }
 
       // Objeto estruturado com as regras fiscais moçambicanas para persistência

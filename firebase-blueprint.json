@@ -14,9 +14,20 @@
       },
       "required": ["uid", "email", "role", "createdAt", "status"]
     },
+    "Admin": {
+      "title": "Admin",
+      "description": "Verified platform administrator record keyed by Firebase UID",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
     "ClientCompany": {
       "title": "ClientCompany",
-      "description": "Client company record and credentials synchronized with Firebase Firestore",
+      "description": "Client company record and hashed credentials synchronized with Firebase Firestore",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -24,13 +35,37 @@
         "nuit": { "type": "string", "maxLength": 32 },
         "email": { "type": "string", "maxLength": 256 },
         "telefone": { "type": "string", "maxLength": 64 },
-        "passwordHash": { "type": "string", "description": "Encrypted/stored client password for ERP sync", "maxLength": 256 },
+        "passwordHash": { "type": "string", "description": "Salted PBKDF2-SHA256 hash of client password", "maxLength": 256 },
         "subscription_plan": { "type": "string", "enum": ["Starter", "Growth", "Business", "Bronze", "Silver", "Gold", "Platinum"] },
         "subscription_status": { "type": "string", "enum": ["ativo", "suspenso", "pendente"] },
         "fee_base": { "type": "number" },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "nome", "nuit", "email", "subscription_plan", "subscription_status", "fee_base", "updatedAt"]
+    },
+    "SaasClient": {
+      "title": "SaasClient",
+      "description": "Multi-tenant SaaS client directory synchronized in real time with salted password hashes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "companyName": { "type": "string", "maxLength": 256 },
+        "tradeName": { "type": "string", "maxLength": 256 },
+        "nuit": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 256 },
+        "phone": { "type": "string", "maxLength": 64 },
+        "address": { "type": "string", "maxLength": 512 },
+        "plan": { "type": "string", "maxLength": 64 },
+        "monthlyFee": { "type": "number" },
+        "status": { "type": "string", "enum": ["Ativo", "Suspenso", "Pendente", "ativo", "suspenso", "pendente"] },
+        "adminName": { "type": "string", "maxLength": 256 },
+        "adminPassword": { "type": "string", "description": "Salted PBKDF2-SHA256 hash", "maxLength": 256 },
+        "role": { "type": "string", "maxLength": 64 },
+        "nextBillingDate": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["email", "updatedAt"]
     },
     "CloudBackup": {
       "title": "CloudBackup",
@@ -49,6 +84,24 @@
       },
       "required": ["id", "empresaId", "empresaNome", "timestamp", "tipo", "quantidadeColaboradores", "quantidadeLancamentos", "tamanhoKb", "snapshotJson"]
     },
+    "BackupRecord": {
+      "title": "BackupRecord",
+      "description": "Backup metadata record synchronized by CorporateSettings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "empresaId": { "type": "string", "maxLength": 128 },
+        "empresaNome": { "type": "string", "maxLength": 256 },
+        "timestamp": { "type": "string", "maxLength": 64 },
+        "tipo": { "type": "string", "maxLength": 128 },
+        "quantidadeColaboradores": { "type": "number" },
+        "quantidadeLancamentos": { "type": "number" },
+        "tamanhoKb": { "type": "number" },
+        "syncedWithFirebase": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "empresaId", "empresaNome", "timestamp", "tipo", "quantidadeColaboradores", "quantidadeLancamentos", "tamanhoKb", "syncedWithFirebase", "createdAt"]
+    },
     "CredentialRequest": {
       "title": "CredentialRequest",
       "description": "Access credential request submitted by prospective or existing clients",
@@ -66,6 +119,50 @@
         "dataSolicitacao": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "nomeEmpresa", "nomeResponsavel", "email", "telefone", "planoEscolhido", "precoMensal", "status", "dataSolicitacao"]
+    },
+    "LandingCredentialRequest": {
+      "title": "LandingCredentialRequest",
+      "description": "Onboarding credential request notification record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "empresa": { "type": "string", "maxLength": 256 },
+        "responsavel": { "type": "string", "maxLength": 256 },
+        "nuit": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 256 },
+        "telefone": { "type": "string", "maxLength": 64 },
+        "plano": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["PENDENTE", "APROVADO", "REGISTADO_ONLINE", "CREDENCIAIS_ENVIADAS"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "empresa", "email", "plano", "status", "createdAt"]
+    },
+    "CompanyProfile": {
+      "title": "CompanyProfile",
+      "description": "Corporate fiscal and registration profile stored in Firestore",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "nome": { "type": "string", "maxLength": 256 },
+        "nuit": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 256 },
+        "plano": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "maxLength": 32 },
+        "origem": { "type": "string", "maxLength": 128 },
+        "endereco": { "type": "string", "maxLength": 512 },
+        "pais": { "type": "string", "maxLength": 128 },
+        "provincia": { "type": "string", "maxLength": 128 },
+        "distrito": { "type": "string", "maxLength": 128 },
+        "regime_iva": { "type": "string", "maxLength": 128 },
+        "sector_negocio": { "type": "string", "maxLength": 256 },
+        "tamanho_empresa": { "type": "string", "maxLength": 128 },
+        "regime_fiscal_pme": { "type": "string", "maxLength": 128 },
+        "nuel": { "type": "string", "maxLength": 64 },
+        "telefone": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["nome", "nuit", "updatedAt"]
     }
   },
   "firestore": {
@@ -73,17 +170,37 @@
       "schema": "User",
       "description": "User login accounts and profiles synchronized with Firebase Authentication"
     },
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Platform administrator UID registry"
+    },
     "/erp_clients/{clientId}": {
       "schema": "ClientCompany",
-      "description": "Client company accounts, passwords, and subscription states stored in Firebase"
+      "description": "Client company accounts, hashed passwords, and subscription states stored in Firebase"
+    },
+    "/saas_clients/{clientId}": {
+      "schema": "SaasClient",
+      "description": "Multi-tenant client directory synchronized with hashed adminPassword"
     },
     "/erp_backups/{backupId}": {
       "schema": "CloudBackup",
       "description": "Cloud file and database backups stored in Firebase Firestore"
     },
+    "/backups/{backupId}": {
+      "schema": "BackupRecord",
+      "description": "Cloud backup summaries linked to corporate settings"
+    },
     "/erp_credential_requests/{requestId}": {
       "schema": "CredentialRequest",
-      "description": "Requests for ERP access credentials submitted by clients with real-time admin notification"
+      "description": "Requests for ERP access credentials submitted by clients"
+    },
+    "/credential_requests/{requestId}": {
+      "schema": "LandingCredentialRequest",
+      "description": "Real-time onboarding credential notifications"
+    },
+    "/companies/{companyId}": {
+      "schema": "CompanyProfile",
+      "description": "Corporate fiscal and registration profile documents"
     }
   }
 }

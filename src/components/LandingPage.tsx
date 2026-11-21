@@ -374,9 +374,9 @@ export default function LandingPage({
         </div>
       </section>
 
-      {/* Contactos — Apenas Telemóvel e E-mails */}
+      {/* Contactos — Telemóveis, E-mail e Endereço Físico */}
       <section id="contacto" className="bg-[#FAFAFB] border-t border-slate-200 py-14 md:py-16">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-6">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-8">
           <div className="space-y-1">
             <p className="text-[12px] font-medium text-blue-900">Contactos</p>
             <h2 className="text-xl sm:text-2xl font-semibold text-slate-950 tracking-tight">
@@ -384,10 +384,13 @@ export default function LandingPage({
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-3xl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Telemóvel */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-              <div className="flex items-center gap-2 text-slate-900">
-                <Phone size={15} className="text-blue-900 shrink-0" />
+              <div className="flex items-center gap-2.5 text-slate-950">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <Phone size={16} />
+                </div>
                 <span className="text-xs font-semibold">Telemóvel</span>
               </div>
               <div className="space-y-1.5 text-sm font-mono tabular-nums text-slate-700">
@@ -404,28 +407,35 @@ export default function LandingPage({
               </div>
             </div>
 
+            {/* E-mail */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-              <div className="flex items-center gap-2 text-slate-900">
-                <Mail size={15} className="text-blue-900 shrink-0" />
+              <div className="flex items-center gap-2.5 text-slate-950">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <Mail size={16} />
+                </div>
                 <span className="text-xs font-semibold">E-mail</span>
               </div>
-              <div className="space-y-1.5 text-sm text-slate-700">
-                <div>
-                  <a
-                    href="mailto:click@payrolltech.co.mz"
-                    className="text-blue-900 hover:underline font-medium"
-                  >
-                    click@payrolltech.co.mz
-                  </a>
+              <div className="text-sm text-slate-700">
+                <a
+                  href="mailto:click@payrolltech.co.mz"
+                  className="text-blue-900 hover:underline font-medium break-all"
+                >
+                  click@payrolltech.co.mz
+                </a>
+              </div>
+            </div>
+
+            {/* Endereço Físico */}
+            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+              <div className="flex items-center gap-2.5 text-slate-950">
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                  <MapPin size={16} />
                 </div>
-                <div>
-                  <a
-                    href="mailto:gersonjcumbane@gmail.com"
-                    className="text-blue-900 hover:underline font-medium"
-                  >
-                    gersonjcumbane@gmail.com
-                  </a>
-                </div>
+                <span className="text-xs font-semibold">Endereço Físico</span>
+              </div>
+              <div className="space-y-1 text-sm text-slate-700 leading-relaxed">
+                <p className="font-medium text-slate-900">Bairro São Dâmaso, Machava Q4</p>
+                <p className="text-xs text-slate-500">Matola · Moçambique</p>
               </div>
             </div>
           </div>

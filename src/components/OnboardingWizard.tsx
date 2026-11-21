@@ -26,6 +26,7 @@ import {
   FileText
 } from 'lucide-react';
 import { syncRegisteredAccountToFirestore } from '../lib/firebase';
+import { scanFileForMalware } from '../lib/security';
 
 interface OnboardingWizardProps {
   onCancel: () => void;
@@ -820,8 +821,25 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
+                                if (file.size > 2 * 1024 * 1024) {
+                                  showToast('O logótipo excede o limite máximo de 2MB.');
+                                  return;
+                                }
                                 const reader = new FileReader();
-                                reader.onloadend = () => setLogoUrl(reader.result as string);
+                                reader.onloadend = async () => {
+                                  const result = reader.result as string;
+                                  const avScan = await scanFileForMalware({
+                                    base64: result.split(',')[1] || '',
+                                    mimeType: file.type || 'image/png',
+                                    fileName: file.name,
+                                    maxBytes: 2 * 1024 * 1024
+                                  });
+                                  if (!avScan.safe) {
+                                    showToast(`Ficheiro bloqueado por segurança: ${avScan.reason}`);
+                                    return;
+                                  }
+                                  setLogoUrl(result);
+                                };
                                 reader.readAsDataURL(file);
                               }
                             }}

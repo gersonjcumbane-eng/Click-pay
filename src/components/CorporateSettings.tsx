@@ -35,6 +35,7 @@ import { matrizFiscaisMoçambique } from '../db_tax';
 import { useToast } from '../context/ToastContext';
 import EnvironmentMasking from './EnvironmentMasking';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
+import { scanFileForMalware } from '../lib/security';
 
 interface CorporateSettingsProps {
   company: CompanyData;
@@ -343,8 +344,20 @@ export default function CorporateSettings({
         return;
       }
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogo(reader.result as string);
+      reader.onloadend = async () => {
+        const result = reader.result as string;
+        const base64Part = result.split(',')[1] || '';
+        const avScan = await scanFileForMalware({
+          base64: base64Part,
+          mimeType: file.type || 'image/png',
+          fileName: file.name,
+          maxBytes: 2 * 1024 * 1024
+        });
+        if (!avScan.safe) {
+          showError(`Imagem bloqueada pelo Antivírus ClickPay: ${avScan.reason}`);
+          return;
+        }
+        setLogo(result);
       };
       reader.readAsDataURL(file);
     }

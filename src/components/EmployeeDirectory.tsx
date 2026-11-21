@@ -36,6 +36,7 @@ import {
 import { useToast, useConfirm } from '../context/ToastContext';
 import { Employee, CompanyData } from '../types';
 import { calcularFolhaSalario } from '../db_tax';
+import { scanFileForMalware } from '../lib/security';
 
 export function getCarrierInfo(phone: string) {
   const clean = phone.replace(/\s+/g, '').trim();
@@ -264,12 +265,22 @@ export default function EmployeeDirectory({
       });
 
       setUploadProgress(25);
-      setUploadStep('A codificar ficheiro em formato seguro...');
+      setUploadStep('A verificar integridade do ficheiro com Antivírus ClickPay...');
 
       // Send to backend
       const mimeType = file.type && file.type !== 'application/octet-stream' 
         ? file.type 
         : (isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+      const avScan = await scanFileForMalware({
+        base64,
+        mimeType,
+        fileName: file.name,
+        maxBytes: 15 * 1024 * 1024
+      });
+      if (!avScan.safe) {
+        throw new Error(`Ficheiro bloqueado pelo Antivírus ClickPay (${avScan.threatName}): ${avScan.reason}`);
+      }
       
       setUploadProgress(40);
       setUploadStep('A analisar documento com Inteligência Artificial (Gemini)...');
