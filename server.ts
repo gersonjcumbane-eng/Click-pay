@@ -17,6 +17,7 @@ import {
   queryMobileTransactionStatus,
   processOperatorWebhook
 } from './src/services/mobileMoneyService';
+import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from './src/lib/pricing';
 import { 
   employees, 
   configuracaoFiscal, 
@@ -1251,8 +1252,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           email: "construcao@payrolltech.co.mz",
           telefone: "+258 84 111 2233",
           logo: "/clickpay-logo.png",
-          fee_base: 3500.00,
-          fee_por_slip: 150.00,
+          fee_base: 1500.00,
+          fee_por_slip: 120.00,
           password: "bronze2026",
           subscription_status: "ativo",
           subscription_plan: "Bronze",
@@ -1271,8 +1272,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           email: "educacao@payrolltech.co.mz",
           telefone: "+258 82 333 4455",
           logo: "/clickpay-logo.png",
-          fee_base: 6500.00,
-          fee_por_slip: 120.00,
+          fee_base: 3500.00,
+          fee_por_slip: 100.00,
           password: "silver2026",
           subscription_status: "ativo",
           subscription_plan: "Silver",
@@ -1291,8 +1292,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           email: "servicos@payrolltech.co.mz",
           telefone: "+258 85 555 6677",
           logo: "/clickpay-logo.png",
-          fee_base: 9500.00,
-          fee_por_slip: 250.00,
+          fee_base: 6900.00,
+          fee_por_slip: 95.00,
           password: "gold2026",
           subscription_status: "ativo",
           subscription_plan: "Gold",
@@ -1377,7 +1378,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             const docPlan = f.plan?.stringValue || 'Starter';
             const docStatus = String(f.status?.stringValue || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo';
             const docNuit = f.nuit?.stringValue || '400000000';
-            const docFee = Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || 3500);
+            const docFee = Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || getPlanFeeMzn(docPlan));
 
             const passwordMatches =
               isFirebaseAuthed ||
@@ -1409,7 +1410,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
                   subscription_plan: planMapped as any,
                   next_billing_date: getDefaultNextBillingDate(),
                   fee_base: docFee,
-                  fee_por_slip: 100
+                  fee_por_slip: getPlanExtraSlipFeeMzn(docPlan)
                 });
               }
               selecionarClienteEmpresa(restored.id);
@@ -1791,8 +1792,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               subscription_status: (String(f.status?.stringValue || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo') as any,
               subscription_plan: (f.plan?.stringValue || 'Bronze') as any,
               next_billing_date: getDefaultNextBillingDate(),
-              fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || 3500),
-              fee_por_slip: 100
+              fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || getPlanFeeMzn(f.plan?.stringValue)),
+              fee_por_slip: getPlanExtraSlipFeeMzn(f.plan?.stringValue)
             });
           }
         }
@@ -2404,6 +2405,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       regimeIva,
       logo,
       plano,
+      billingCycle,
+      feeBase: bodyFeeBase,
       metodoPagamento,
       armazemNome,
       armazemCodigo
@@ -2420,10 +2423,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     try {
       const selectedPlan = plano || 'Starter';
-      const feeBase =
-        selectedPlan === 'Starter' || selectedPlan === 'Bronze' ? 3500 :
-        selectedPlan === 'Growth' || selectedPlan === 'Silver' ? 6500 :
-        9500;
+      const cycle = billingCycle === 'anual' ? 'anual' : 'mensal';
+      const feeBase = Number(bodyFeeBase) || getPlanFeeMzn(selectedPlan, cycle);
+      const feePorSlip = getPlanExtraSlipFeeMzn(selectedPlan);
+      const billingDays = cycle === 'anual' ? 365 : 30;
+      const nextBillingDate = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const nomeCompletoUsuario = `${nome || ''} ${apelido || ''}`.trim() || cleanEmpresa;
 
       // Se já foi criado na Etapa 1 e está a finalizar a configuração na Etapa 3, atualizar a empresa existente
@@ -2441,6 +2445,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           if (contacto) existingCompany.telefone = contacto;
           existingCompany.subscription_plan = selectedPlan;
           existingCompany.fee_base = feeBase;
+          existingCompany.fee_por_slip = feePorSlip;
+          existingCompany.next_billing_date = nextBillingDate;
 
           selecionarClienteEmpresa(existingCompany.id);
 
@@ -2462,14 +2468,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               nome_usuario: nomeCompletoUsuario,
               subscription_status: existingCompany.subscription_status || 'ativo',
               subscription_plan: existingCompany.subscription_plan,
-              next_billing_date: existingCompany.next_billing_date
+              next_billing_date: existingCompany.next_billing_date,
+              fee_base: existingCompany.fee_base
             }
           });
         }
       }
 
       const companyId = `cli_reg_${Date.now()}`;
-      const nextBillingDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       // 1. Criar empresa na base de dados local do ERP
       const novaEmpresa = adicionarClienteEmpresa({
@@ -2489,7 +2495,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         subscription_plan: selectedPlan,
         next_billing_date: nextBillingDate,
         fee_base: feeBase,
-        fee_por_slip: 100
+        fee_por_slip: feePorSlip
       });
 
       // 2. Registar utilizador local, na gestão de acessos e sincronizar no Firebase Auth
@@ -2642,8 +2648,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         email: email || '',
         telefone: telefone || '',
         logo: logo || '/clickpay-logo.png',
-        fee_base: Number(fee_base) || 3000.00,
-        fee_por_slip: Number(fee_por_slip) || 150.00,
+        fee_base: Number(fee_base) || getPlanFeeMzn(subscription_plan),
+        fee_por_slip: Number(fee_por_slip) || getPlanExtraSlipFeeMzn(subscription_plan),
         password: password || crypto.randomBytes(8).toString('hex'),
         subscription_status: subscription_status || 'ativo',
         subscription_plan: subscription_plan || 'Bronze',
@@ -6462,8 +6468,8 @@ Host: https://clickpay.co.mz
     
     const statusFormatted = (cliente.subscription_status || 'ativo').toUpperCase();
     const planFormatted = cliente.subscription_plan || 'Bronze';
-    const feeBaseMZ = (cliente.fee_base || 1500).toLocaleString('pt-MZ', { minimumFractionDigits: 2 });
-    const feeSlipMZ = (cliente.fee_por_slip || 150).toLocaleString('pt-MZ', { minimumFractionDigits: 2 });
+    const feeBaseMZ = (cliente.fee_base || getPlanFeeMzn(planFormatted)).toLocaleString('pt-MZ', { minimumFractionDigits: 2 });
+    const feeSlipMZ = (cliente.fee_por_slip || getPlanExtraSlipFeeMzn(planFormatted)).toLocaleString('pt-MZ', { minimumFractionDigits: 2 });
     const nextBilling = cliente.next_billing_date || 'N/A';
 
     const conteudo_html = `<div style="font-family: sans-serif; color: #1e293b; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin: 0 auto; background: #ffffff;">

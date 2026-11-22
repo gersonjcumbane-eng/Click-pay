@@ -1263,9 +1263,9 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                         onChange={(e) => setGenPlan(e.target.value)}
                         className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
                       >
-                        <option value="Bronze">Starter (Bronze: 3.500 MT/mês)</option>
-                        <option value="Silver">Profissional (Silver: 6.500 MT/mês)</option>
-                        <option value="Gold">Empresarial (Gold: 9.500 MT/mês)</option>
+                        <option value="Bronze">Starter (Bronze: 1.500 MT/mês)</option>
+                        <option value="Silver">Profissional (Silver: 3.500 MT/mês)</option>
+                        <option value="Gold">Empresarial (Gold: 6.900 MT/mês)</option>
                         <option value="Platinum">Platinum / Mestre (Custom)</option>
                       </select>
                     </div>

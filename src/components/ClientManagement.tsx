@@ -29,6 +29,7 @@ import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
 import { hashPassword } from '../lib/security';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
+import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from '../lib/pricing';
 
 interface ClientCompany {
   id: string;
@@ -153,8 +154,8 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
   const [logo, setLogo] = useState('');
-  const [feeBase, setFeeBase] = useState('3000');
-  const [feePorSlip, setFeePorSlip] = useState('150');
+  const [feeBase, setFeeBase] = useState('1500');
+  const [feePorSlip, setFeePorSlip] = useState('120');
   const [newPassword, setNewPassword] = useState('');
   const [subStatus, setSubStatus] = useState<'ativo' | 'suspenso' | 'pendente'>('ativo');
   const [subPlan, setSubPlan] = useState<'Bronze' | 'Silver' | 'Gold' | 'Platinum'>('Bronze');
@@ -167,8 +168,8 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
   // Edit fields state for managing the subscription of selected client
   const [editStatus, setEditStatus] = useState<'ativo' | 'suspenso' | 'pendente'>('ativo');
   const [editPlan, setEditPlan] = useState<'Bronze' | 'Silver' | 'Gold' | 'Platinum'>('Bronze');
-  const [editFeeBase, setEditFeeBase] = useState('3000');
-  const [editFeePorSlip, setEditFeePorSlip] = useState('150');
+  const [editFeeBase, setEditFeeBase] = useState('1500');
+  const [editFeePorSlip, setEditFeePorSlip] = useState('120');
   const [editNextBillingDate, setEditNextBillingDate] = useState(() => getDefaultNextBillingDate());
   const [editPassword, setEditPassword] = useState('');
   const [updatingSubscription, setUpdatingSubscription] = useState(false);
@@ -320,6 +321,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             rawPlan.includes('gold') || rawPlan.includes('business') || rawPlan.includes('empresarial') ? 'Gold' :
             rawPlan.includes('silver') || rawPlan.includes('growth') || rawPlan.includes('profissional') ? 'Silver' :
             'Bronze';
+          const fallbackFee = getPlanFeeMzn(normalizedPlan);
           fbClients.push({
             id: d.id,
             nome: String(data.companyName || data.tradeName || data.nome || 'Empresa ClickPay'),
@@ -334,9 +336,9 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             logo: '/clickpay-logo.png',
             subscription_status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo',
             subscription_plan: normalizedPlan,
-            fee_base: Number(data.monthlyFee) || 3500,
-            fee_por_slip: 0,
-            billingFeeMzn: Number(data.monthlyFee) || 3500,
+            fee_base: Number(data.monthlyFee) || fallbackFee,
+            fee_por_slip: getPlanExtraSlipFeeMzn(normalizedPlan),
+            billingFeeMzn: Number(data.monthlyFee) || fallbackFee,
             next_billing_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             countEmployees: 0,
             payrollGrossTotal: 0,
@@ -745,8 +747,9 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                     setNuit(req.nuit && req.nuit !== 'Não informado' ? req.nuit : '');
                     setEmail(req.email || '');
                     setTelefone(req.telefone || '');
-                    setSubPlan(req.plano === 'Business' ? 'Gold' : req.plano === 'Growth' ? 'Silver' : 'Bronze');
-                    setFeeBase(req.plano === 'Business' ? '6500' : req.plano === 'Growth' ? '5000' : '3000');
+                    setSubPlan(req.plano === 'Business' || req.plano === 'Gold' ? 'Gold' : req.plano === 'Growth' || req.plano === 'Silver' ? 'Silver' : 'Bronze');
+                    setFeeBase(String(getPlanFeeMzn(req.plano)));
+                    setFeePorSlip(String(getPlanExtraSlipFeeMzn(req.plano)));
                   }}
                   className="w-full py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-[10px] font-extrabold uppercase tracking-wider cursor-pointer transition-colors"
                 >
@@ -929,13 +932,20 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
               <label className="text-[11px] font-bold text-slate-700">Plano de Assinatura *</label>
               <select
                 value={subPlan}
-                onChange={(e) => setSubPlan(e.target.value as any)}
+                onChange={(e) => {
+                  const next = e.target.value as 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+                  setSubPlan(next);
+                  if (next !== 'Platinum') {
+                    setFeeBase(String(getPlanFeeMzn(next)));
+                    setFeePorSlip(String(getPlanExtraSlipFeeMzn(next)));
+                  }
+                }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
               >
-                <option value="Bronze">Plano Bronze (SaaS)</option>
-                <option value="Silver">Plano Silver (SaaS)</option>
-                <option value="Gold">Plano Gold (SaaS)</option>
-                <option value="Platinum">Plano Platinum (SaaS)</option>
+                <option value="Bronze">Starter · Bronze (1.500 MT/mês)</option>
+                <option value="Silver">Profissional · Silver (3.500 MT/mês)</option>
+                <option value="Gold">Empresarial · Gold (6.900 MT/mês)</option>
+                <option value="Platinum">Platinum · Personalizado</option>
               </select>
             </div>
 
@@ -1214,13 +1224,20 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                     <label className="text-[10px] font-bold text-slate-600">Plano Contratado</label>
                     <select
                       value={editPlan}
-                      onChange={(e) => setEditPlan(e.target.value as any)}
+                      onChange={(e) => {
+                        const next = e.target.value as 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+                        setEditPlan(next);
+                        if (next !== 'Platinum') {
+                          setEditFeeBase(String(getPlanFeeMzn(next)));
+                          setEditFeePorSlip(String(getPlanExtraSlipFeeMzn(next)));
+                        }
+                      }}
                       className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     >
-                      <option value="Bronze">Plano Bronze</option>
-                      <option value="Silver">Plano Silver</option>
-                      <option value="Gold">Plano Gold</option>
-                      <option value="Platinum">Plano Platinum</option>
+                      <option value="Bronze">Starter · Bronze (1.500 MT)</option>
+                      <option value="Silver">Profissional · Silver (3.500 MT)</option>
+                      <option value="Gold">Empresarial · Gold (6.900 MT)</option>
+                      <option value="Platinum">Platinum · Custom</option>
                     </select>
                   </div>
 

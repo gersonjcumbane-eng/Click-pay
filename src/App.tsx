@@ -595,7 +595,7 @@ export default function App() {
               }</span></div>
               <div>Data de Renovação: <span className="font-bold text-slate-700">{company.next_billing_date || 'N/D'}</span></div>
               <div>NUIT da Empresa: <span className="font-bold text-slate-700">{company.nuit}</span></div>
-              <div>Mensalidade Estimada: <span className="font-bold text-slate-700">{(company.fee_base || 2000).toLocaleString()} MT</span></div>
+              <div>Mensalidade Estimada: <span className="font-bold text-slate-700">{(company.fee_base || 1500).toLocaleString()} MT</span></div>
             </div>
           </div>
 

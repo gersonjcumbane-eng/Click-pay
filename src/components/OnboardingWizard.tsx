@@ -27,6 +27,14 @@ import {
 } from 'lucide-react';
 import { syncRegisteredAccountToFirestore } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
+import {
+  BillingCycle,
+  CLICKPAY_PLANS,
+  formatMzn,
+  getPlanFeeMzn,
+  getPlanSpec,
+  normalizePlanToInternal
+} from '../lib/pricing';
 
 interface OnboardingWizardProps {
   onCancel: () => void;
@@ -72,6 +80,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
   // Step 2: Subscription & Payment State
   const [selectedPlan, setSelectedPlan] = useState<'Starter' | 'Growth' | 'Business' | 'Vitalicio'>('Starter');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('mensal');
   const [paymentSubStep, setPaymentSubStep] = useState<'PLANS' | 'PAYMENT'>('PLANS');
   const [metodoPagamento, setMetodoPagamento] = useState<'ONLINE' | 'VOUCHER'>('ONLINE');
   const [carteiraNumero, setCarteiraNumero] = useState('');
@@ -139,7 +148,8 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
           email: cleanEmail,
           nuit: cleanNuit,
           password: senha,
-          plano: 'Starter'
+          plano: 'Starter',
+          billingCycle: 'mensal'
         })
       }).catch(() => null);
 
@@ -163,7 +173,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         nuit: cleanNuit,
         password: senha,
         plano: 'Starter',
-        feeBase: 3500
+        feeBase: getPlanFeeMzn('Starter', 'mensal')
       });
 
       if (fbResult.syncedCollections.length === 0) {
@@ -232,9 +242,10 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     const cleanEmpresa = nomeEmpresa.trim();
     const cleanEmail = email.trim().toLowerCase();
     const cleanNuit = nuit.replace(/\s+/g, '').trim();
-    const targetPlan = selectedPlan === 'Vitalicio' ? 'Gold' : selectedPlan;
-    const feeBase = targetPlan === 'Starter' ? 3500 : targetPlan === 'Growth' ? 6500 : 9500;
-    const mappedPlan = targetPlan === 'Starter' ? 'Bronze' : targetPlan === 'Growth' ? 'Silver' : 'Gold';
+    const targetPlan = selectedPlan === 'Vitalicio' ? 'Business' : selectedPlan;
+    const feeBase = getPlanFeeMzn(targetPlan, billingCycle);
+    const mappedPlan = normalizePlanToInternal(targetPlan);
+    const billingDays = billingCycle === 'anual' ? 365 : 30;
 
     try {
       const payload = {
@@ -251,6 +262,8 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         regimeIva,
         logo: logoUrl,
         plano: targetPlan,
+        billingCycle,
+        feeBase,
         metodoPagamento,
         armazemNome,
         armazemCodigo
@@ -291,7 +304,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         localStorage.setItem('paytek_company_id', clientId);
         localStorage.setItem('paytek_sub_status', data.usuario?.subscription_status || 'ativo');
         localStorage.setItem('paytek_sub_plan', data.usuario?.subscription_plan || mappedPlan);
-        const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         localStorage.setItem('paytek_sub_expire', data.usuario?.next_billing_date || defaultExp);
         localStorage.setItem('paytek_company_name', data.usuario?.nome_empresa || cleanEmpresa);
         onSuccess(data.usuario);
@@ -313,7 +326,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         provincia
       });
 
-      const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const fallbackUser = {
         id: clientId,
         email: cleanEmail,
@@ -344,12 +357,8 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
   };
 
   // Price formatting helper
-  const getPlanPrice = (plan: 'Starter' | 'Growth' | 'Business') => {
-    switch (plan) {
-      case 'Starter': return '3 500,00 MT';
-      case 'Growth': return '6 500,00 MT';
-      case 'Business': return '9 500,00 MT';
-    }
+  const getPlanPrice = (plan: 'Starter' | 'Growth' | 'Business' | 'Vitalicio') => {
+    return formatMzn(getPlanFeeMzn(plan, billingCycle), { spaceGrouping: true });
   };
 
   return (
@@ -1048,95 +1057,99 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
               {paymentSubStep === 'PLANS' ? (
                 /* Step 2.1: Plan Selector (Image 6) */
                 <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6">
-                  <div>
-                    <h2 className="text-lg font-black text-slate-900">Escolha o seu Plano</h2>
-                    <p className="text-xs text-slate-500">Seleccione o plano que melhor se adapta às suas necessidades.</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-lg font-black text-slate-900">Escolha o seu Plano</h2>
+                      <p className="text-xs text-slate-500">
+                        Preços em Meticais adaptados ao mercado moçambicano. Poupe 20% na subscrição anual.
+                      </p>
+                    </div>
+
+                    <div className="inline-flex items-center bg-slate-100 rounded-xl p-1 self-start sm:self-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle('mensal')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          billingCycle === 'mensal'
+                            ? 'bg-blue-900 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Mensal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle('anual')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                          billingCycle === 'anual'
+                            ? 'bg-blue-900 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>Anual</span>
+                        <span className="text-[10px] font-black bg-emerald-400 text-slate-950 px-1.5 py-0.5 rounded">
+                          -20%
+                        </span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    
-                    {/* Starter */}
-                    <div
-                      onClick={() => setSelectedPlan('Starter')}
-                      className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-4 ${
-                        selectedPlan === 'Starter'
-                          ? 'border-blue-900 bg-blue-50/20 shadow-md'
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-extrabold text-slate-900">Starter</h3>
-                        <div>
-                          <span className="text-xl font-black text-slate-900">3 500,00 MT</span>
-                          <span className="text-[10px] text-slate-400 font-bold">/mês</span>
+                    {CLICKPAY_PLANS.map((plan) => {
+                      const isSelected = selectedPlan === plan.id;
+                      const displayMonthly =
+                        billingCycle === 'anual' ? plan.annualMonthlyEquivalentMzn : plan.monthlyPriceMzn;
+                      return (
+                        <div
+                          key={plan.id}
+                          onClick={() => setSelectedPlan(plan.id)}
+                          className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-4 relative ${
+                            plan.recommended
+                              ? isSelected
+                                ? 'border-blue-900 bg-blue-50/30 shadow-lg'
+                                : 'border-amber-300 bg-amber-50/10 hover:border-amber-400'
+                              : isSelected
+                              ? 'border-blue-900 bg-blue-50/20 shadow-md'
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          {plan.recommended && (
+                            <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full shadow-xs tracking-wider">
+                              RECOMENDADO
+                            </span>
+                          )}
+
+                          <div className="space-y-2">
+                            <h3 className="text-sm font-extrabold text-slate-900">
+                              {plan.name} <span className="text-[11px] font-semibold text-slate-500">· {plan.segment}</span>
+                            </h3>
+                            <div>
+                              <span className="text-xl font-black text-slate-900">
+                                {formatMzn(displayMonthly, { spaceGrouping: true })}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-bold">/mês</span>
+                              {billingCycle === 'anual' && (
+                                <p className="text-[10px] font-bold text-emerald-700 mt-0.5">
+                                  Total anual: {formatMzn(plan.annualTotalMzn, { spaceGrouping: true })} (Poupe {formatMzn(plan.annualSavingsMzn, { spaceGrouping: true })})
+                                </p>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 font-semibold">
+                              {plan.includedUsersLabel} · Até {plan.includedEmployees} colaboradores
+                            </p>
+
+                            <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
+                              {plan.features.map((feat) => (
+                                <li key={feat} className="flex items-start gap-1.5">
+                                  <Check size={13} className="text-emerald-600 shrink-0 mt-0.5" />
+                                  <span>{feat}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         </div>
-                        <p className="text-[10px] text-slate-500 font-semibold">Até 5 utilizador(es)</p>
-
-                        <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 5 utilizadores</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo + Backup Cloud Firebase</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Conformidade fiscal MZ/ZA</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte por email e WhatsApp</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    {/* Growth (RECOMENDADO) */}
-                    <div
-                      onClick={() => setSelectedPlan('Growth')}
-                      className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-4 relative ${
-                        selectedPlan === 'Growth'
-                          ? 'border-blue-900 bg-blue-50/30 shadow-lg'
-                          : 'border-amber-300 bg-amber-50/10 hover:border-amber-400'
-                      }`}
-                    >
-                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full shadow-xs tracking-wider">
-                        RECOMENDADO
-                      </span>
-
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-extrabold text-slate-900">Profissional</h3>
-                        <div>
-                          <span className="text-xl font-black text-slate-900">6 500,00 MT</span>
-                          <span className="text-[10px] text-slate-400 font-bold">/mês</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 font-semibold">Até 15 utilizador(es)</p>
-
-                        <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 15 utilizadores</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo a todas as funcionalidades</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Conformidade fiscal MZ/ZA</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte prioritário</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    {/* Business */}
-                    <div
-                      onClick={() => setSelectedPlan('Business')}
-                      className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-4 ${
-                        selectedPlan === 'Business'
-                          ? 'border-blue-900 bg-blue-50/20 shadow-md'
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="space-y-2">
-                        <h3 className="text-sm font-extrabold text-slate-900">Empresarial</h3>
-                        <div>
-                          <span className="text-xl font-black text-slate-900">9 500,00 MT</span>
-                          <span className="text-[10px] text-slate-400 font-bold">/mês</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 font-semibold">Até 30 utilizador(es)</p>
-
-                        <ul className="space-y-2 pt-2 text-[11px] text-slate-600 font-medium">
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Até 30 utilizadores</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Acesso completo a todas as funcionalidades</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Conformidade fiscal MZ/ZA</li>
-                          <li className="flex items-start gap-1.5"><Check size={13} className="text-emerald-600 shrink-0 mt-0.5" /> Suporte prioritário VIP</li>
-                        </ul>
-                      </div>
-                    </div>
-
+                      );
+                    })}
                   </div>
 
                   <div className="flex items-center justify-between pt-4 border-t border-slate-100">
@@ -1171,14 +1184,16 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
                         PLANO SELECCIONADO
                       </span>
-                      <span className="text-sm font-black text-slate-900">{selectedPlan}</span>
+                      <span className="text-sm font-black text-slate-900">
+                        {getPlanSpec(selectedPlan).name} · {billingCycle === 'anual' ? 'Anual (-20%)' : 'Mensal'}
+                      </span>
                     </div>
 
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
                         TOTAL A PAGAR
                       </span>
-                      <span className="text-base font-black text-blue-900">{getPlanPrice(selectedPlan as any)}</span>
+                      <span className="text-base font-black text-blue-900">{getPlanPrice(selectedPlan)}</span>
                     </div>
                   </div>
 
@@ -1280,7 +1295,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       onClick={async () => {
                         if (metodoPagamento === 'ONLINE' && carteiraNumero.trim()) {
                           setIsPayingPlan(true);
-                          const amountNum = selectedPlan === 'Growth' ? 6500 : selectedPlan === 'Business' ? 9500 : 3500;
+                          const amountNum = getPlanFeeMzn(selectedPlan, billingCycle);
                           try {
                             const res = await fetch('/api/payments/c2b/collect', {
                               method: 'POST',
@@ -1288,7 +1303,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                               body: JSON.stringify({
                                 phone: carteiraNumero.trim(),
                                 amount: amountNum,
-                                description: `Plano ${selectedPlan} ClickPay ERP`
+                                description: `Plano ${getPlanSpec(selectedPlan).name} (${billingCycle}) ClickPay ERP`
                               })
                             });
                             const payData = await res.json().catch(() => null);

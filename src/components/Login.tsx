@@ -656,7 +656,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                         ? 'bg-amber-100 border-amber-300 text-amber-950 font-black'
                         : 'bg-slate-50 hover:bg-amber-50 border-slate-200 text-slate-700'
                     }`}
-                    title="3.500 MT/mês - Até 5 colaboradores"
+                    title="1.500 MT/mês - Até 5 colaboradores"
                   >
                     🥉 Starter
                   </button>
@@ -670,7 +670,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                         ? 'bg-blue-100 border-blue-300 text-blue-950 font-black'
                         : 'bg-slate-50 hover:bg-blue-50 border-slate-200 text-slate-700'
                     }`}
-                    title="6.500 MT/mês - Até 15 colaboradores"
+                    title="3.500 MT/mês - Até 20 colaboradores"
                   >
                     🥈 Profissional
                   </button>
@@ -684,7 +684,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                         ? 'bg-emerald-100 border-emerald-300 text-emerald-950 font-black'
                         : 'bg-slate-50 hover:bg-emerald-50 border-slate-200 text-slate-700'
                     }`}
-                    title="9.500 MT/mês - Até 30 colaboradores"
+                    title="6.900 MT/mês - Até 50 colaboradores"
                   >
                     🥇 Empresarial
                   </button>

@@ -9,6 +9,7 @@ import {
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { hashPassword, isHashedPassword, verifyPassword } from './security';
+import { getPlanFeeMzn } from './pricing';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
@@ -76,7 +77,7 @@ export async function syncClientToFirestore(clientData: any): Promise<{ ok: bool
       passwordHash: (hashedSecret || '••••••••').substring(0, 256),
       subscription_plan: clientData.subscription_plan || 'Starter',
       subscription_status: clientData.subscription_status || 'ativo',
-      fee_base: Number(clientData.fee_base) || 3500,
+      fee_base: Number(clientData.fee_base) || getPlanFeeMzn(clientData.subscription_plan),
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return { ok: true };
@@ -118,7 +119,7 @@ export async function syncCredentialRequestToFirestore(reqData: any): Promise<{ 
       telefone: String(reqData.telefone || '+258 84 000 0000').substring(0, 64),
       nuit: String(reqData.nuit || '').substring(0, 32),
       planoEscolhido: String(reqData.planoEscolhido || 'Starter').substring(0, 64),
-      precoMensal: Number(reqData.precoMensal) || 3500,
+      precoMensal: Number(reqData.precoMensal) || getPlanFeeMzn(reqData.planoEscolhido),
       status: reqData.status === 'APROVADO' || reqData.status === 'CREDENCIAIS_ENVIADAS' ? reqData.status : 'PENDENTE',
       dataSolicitacao: String(reqData.dataSolicitacao || new Date().toISOString()).substring(0, 64)
     });
@@ -190,7 +191,7 @@ export async function syncRegisteredAccountToFirestore(params: {
   const safeId = String(params.clientId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
   const reqId = `ONB_${safeId}`.substring(0, 128);
   const plano = params.plano || 'Starter';
-  const feeBase = Number(params.feeBase) || (plano === 'Gold' || plano === 'Business' ? 9500 : plano === 'Silver' || plano === 'Growth' ? 6500 : 3500);
+  const feeBase = Number(params.feeBase) || getPlanFeeMzn(plano);
   const syncedCollections: string[] = [];
   const errors: string[] = [];
 

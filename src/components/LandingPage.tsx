@@ -21,6 +21,7 @@ import SupportTicketModal, {
   buildSupportWhatsAppUrl,
   CLICKPAY_SUPPORT
 } from './SupportTicketModal';
+import { BillingCycle, CLICKPAY_PLANS, formatMzn } from '../lib/pricing';
 
 interface LandingPageProps {
   onEnterLogin: () => void;
@@ -34,6 +35,7 @@ export default function LandingPage({
   onEnterPlanDemo
 }: LandingPageProps) {
   const [supportModalOpen, setSupportModalOpen] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('mensal');
 
   return (
     <div className="min-h-screen bg-[#FAFAFB] flex flex-col font-sans text-slate-900 antialiased selection:bg-blue-900 selection:text-white">
@@ -128,174 +130,143 @@ export default function LandingPage({
 
       {/* Plans & Pricing */}
       <section id="planos" className="py-16 md:py-20 max-w-6xl mx-auto px-4 sm:px-6 w-full">
-        <div className="max-w-2xl space-y-2 mb-10">
-          <p className="text-[12px] font-medium text-blue-900">Planos em Meticais</p>
-          <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight text-balance">
-            Escolha o plano adequado à sua empresa
-          </h2>
-          <p className="text-sm text-slate-600">
-            Preços mensais sem fidelização, com pagamento via M-Pesa, e-Mola ou transferência bancária.
-          </p>
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+          <div className="max-w-2xl space-y-2">
+            <p className="text-[12px] font-medium text-blue-900">Planos em Meticais (Sem Risco Cambial)</p>
+            <h2 className="text-2xl sm:text-3xl font-semibold text-slate-950 tracking-tight text-balance">
+              Escolha o plano adequado à sua empresa
+            </h2>
+            <p className="text-sm text-slate-600">
+              Preços competitivos para o mercado moçambicano com pagamento via M-Pesa, e-Mola ou transferência bancária.
+            </p>
+          </div>
+
+          <div
+            role="group"
+            aria-label="Ciclo de faturação"
+            className="inline-flex items-center bg-white border border-slate-200 rounded-xl p-1 self-start md:self-auto shadow-2xs shrink-0"
+          >
+            <button
+              type="button"
+              onClick={() => setBillingCycle('mensal')}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                billingCycle === 'mensal'
+                  ? 'bg-blue-900 text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Mensal
+            </button>
+            <button
+              type="button"
+              onClick={() => setBillingCycle('anual')}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                billingCycle === 'anual'
+                  ? 'bg-blue-900 text-white'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Anual</span>
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  billingCycle === 'anual'
+                    ? 'bg-emerald-400 text-slate-950'
+                    : 'bg-emerald-100 text-emerald-800'
+                }`}
+              >
+                -20%
+              </span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Starter */}
-          <div className="bg-white rounded-xl p-6 border border-slate-200 flex flex-col justify-between space-y-6">
-            <div className="space-y-4">
-              <div>
-                <p className="text-[12px] font-semibold text-slate-500">Starter · Microempresa</p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Para negócios em início de atividade e prestadores de serviços.
-                </p>
-              </div>
+          {CLICKPAY_PLANS.map((plan) => {
+            const displayMonthly =
+              billingCycle === 'anual' ? plan.annualMonthlyEquivalentMzn : plan.monthlyPriceMzn;
+            const isRecommended = Boolean(plan.recommended);
+            const isEnterprise = plan.internalCode === 'Gold';
 
-              <div className="pt-2 border-t border-slate-100">
-                <span className="text-2xl font-semibold text-slate-950 font-mono tabular-nums">
-                  3.500,00 MT
-                </span>
-                <span className="text-xs text-slate-500"> / mês</span>
-              </div>
+            return (
+              <div
+                key={plan.id}
+                className={`bg-white rounded-xl p-6 flex flex-col justify-between space-y-6 ${
+                  isRecommended ? 'border-2 border-blue-900 shadow-sm' : 'border border-slate-200'
+                }`}
+              >
+                <div className="space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <p
+                        className={`text-[12px] font-semibold ${
+                          isRecommended ? 'text-blue-900' : 'text-slate-500'
+                        }`}
+                      >
+                        {plan.name} · {plan.segment}
+                      </p>
+                      {isRecommended && (
+                        <span className="text-[11px] font-semibold text-blue-900">Recomendado</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">{plan.tagline}</p>
+                  </div>
 
-              <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Até 5 colaboradores</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Faturação e vendas (IVA / ISPC)</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Recibos de salário mensais</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Cálculo IRPS (Lei 11/2025) &amp; INSS</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Suporte técnico via WhatsApp</span>
-                </li>
-              </ul>
-            </div>
+                  <div className="pt-2 border-t border-slate-100 space-y-1">
+                    <div>
+                      <span
+                        className={`text-2xl font-semibold font-mono tabular-nums ${
+                          isRecommended ? 'text-blue-900' : 'text-slate-950'
+                        }`}
+                      >
+                        {formatMzn(displayMonthly)}
+                      </span>
+                      <span className="text-xs text-slate-500"> / mês</span>
+                    </div>
+                    {billingCycle === 'anual' ? (
+                      <p className="text-[11px] text-emerald-700 font-medium">
+                        Facturado {formatMzn(plan.annualTotalMzn)}/ano · Poupe {formatMzn(plan.annualSavingsMzn)}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-500">
+                        Ou {formatMzn(plan.annualMonthlyEquivalentMzn)}/mês no plano anual (-20%)
+                      </p>
+                    )}
+                  </div>
 
-            <button
-              type="button"
-              onClick={() => onEnterPlanDemo('Bronze')}
-              className="w-full py-2.5 bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 font-semibold rounded-lg text-xs cursor-pointer transition-colors whitespace-nowrap shrink-0"
-            >
-              Escolher Starter
-            </button>
-          </div>
-
-          {/* Profissional */}
-          <div className="bg-white rounded-xl p-6 border-2 border-blue-900 flex flex-col justify-between space-y-6">
-            <div className="space-y-4">
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[12px] font-semibold text-blue-900">
-                    Profissional · Pequena Empresa
-                  </p>
-                  <span className="text-[11px] font-semibold text-blue-900">Recomendado</span>
+                  <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
+                    {plan.features.map((feat) => (
+                      <li key={feat} className="flex items-start gap-2">
+                        <Check
+                          size={14}
+                          className={`${isRecommended ? 'text-blue-900' : 'text-slate-500'} shrink-0 mt-0.5`}
+                        />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Para equipas ativas com gestão de stocks e obrigações ao SISSMO.
-                </p>
+
+                <button
+                  type="button"
+                  onClick={() => onEnterPlanDemo(plan.internalCode)}
+                  className={`w-full py-2.5 font-semibold rounded-lg text-xs cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                    isRecommended
+                      ? 'bg-blue-900 hover:bg-blue-950 text-white'
+                      : isEnterprise
+                      ? 'bg-slate-900 hover:bg-slate-950 text-white'
+                      : 'bg-white hover:bg-slate-50 text-slate-900 border border-slate-300'
+                  }`}
+                >
+                  Escolher {plan.name}
+                </button>
               </div>
-
-              <div className="pt-2 border-t border-slate-100">
-                <span className="text-2xl font-semibold text-blue-900 font-mono tabular-nums">
-                  6.500,00 MT
-                </span>
-                <span className="text-xs text-slate-500"> / mês</span>
-              </div>
-
-              <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
-                  <span>Até 15 colaboradores</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
-                  <span>Ficheiros SISSMO &amp; guias do INSS</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
-                  <span>Contratos de trabalho (Lei 13/2023)</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
-                  <span>Compras, fornecedores e inventário</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-blue-900 shrink-0 mt-0.5" />
-                  <span>Pagamentos via M-Pesa e e-Mola</span>
-                </li>
-              </ul>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onEnterPlanDemo('Silver')}
-              className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-semibold rounded-lg text-xs cursor-pointer transition-colors whitespace-nowrap shrink-0"
-            >
-              Escolher Profissional
-            </button>
-          </div>
-
-          {/* Empresarial */}
-          <div className="bg-white rounded-xl p-6 border border-slate-200 flex flex-col justify-between space-y-6">
-            <div className="space-y-4">
-              <div>
-                <p className="text-[12px] font-semibold text-slate-500">
-                  Empresarial · Média Empresa
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Contabilidade PGC-NIRF completa e gestão multi-armazém.
-                </p>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100">
-                <span className="text-2xl font-semibold text-slate-950 font-mono tabular-nums">
-                  9.500,00 MT
-                </span>
-                <span className="text-xs text-slate-500"> / mês</span>
-              </div>
-
-              <ul className="space-y-2.5 text-xs text-slate-700 pt-2">
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Até 30 colaboradores</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Contabilidade PGC: DRE, Balanço e Fluxo de Caixa</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Gestão avançada de stocks e múltiplos armazéns</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Reconciliação financeira e tesouraria</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <Check size={14} className="text-slate-500 shrink-0 mt-0.5" />
-                  <span>Acompanhamento executivo prioritário</span>
-                </li>
-              </ul>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onEnterPlanDemo('Gold')}
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-950 text-white font-semibold rounded-lg text-xs cursor-pointer transition-colors whitespace-nowrap shrink-0"
-            >
-              Escolher Empresarial
-            </button>
-          </div>
+            );
+          })}
         </div>
+
+        <p className="mt-6 text-xs text-slate-500 leading-relaxed">
+          Modelo híbrido transparente em Meticais (MZN): cada plano inclui o pacote de módulos, utilizadores e base de colaboradores; recibos salariais adicionais acima do limite são cobrados apenas pelos processamentos emitidos no mês.
+        </p>
       </section>
 
       {/* Sobre Nós, Localização, Missão, Visão e Valores */}
