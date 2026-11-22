@@ -401,14 +401,158 @@ export async function authenticateClientInFirebase(
   return { ok: false };
 }
 
+let gsiLoaderPromise: Promise<boolean> | null = null;
+
+function loadGoogleIdentityScript(): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  if ((window as any).google?.accounts?.oauth2) return Promise.resolve(true);
+  if (gsiLoaderPromise) return gsiLoaderPromise;
+
+  gsiLoaderPromise = new Promise((resolve) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-clickpay-gsi="true"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(Boolean((window as any).google?.accounts?.oauth2)));
+      existing.addEventListener('error', () => resolve(false));
+      setTimeout(() => resolve(Boolean((window as any).google?.accounts?.oauth2)), 2500);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.setAttribute('data-clickpay-gsi', 'true');
+    script.onload = () => resolve(Boolean((window as any).google?.accounts?.oauth2));
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+    setTimeout(() => resolve(Boolean((window as any).google?.accounts?.oauth2)), 5000);
+  });
+
+  return gsiLoaderPromise;
+}
+
+async function signInViaGoogleIdentityServices(): Promise<{
+  ok: boolean;
+  cancelled?: boolean;
+  googleAccessToken?: string;
+  email?: string;
+  emailVerified?: boolean;
+  displayName?: string;
+  error?: string;
+}> {
+  const clientId = (firebaseConfig as any).oAuthClientId;
+  if (!clientId || typeof window === 'undefined') {
+    return { ok: false };
+  }
+
+  const loaded = await loadGoogleIdentityScript();
+  const oauth2 = (window as any).google?.accounts?.oauth2;
+  if (!loaded || !oauth2?.initTokenClient) {
+    return { ok: false };
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (val: {
+      ok: boolean;
+      cancelled?: boolean;
+      googleAccessToken?: string;
+      email?: string;
+      emailVerified?: boolean;
+      displayName?: string;
+      error?: string;
+    }) => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+
+    try {
+      const tokenClient = oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'openid email profile',
+        prompt: 'select_account',
+        callback: async (tokenResponse: any) => {
+          if (tokenResponse?.error || !tokenResponse?.access_token) {
+            const errCode = String(tokenResponse?.error || '');
+            if (errCode === 'access_denied') {
+              finish({
+                ok: false,
+                cancelled: true,
+                error: 'Autorização Gmail cancelada pelo utilizador.'
+              });
+              return;
+            }
+            finish({ ok: false });
+            return;
+          }
+
+          try {
+            const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+            });
+            const info: any = await userInfoRes.json().catch(() => ({}));
+            if (!userInfoRes.ok || !info?.email) {
+              finish({ ok: false });
+              return;
+            }
+            finish({
+              ok: true,
+              googleAccessToken: tokenResponse.access_token,
+              email: String(info.email).toLowerCase().trim(),
+              emailVerified: Boolean(info.email_verified),
+              displayName: String(info.name || '')
+            });
+          } catch {
+            finish({ ok: false });
+          }
+        },
+        error_callback: (err: any) => {
+          const errType = String(err?.type || '');
+          if (errType === 'popup_closed') {
+            finish({
+              ok: false,
+              cancelled: true,
+              error: 'Janela de autenticação Gmail fechada antes de concluir.'
+            });
+            return;
+          }
+          finish({ ok: false });
+        }
+      });
+
+      tokenClient.requestAccessToken();
+    } catch {
+      finish({ ok: false });
+    }
+  });
+}
+
 export async function signInWithGoogleAccount(): Promise<{
   ok: boolean;
+  googleAccessToken?: string;
   idToken?: string;
   email?: string;
   emailVerified?: boolean;
   displayName?: string;
   error?: string;
 }> {
+  // 1. Tentar primeiro via Google Identity Services direto (sem redirecionar para domínio Firebase)
+  const gisRes = await signInViaGoogleIdentityServices();
+  if (gisRes.ok && gisRes.googleAccessToken && gisRes.email) {
+    return {
+      ok: true,
+      googleAccessToken: gisRes.googleAccessToken,
+      email: gisRes.email,
+      emailVerified: gisRes.emailVerified,
+      displayName: gisRes.displayName
+    };
+  }
+  if (gisRes.cancelled) {
+    return { ok: false, error: gisRes.error || 'Autenticação Gmail cancelada.' };
+  }
+
+  // 2. Fallback silencioso caso o domínio ainda não esteja registado no cliente OAuth direto
   try {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
@@ -424,36 +568,35 @@ export async function signInWithGoogleAccount(): Promise<{
     };
   } catch (err: any) {
     const code = err?.code || '';
-    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return { ok: false, error: 'Janela de autenticação Google fechada antes de concluir.' };
+      return { ok: false, error: 'Janela de autenticação Gmail fechada antes de concluir.' };
     }
     if (code === 'auth/popup-blocked') {
       return {
         ok: false,
-        error: 'O navegador bloqueou a janela popup do Google. Permita popups para este site ou autentique-se com e-mail e palavra-passe.'
+        error: 'O navegador bloqueou a janela do Google. Permita popups para este site ou autentique-se com e-mail e palavra-passe.'
       };
     }
     if (code === 'auth/unauthorized-domain') {
       return {
         ok: false,
-        error: `O domínio "${hostname}" não está autorizado no Firebase Authentication. Adicione-o em Domínios Autorizados na Consola Firebase ou entre com e-mail e palavra-passe.`
+        error: 'Não foi possível concluir o acesso direto via Gmail neste endereço. Entre com o seu e-mail e palavra-passe.'
       };
     }
     if (code === 'auth/network-request-failed') {
       return {
         ok: false,
-        error: 'Falha de ligação ao contactar a autenticação Google. Verifique a internet ou utilize e-mail e palavra-passe.'
+        error: 'Falha de ligação ao contactar os serviços Google. Verifique a internet ou utilize e-mail e palavra-passe.'
       };
     }
     return {
       ok: false,
-      error: `Não foi possível concluir a autenticação com a Conta Google${code ? ` (${code})` : ''}. Utilize e-mail e palavra-passe.`
+      error: 'Não foi possível concluir a autenticação com a sua conta Gmail. Utilize e-mail e palavra-passe.'
     };
   }
 }
 
-export async function lookupClientByEmailInFirebase(email: string): Promise<{
+export async function lookupClientByEmailInCloud(email: string): Promise<{
   found: boolean;
   client?: {
     id: string;
@@ -473,11 +616,11 @@ export async function lookupClientByEmailInFirebase(email: string): Promise<{
     if (p === 'Platinum') return 'Platinum';
     return 'Bronze';
   };
-  const path = 'saas_clients';
+
   try {
-    const q = query(collection(db, path), where('email', '==', emailNorm));
-    const snap = await getDocs(q);
-    for (const d of snap.docs) {
+    const qSaas = query(collection(db, 'saas_clients'), where('email', '==', emailNorm));
+    const snapSaas = await getDocs(qSaas);
+    for (const d of snapSaas.docs) {
       const data: any = d.data();
       return {
         found: true,
@@ -490,14 +633,32 @@ export async function lookupClientByEmailInFirebase(email: string): Promise<{
         }
       };
     }
+
+    const qErp = query(collection(db, 'erp_clients'), where('email', '==', emailNorm));
+    const snapErp = await getDocs(qErp);
+    for (const d of snapErp.docs) {
+      const data: any = d.data();
+      return {
+        found: true,
+        client: {
+          id: data.id || d.id,
+          email: emailNorm,
+          companyName: data.nome || 'Empresa ClickPay',
+          plan: mapPlan(data.subscription_plan),
+          status: String(data.subscription_status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo'
+        }
+      };
+    }
     return { found: false };
   } catch (error) {
     if (error instanceof Error && error.message.toLowerCase().includes('permission')) {
-      handleFirestoreError(error, OperationType.GET, path);
+      handleFirestoreError(error, OperationType.GET, 'saas_clients');
     }
     return { found: false };
   }
 }
+
+export const lookupClientByEmailInFirebase = lookupClientByEmailInCloud;
 
 // Test Connection to Firestore as per requirements
 async function testConnection() {

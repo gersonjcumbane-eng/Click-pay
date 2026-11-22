@@ -31,12 +31,14 @@ import {
   Filter,
   DollarSign,
   CheckSquare,
-  Info
+  Info,
+  Printer
 } from 'lucide-react';
 import { useToast, useConfirm } from '../context/ToastContext';
 import { Employee, CompanyData } from '../types';
 import { calcularFolhaSalario } from '../db_tax';
 import { scanFileForMalware } from '../lib/security';
+import PayslipA4Modal, { PayslipA4Data } from './PayslipA4Modal';
 
 export function getCarrierInfo(phone: string) {
   const clean = phone.replace(/\s+/g, '').trim();
@@ -370,6 +372,56 @@ export default function EmployeeDirectory({
   // Individual calculation results
   const [calcResult, setCalcResult] = useState<any>(null);
   const [loadingPay, setLoadingPay] = useState(false);
+  const [selectedPayslipA4, setSelectedPayslipA4] = useState<PayslipA4Data | null>(null);
+
+  const handleOpenPayslipA4 = (emp: Employee, diasFaltasInput?: number, pdfUrl?: string) => {
+    const inputEl = document.getElementById(`faltas_${emp.id}`) as HTMLInputElement | null;
+    const faltasNum =
+      diasFaltasInput !== undefined
+        ? diasFaltasInput
+        : inputEl
+        ? Math.max(0, parseInt(inputEl.value, 10) || 0)
+        : emp.faltas_historico?.filter((f) => f.tipo === 'Injustificada').reduce((acc, curr) => acc + curr.dias, 0) || 0;
+    const calc = calcularFolhaSalario(emp.salario_base, faltasNum, emp.numero_dependentes);
+    const shortId = (emp.id || '001').replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '001';
+    const hoje = new Date().toLocaleDateString('pt-PT');
+
+    setSelectedPayslipA4({
+      numeroRecibo: `RV-${selectedPeriod.replace(/\s+/g, '').slice(0, 6).toUpperCase()}/${shortId}`,
+      periodo: selectedPeriod,
+      dataEmissao: hoje,
+      empresa: {
+        nome: company.nome || 'ClickPay Moçambique, Lda',
+        nuit: company.nuit,
+        nuel: company.nuel,
+        endereco: company.endereco,
+        provincia: company.provincia,
+        email: company.email,
+        telefone: company.telefone,
+        logo: company.logo
+      },
+      colaborador: {
+        nome: emp.nome,
+        cargo: emp.cargo,
+        nuit: emp.nuit,
+        inss_numero: emp.inss_numero,
+        numero_dependentes: emp.numero_dependentes,
+        carteira_movel: emp.carteira_movel
+      },
+      valores: {
+        salarioBase: emp.salario_base,
+        descontoFaltas: calc.descontoFaltas,
+        diasFaltas: faltasNum,
+        inssTrabalhador: calc.inssTrabalhador,
+        inssEmpresa: calc.inssEmpresa,
+        irpsConstatado: calc.irpsConstatado,
+        descontoVales: 0,
+        totalDescontos: calc.totalDescontos,
+        salarioLiquido: calc.salarioLiquido
+      },
+      pdfDownloadUrl: pdfUrl
+    });
+  };
 
   // Search filter
   const filteredEmployees = employees.filter(emp => 
@@ -1796,17 +1848,28 @@ export default function EmployeeDirectory({
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => {
-                                const input = document.getElementById(`faltas_${emp.id}`) as HTMLInputElement;
-                                const diasFaltas = input ? (parseInt(input.value) || 0) : 0;
-                                handleProcessIndividual(emp, diasFaltas);
-                              }}
-                              disabled={loadingPay}
-                              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold rounded-lg shadow-sm cursor-pointer text-xs transition-all"
-                            >
-                              {loadingPay ? 'A transferir fundos...' : '⚡ LIQUIDAR & GERAR RECIBO'}
-                            </button>
+                            <div className="space-y-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const input = document.getElementById(`faltas_${emp.id}`) as HTMLInputElement;
+                                  const diasFaltas = input ? (parseInt(input.value) || 0) : 0;
+                                  handleProcessIndividual(emp, diasFaltas);
+                                }}
+                                disabled={loadingPay}
+                                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold rounded-lg shadow-sm cursor-pointer text-xs transition-all"
+                              >
+                                {loadingPay ? 'A transferir fundos...' : '⚡ LIQUIDAR & GERAR RECIBO'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPayslipA4(emp)}
+                                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg cursor-pointer text-xs flex items-center justify-center gap-1.5 transition-colors"
+                              >
+                                <Printer size={13} />
+                                <span>Recibo A4 (Primavera V10)</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* Seção Completa de Faltas - 1 clique e histórico */}
@@ -2071,12 +2134,21 @@ export default function EmployeeDirectory({
                                 <p className="text-[10px] text-emerald-700">O colaborador foi liquidado e a folha foi actualizada.</p>
                               </div>
                             </div>
-                            <a
-                              href={calcResult.linkFicheiro}
-                              className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-lg flex items-center gap-1 shrink-0"
-                            >
-                              <Download size={14} /> DESCARREGAR RECIBO (PDF)
-                            </a>
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPayslipA4(emp, undefined, calcResult.linkFicheiro)}
+                                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg flex items-center gap-1.5 cursor-pointer text-xs"
+                              >
+                                <Printer size={14} /> VER / IMPRIMIR A4 (PRIMAVERA V10)
+                              </button>
+                              <a
+                                href={calcResult.linkFicheiro}
+                                className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white font-bold rounded-lg flex items-center gap-1 text-xs"
+                              >
+                                <Download size={14} /> DESCARREGAR RECIBO (PDF)
+                              </a>
+                            </div>
                           </motion.div>
                         )}
                       </motion.div>
@@ -2089,6 +2161,12 @@ export default function EmployeeDirectory({
         </div>
       </div>
       )}
+
+      <PayslipA4Modal
+        isOpen={!!selectedPayslipA4}
+        onClose={() => setSelectedPayslipA4(null)}
+        data={selectedPayslipA4}
+      />
     </div>
   );
 }

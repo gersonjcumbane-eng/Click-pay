@@ -8,8 +8,48 @@ import fs from 'fs';
 import path from 'path';
 import { PayrollCalculation, CompanyData, Employee } from './types';
 
+function computePdfHashCode(refCode: string, total: number, nuit?: string): string {
+  const seed = `${refCode}|${Number(total || 0).toFixed(2)}|${nuit || '402302399'}|CLICKPAY`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hex = (hash >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(0, 6);
+  const tail = refCode.replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || 'MZ26';
+  return `${hex.slice(0, 4)}-${tail}`;
+}
+
+function drawPrimaveraFooter(
+  doc: any,
+  refCode: string,
+  options?: { x?: number; width?: number; y?: number; total?: number; nuit?: string; compact?: boolean }
+) {
+  const x = options?.x ?? 50;
+  const width = options?.width ?? 495;
+  const y = options?.y ?? 774;
+  const hash = computePdfHashCode(refCode, options?.total ?? 0, options?.nuit);
+
+  doc.save();
+  doc.strokeColor('#0f172a').lineWidth(0.75).moveTo(x, y).lineTo(x + width, y).stroke();
+  doc.fontSize(options?.compact ? 6.5 : 7).font('Helvetica-Bold').fillColor('#0f172a');
+  doc.text(
+    'Processado por computador · Formato A4 (PRIMAVERA ERP V10)',
+    x,
+    y + 4,
+    { width: width - 145, lineBreak: false }
+  );
+  doc.fontSize(options?.compact ? 6.5 : 7).font('Helvetica').fillColor('#475569');
+  doc.text(`Ref. Controlo: ${hash} · Pág. 1/1`, x + width - 145, y + 4, {
+    width: 145,
+    align: 'right',
+    lineBreak: false
+  });
+  doc.restore();
+}
+
 /**
- * Generates a polished PDF salary slip for an employee.
+ * Generates a polished A4 PDF salary slip in Primavera ERP V10 style for an employee.
  * Utilizes default built-in PDFKit fonts (Helvetica, Helvetica-Bold) for native container rendering.
  */
 export function criarReciboSalarioPDF(
@@ -20,17 +60,19 @@ export function criarReciboSalarioPDF(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
       const stream = fs.createWriteStream(caminhoFicheiro);
       doc.pipe(stream);
 
+      const startX = 40;
+      const width = 515;
+
       // =========================================================================
-      // 1. CABEÇALHO CONECTADO AO PERFIL DA EMPRESA E LOGÓTIPO CORPORATIVO
+      // 1. CABEÇALHO EMPRESA & QUADRO METADADOS PRIMAVERA V10
       // =========================================================================
-      let textX = 50;
+      let textX = startX;
       let drawn = false;
 
-      // Render custom logo if exists and is valid base64 image (PNG/JPEG)
       if (dadosEmpresa.logo && dadosEmpresa.logo.startsWith('data:image/')) {
         try {
           const parts = dadosEmpresa.logo.split(';base64,');
@@ -38,159 +80,257 @@ export function criarReciboSalarioPDF(
           const base64Data = parts[1];
           if (base64Data && (mime.includes('png') || mime.includes('jpeg') || mime.includes('jpg'))) {
             const buffer = Buffer.from(base64Data, 'base64');
-            doc.image(buffer, 50, 45, { width: 45 });
-            textX = 110;
+            doc.image(buffer, startX, 40, { width: 42 });
+            textX = startX + 52;
             drawn = true;
           }
         } catch (err) {
-          console.error("Error drawing logo in PDF:", err);
+          console.error('Error drawing logo in PDF:', err);
         }
       }
 
-      // Fallback to logo-payroll.png
       if (!drawn) {
         try {
           const caminhoLogotipo = path.join(__dirname, '..', 'public', 'logo-payroll.png');
           const caminhoAlternativo = path.join(process.cwd(), 'public', 'logo-payroll.png');
-          
           if (fs.existsSync(caminhoLogotipo)) {
-            doc.image(caminhoLogotipo, 50, 45, { width: 45 });
-            textX = 110;
+            doc.image(caminhoLogotipo, startX, 40, { width: 42 });
+            textX = startX + 52;
           } else if (fs.existsSync(caminhoAlternativo)) {
-            doc.image(caminhoAlternativo, 50, 45, { width: 45 });
-            textX = 110;
+            doc.image(caminhoAlternativo, startX, 40, { width: 42 });
+            textX = startX + 52;
           }
         } catch (err) {
-          console.error("Error drawing logo-payroll in PDF:", err);
+          console.error('Error drawing logo-payroll in PDF:', err);
         }
       }
 
       const nomeEmpresa = (
-        dadosEmpresa.nome || 
-        (dadosEmpresa as any).nome_comercial || 
-        'Mercearia do Povo Lda'
+        dadosEmpresa.nome ||
+        (dadosEmpresa as any).nome_comercial ||
+        'ClickPay Moçambique, Lda'
       ).toUpperCase();
 
-      doc.fontSize(13).font('Helvetica-Bold').fillColor('#111827').text(nomeEmpresa, textX, 45);
-      
       const nuitEmp = (dadosEmpresa as any).identificadores_legais?.nuit || dadosEmpresa.nuit || 'N/A';
       const nuelEmp = (dadosEmpresa as any).identificadores_legais?.nuel || dadosEmpresa.nuel || 'N/A';
-      doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
-      doc.text(`NUIT: ${nuitEmp}  |  NUEL: ${nuelEmp}`, textX, 60);
-
       const dist = (dadosEmpresa as any).localizacao?.distrito || dadosEmpresa.distrito || 'Maputo';
       const prov = (dadosEmpresa as any).localizacao?.provincia || dadosEmpresa.provincia || 'Maputo Cidade';
-      const localizacaoSede = `${dist}, ${prov}`;
       const regimeIvaStr = (dadosEmpresa as any).enquadramento_fiscal?.regime || dadosEmpresa.regime_iva || 'IVA Normal';
-      doc.text(`Regime de IVA: ${regimeIvaStr}  |  Sede: ${localizacaoSede}, Moçambique`, textX, 74);
-
       const emailEmp = (dadosEmpresa as any).contacto?.email || dadosEmpresa.email || 'N/A';
       const telfEmp = (dadosEmpresa as any).contacto?.telefone || dadosEmpresa.telefone || 'N/A';
-      doc.text(`Contacto: ${emailEmp}  |  Tel: ${telfEmp}`, textX, 88);
 
-      // Linha de separação estética do cabeçalho institucional
-      doc.moveTo(50, 105).lineTo(545, 105).stroke('#e2e8f0');
-      let currentY = 120;
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text(nomeEmpresa, textX, 40, { width: 255 });
+      doc.fontSize(7.5).font('Helvetica').fillColor('#475569');
+      doc.text(`NUIT: ${nuitEmp}  |  NUEL: ${nuelEmp}`, textX, 56, { width: 255 });
+      doc.text(`Regime: ${regimeIvaStr}  |  ${dist}, ${prov}`, textX, 68, { width: 255 });
+      doc.text(`Contacto: ${emailEmp}  |  Tel: ${telfEmp}`, textX, 80, { width: 255 });
+
+      // Quadro Direito Primavera V10: RECIBO DE VENCIMENTO (ORIGINAL)
+      const boxX = 355;
+      const boxW = 200;
+      const boxY = 38;
+      const shortEmpId = (dadosFuncionario.id || '001').replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '001';
+      const numRecibo = `RV-${dadosSalario.periodo.replace(/\s+/g, '').slice(0, 6).toUpperCase()}/${shortEmpId}`;
+      const dataEmissaoStr = new Date().toLocaleDateString('pt-PT');
+
+      doc.rect(boxX, boxY, boxW, 74).strokeColor('#0f172a').lineWidth(1).stroke();
+      doc.rect(boxX, boxY, boxW, 18).fill('#0f172a');
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#ffffff').text('RECIBO DE VENCIMENTO', boxX + 6, boxY + 5);
+      doc.fontSize(7).text('ORIGINAL', boxX + boxW - 54, boxY + 5, { width: 48, align: 'right' });
+
+      doc.strokeColor('#cbd5e1').lineWidth(0.5);
+      doc.moveTo(boxX, boxY + 37).lineTo(boxX + boxW, boxY + 37).stroke();
+      doc.moveTo(boxX, boxY + 56).lineTo(boxX + boxW, boxY + 56).stroke();
+      doc.moveTo(boxX + 100, boxY + 37).lineTo(boxX + 100, boxY + 74).stroke();
+
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('N.º Documento', boxX + 6, boxY + 21);
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a').text(numRecibo, boxX + 6, boxY + 28);
+
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Período', boxX + 6, boxY + 40);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text(dadosSalario.periodo, boxX + 6, boxY + 47, { width: 90 });
+
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Data Emissão', boxX + 105, boxY + 40);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text(dataEmissaoStr, boxX + 105, boxY + 47);
+
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Moeda', boxX + 6, boxY + 59);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text('MZN (Metical)', boxX + 6, boxY + 66);
+
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Página', boxX + 105, boxY + 59);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text('1 / 1', boxX + 105, boxY + 66);
+
+      // Linha divisória principal do cabeçalho
+      doc.strokeColor('#0f172a').lineWidth(1.2).moveTo(startX, 122).lineTo(startX + width, 122).stroke();
 
       // =========================================================================
-      // 2. TÍTULO DO DOCUMENTO DE PAYROLL
+      // 2. QUADRO DE IDENTIFICAÇÃO DO TRABALHADOR (ESTILO PRIMAVERA V10)
       // =========================================================================
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a').text('RECIBO DE VENCIMENTO / FOLHA DE SALÁRIO', 50, currentY, { align: 'center' });
-      currentY += 16;
-      doc.fontSize(9).font('Helvetica').fillColor('#64748b').text(`Período de Processamento: ${dadosSalario.periodo}`, 50, currentY, { align: 'center' });
-      currentY += 20;
+      const empBoxY = 132;
+      const empBoxH = 66;
+      doc.rect(startX, empBoxY, width, empBoxH).strokeColor('#0f172a').lineWidth(0.8).stroke();
+      doc.rect(startX, empBoxY, width, 16).fill('#f1f5f9').strokeColor('#0f172a').lineWidth(0.8).stroke();
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text('IDENTIFICAÇÃO DO(A) TRABALHADOR(A)', startX + 8, empBoxY + 5);
+
+      const empColSplit = startX + 315;
+      doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(empColSplit, empBoxY + 16).lineTo(empColSplit, empBoxY + empBoxH).stroke();
+
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Nome Completo', startX + 8, empBoxY + 21);
+      doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#0f172a').text(dadosFuncionario.nome.toUpperCase(), startX + 8, empBoxY + 30, { width: 300 });
+      doc.fontSize(7.5).font('Helvetica').fillColor('#334155').text(`Cargo / Função: ${dadosFuncionario.cargo}`, startX + 8, empBoxY + 46, { width: 300 });
+
+      const dependentesTexto = dadosFuncionario.numero_dependentes >= 4 ? '4 ou mais' : String(dadosFuncionario.numero_dependentes || 0);
+      doc.fontSize(7.5).font('Helvetica').fillColor('#334155');
+      doc.text(`NUIT Trabalhador: ${dadosFuncionario.nuit || 'N/A'}`, empColSplit + 8, empBoxY + 21);
+      doc.text(`Beneficiário INSS: ${dadosFuncionario.inss_numero || 'N/A'}`, empColSplit + 8, empBoxY + 33);
+      doc.text(`Dependentes IRPS: ${dependentesTexto}`, empColSplit + 8, empBoxY + 45);
+      doc.text(`Carteira: ${dadosFuncionario.carteira_movel || 'N/D'}`, empColSplit + 8, empBoxY + 55);
 
       // =========================================================================
-      // 3. QUADRO DE INFORMAÇÕES DO TRABALHADOR
+      // 3. TABELA DE REMUNERAÇÕES E DESCONTOS (COM DIVISORES DE COLUNAS)
       // =========================================================================
-      const topoQuadroTrabalhador = currentY;
-      doc.rect(50, topoQuadroTrabalhador, 495, 55).stroke('#cbd5e1');
+      const tblY = 212;
+      const col1X = startX;        // Cód (45)
+      const col2X = startX + 45;   // Descrição (225)
+      const col3X = startX + 270;  // Ref (55)
+      const col4X = startX + 325;  // Remunerações (95)
+      const col5X = startX + 420;  // Descontos (95)
+      const tblEnd = startX + width;
 
-      doc.fontSize(9).font('Helvetica').fillColor('#111827');
-      doc.text(` Funcionário: ${dadosFuncionario.nome.toUpperCase()}`, 55, topoQuadroTrabalhador + 8);
-      doc.text(` Cargo / Função: ${dadosFuncionario.cargo}  |  Nº Beneficiário INSS: ${dadosFuncionario.inss_numero}`, 55, topoQuadroTrabalhador + 23);
+      // Cabeçalho tabela
+      doc.rect(startX, tblY, width, 20).fill('#0f172a');
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff');
+      doc.text('Cód.', col1X + 6, tblY + 6, { width: 35 });
+      doc.text('Descrição da Rubrica Salarial', col2X + 6, tblY + 6, { width: 215 });
+      doc.text('Ref.', col3X + 4, tblY + 6, { width: 47, align: 'center' });
+      doc.text('Remunerações (MT)', col4X + 4, tblY + 6, { width: 85, align: 'right' });
+      doc.text('Descontos (MT)', col5X + 4, tblY + 6, { width: 85, align: 'right' });
 
-      // Exibe o número de dependentes que dão direito ao abatimento do IRPS
-      const dependentesTexto = dadosFuncionario.numero_dependentes >= 4 ? "4 ou mais" : dadosFuncionario.numero_dependentes;
-      doc.font('Helvetica-Oblique').fillColor('#475569').text(` N.º Dependentes IRPS: ${dependentesTexto}  |  NUIT do Trabalhador: ${dadosFuncionario.nuit || 'N/A'}`, 55, topoQuadroTrabalhador + 38);
-      currentY += 75;
+      const rows: { cod: string; desc: string; ref: string; rem: string; descVal: string }[] = [
+        {
+          cod: 'R001',
+          desc: 'Vencimento Base Contratual',
+          ref: '30 dias',
+          rem: dadosSalario.salarioBase.toFixed(2),
+          descVal: '0.00'
+        }
+      ];
 
-      // =========================================================================
-      // 4. TABELA DE VENCIMENTOS E DESCONTOS FISCAIS (ORDEM LEGAL)
-      // =========================================================================
-      const topoTabela = currentY;
-      doc.font('Helvetica-Bold').fillColor('#111827').text('Descrição dos Elementos Salariais', 55, topoTabela);
-      doc.text('Vencimentos (MT)', 250, topoTabela, { width: 120, align: 'right' });
-      doc.text('Descontos (MT)', 400, topoTabela, { width: 120, align: 'right' });
-
-      doc.moveTo(50, topoTabela + 14).lineTo(545, topoTabela + 14).stroke('#cbd5e1');
-      doc.font('Helvetica');
-
-      // Linha: Salário Base Bruto
-      let yLinha = topoTabela + 24;
-      doc.text('Salário Base Contratual', 55, yLinha);
-      doc.text(dadosSalario.salarioBase.toFixed(2), 250, yLinha, { width: 120, align: 'right' });
-
-      // Linha Opcional: Desconto de Faltas Comerciais (Lei nº 13/2023)
       if (dadosSalario.descontoFaltas > 0) {
-        yLinha += 16;
-        doc.text(`Desconto de Faltas Autorizadas/Injustificadas (${dadosSalario.diasFaltas} dias)`, 55, yLinha);
-        doc.text(dadosSalario.descontoFaltas.toFixed(2), 400, yLinha, { width: 120, align: 'right' });
+        rows.push({
+          cod: 'D001',
+          desc: `Desconto de Faltas (${dadosSalario.diasFaltas} dias)`,
+          ref: `${dadosSalario.diasFaltas}d`,
+          rem: '0.00',
+          descVal: dadosSalario.descontoFaltas.toFixed(2)
+        });
       }
 
-      // Linha: Desconto INSS Trabalhador (3%)
-      yLinha += 16;
-      doc.text('Segurança Social Obrigatória (INSS - 3%)', 55, yLinha);
-      doc.text(dadosSalario.inssTrabalhador.toFixed(2), 400, yLinha, { width: 120, align: 'right' });
+      rows.push({
+        cod: 'D002',
+        desc: 'Segurança Social Obrigatória (INSS Trabalhador)',
+        ref: '3,00%',
+        rem: '0.00',
+        descVal: dadosSalario.inssTrabalhador.toFixed(2)
+      });
 
-      // Linha: Retenção na Fonte de IRPS (Com dedução por dependentes subtraída)
       const irpsValue = dadosSalario.irpsConstatado !== undefined ? dadosSalario.irpsConstatado : 0;
-      yLinha += 16;
-      doc.text('Retenção na Fonte de Imposto (IRPS)', 55, yLinha);
-      doc.text(irpsValue.toFixed(2), 400, yLinha, { width: 120, align: 'right' });
+      rows.push({
+        cod: 'D003',
+        desc: 'Retenção na Fonte de Imposto (IRPS - Lei 11/2025)',
+        ref: 'AT MZ',
+        rem: '0.00',
+        descVal: irpsValue.toFixed(2)
+      });
 
-      // Linha: Desconto de Vales / Adiantamento (Dedução Adicional)
       const valesValue = dadosSalario.descontoVales || 0;
       if (valesValue > 0) {
-        yLinha += 16;
-        doc.text('Desconto de Vales / Adiantamento', 55, yLinha);
-        doc.text(valesValue.toFixed(2), 400, yLinha, { width: 120, align: 'right' });
+        rows.push({
+          cod: 'D004',
+          desc: 'Desconto de Adiantamento Salarial (Vale)',
+          ref: 'Art.113',
+          rem: '0.00',
+          descVal: valesValue.toFixed(2)
+        });
       }
 
-      doc.moveTo(50, yLinha + 18).lineTo(545, yLinha + 18).stroke('#cbd5e1');
+      const rowH = 22;
+      let currY = tblY + 20;
+      rows.forEach((r, idx) => {
+        if (idx % 2 === 1) {
+          doc.rect(startX, currY, width, rowH).fill('#f8fafc');
+        }
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#475569').text(r.cod, col1X + 6, currY + 7, { width: 35 });
+        doc.font('Helvetica').fillColor('#0f172a').text(r.desc, col2X + 6, currY + 7, { width: 215 });
+        doc.fillColor('#475569').text(r.ref, col3X + 4, currY + 7, { width: 47, align: 'center' });
+        doc.fillColor('#0f172a').text(r.rem, col4X + 4, currY + 7, { width: 85, align: 'right' });
+        doc.fillColor('#0f172a').text(r.descVal, col5X + 4, currY + 7, { width: 85, align: 'right' });
+
+        doc.strokeColor('#e2e8f0').lineWidth(0.5).moveTo(startX, currY + rowH).lineTo(tblEnd, currY + rowH).stroke();
+        currY += rowH;
+      });
+
+      // Linha de Totais da Tabela
+      doc.rect(startX, currY, width, 24).fill('#f1f5f9');
+      doc.strokeColor('#0f172a').lineWidth(0.8).moveTo(startX, currY).lineTo(tblEnd, currY).stroke();
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a');
+      doc.text('TOTAIS DO RECIBO (MT)', col2X + 6, currY + 8, { width: 260, align: 'right' });
+      doc.text(dadosSalario.salarioBase.toFixed(2), col4X + 4, currY + 8, { width: 85, align: 'right' });
+      doc.text(dadosSalario.totalDescontos.toFixed(2), col5X + 4, currY + 8, { width: 85, align: 'right' });
+
+      const tableBottomY = currY + 24;
+      // Moldura exterior e colunas verticais da tabela
+      doc.strokeColor('#0f172a').lineWidth(0.8).rect(startX, tblY, width, tableBottomY - tblY).stroke();
+      doc.strokeColor('#cbd5e1').lineWidth(0.5);
+      [col2X, col3X, col4X, col5X].forEach((cx) => {
+        doc.moveTo(cx, tblY + 20).lineTo(cx, tableBottomY).stroke();
+      });
 
       // =========================================================================
-      // 5. RESUMO DE TOTAIS E CAIXA DE LÍQUIDO DA FINTECH
+      // 4. RESUMO FINAL & LÍQUIDO A RECEBER (ESTILO PRIMAVERA V10)
       // =========================================================================
-      yLinha += 32;
-      doc.font('Helvetica-Bold');
-      doc.text('Total de Rendimentos Ilíquidos:', 55, yLinha);
-      doc.text(dadosSalario.salarioBase.toFixed(2), 250, yLinha, { width: 120, align: 'right' });
+      const summaryY = tableBottomY + 22;
+      const inssPatronal = dadosSalario.inssEmpresa ?? Math.round(dadosSalario.salarioBase * 0.04 * 100) / 100;
 
-      doc.text('Total de Descontos Efetuados:', 55, yLinha + 16);
-      doc.text(dadosSalario.totalDescontos.toFixed(2), 400, yLinha + 16, { width: 120, align: 'right' });
+      // Caixa Esquerda: Encargos Informativos
+      doc.rect(startX, summaryY, 275, 62).fill('#f8fafc').strokeColor('#cbd5e1').lineWidth(0.8).stroke();
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text('ENCARGOS & LIQUIDAÇÃO (INFORMATIVO)', startX + 8, summaryY + 8);
+      doc.fontSize(7.5).font('Helvetica').fillColor('#334155');
+      doc.text(`INSS Entidade Patronal (4%): ${inssPatronal.toFixed(2)} MT`, startX + 8, summaryY + 24);
+      doc.text(`Meio de Pagamento: Carteira Móvel (${dadosFuncionario.carteira_movel || 'N/D'})`, startX + 8, summaryY + 37);
+      doc.text(`Regime Legal: Lei do Trabalho n.º 13/2023 & IRPS Lei 11/2025`, startX + 8, summaryY + 50);
 
-      // Bloco Destacado Cinzento para o Salário Líquido Disponibilizado no M-Pesa
-      const yCaixaLiquido = yLinha + 40;
-      doc.rect(50, yCaixaLiquido, 495, 28).fill('#f8fafc').stroke('#e2e8f0');
-      doc.fillColor('#0f172a').text('VALOR LÍQUIDO DISPENSADO E PAGO VIA FINTECH:', 60, yCaixaLiquido + 9);
-      doc.fontSize(10).fillColor('#059669').text(`${dadosSalario.salarioLiquido.toFixed(2)} MT`, 400, yCaixaLiquido + 9, { width: 120, align: 'right' });
+      // Caixa Direita: Quadro Liquido
+      const totBoxX = startX + 295;
+      const totBoxW = 220;
+      doc.rect(totBoxX, summaryY, totBoxW, 62).strokeColor('#0f172a').lineWidth(0.8).stroke();
+      doc.fontSize(8).font('Helvetica').fillColor('#475569').text('Total Ilíquido:', totBoxX + 8, summaryY + 8);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(`${dadosSalario.salarioBase.toFixed(2)} MT`, totBoxX + 95, summaryY + 8, { width: 117, align: 'right' });
+
+      doc.font('Helvetica').fillColor('#475569').text('Total Descontos:', totBoxX + 8, summaryY + 22);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(`${dadosSalario.totalDescontos.toFixed(2)} MT`, totBoxX + 95, summaryY + 22, { width: 117, align: 'right' });
+
+      doc.rect(totBoxX, summaryY + 36, totBoxW, 26).fill('#0f172a');
+      doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#ffffff').text('LÍQUIDO A RECEBER:', totBoxX + 8, summaryY + 45);
+      doc.fontSize(10).text(`${dadosSalario.salarioLiquido.toFixed(2)} MT`, totBoxX + 100, summaryY + 44, { width: 112, align: 'right' });
 
       // =========================================================================
-      // 6. ÁREA DE VALIDAÇÃO E ASSINATURAS MANUAIS
+      // 5. ASSINATURAS E RODAPÉ PRIMAVERA V10 ("PROCESSADO POR COMPUTADOR")
       // =========================================================================
-      doc.fontSize(9).font('Helvetica').fillColor('#475569');
-      doc.text('________________________________________', 55, 690);
-      doc.text('Carimbo e Assinatura da Entidade', 100, 705);
+      doc.strokeColor('#64748b').lineWidth(0.6);
+      doc.moveTo(65, 710).lineTo(245, 710).stroke();
+      doc.moveTo(350, 710).lineTo(530, 710).stroke();
 
-      doc.text('________________________________________', 330, 690);
-      doc.text('Assinatura do(a) Trabalhador(a)', 375, 705);
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a');
+      doc.text('Carimbo e Assinatura da Entidade', 65, 716, { width: 180, align: 'center' });
+      doc.text('Assinatura do(a) Trabalhador(a)', 350, 716, { width: 180, align: 'center' });
 
-      // Software de Faturação Certificado nº 01/AT/2026. PRIMAVERA ERP V10
-      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#94a3b8');
-      doc.text('Emitido por PRIMAVERA ERP V10 | Software de Faturação Certificado nº 01/AT/2026 | Processado por Computador', 50, 755, { align: 'center', width: 495 });
+      drawPrimaveraFooter(doc, numRecibo, {
+        x: startX,
+        width,
+        y: 774,
+        total: dadosSalario.salarioLiquido,
+        nuit: nuitEmp
+      });
 
-      // Finaliza a renderização e fecha a transmissão do arquivo
       doc.end();
 
       stream.on('finish', () => {
@@ -295,6 +435,13 @@ export function criarAvisoPrevioPDF(
       doc.text('Data: ____ / ____ / ________', 50, yAssinatura);
       doc.text('___________________________________________', 280, yAssinatura);
       doc.text('Assinatura do(a) Trabalhador(a)', 340, yAssinatura + 15);
+
+      drawPrimaveraFooter(doc, `AP-${dadosContrato.ano_atual}`, {
+        x: 50,
+        width: 495,
+        y: 770,
+        nuit: dadosEmpresa.nuit
+      });
 
       // Finaliza o documento
       doc.end();
@@ -403,6 +550,14 @@ export function criarExtratoFintechPDF(
           yLinha += 20;
         });
       }
+
+      drawPrimaveraFooter(doc, `EX-FIN-${new Date().getFullYear()}`, {
+        x: 50,
+        width: 495,
+        y: 770,
+        total: saldoDisponivel,
+        nuit: dadosEmpresa.nuit
+      });
 
       // Finaliza o documento
       doc.end();
@@ -534,6 +689,14 @@ export function criarRelatorioAuditoriaPDF(
         });
       }
 
+      drawPrimaveraFooter(doc, `AUD-${dadosAuditoria.periodoPesquisado}`, {
+        x: 50,
+        width: 495,
+        y: 770,
+        total: dadosAuditoria.auditoriaGeral.totalPagoFuncionarios,
+        nuit: dadosEmpresa.nuit
+      });
+
       // Finaliza o documento
       doc.end();
 
@@ -560,89 +723,100 @@ export function criarReciboValePDF(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const doc = new PDFDocument({ size: 'A4', margin: 40 });
       const stream = fs.createWriteStream(caminhoFicheiro);
       doc.pipe(stream);
 
-      // --- CABEÇALHO ---
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text(dadosEmpresa.nome.toUpperCase(), { align: 'left' });
-      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit} | Endereço: ${dadosEmpresa.endereco}`);
-      doc.moveTo(50, doc.y + 8).lineTo(545, doc.y + 8).stroke('#e2e8f0');
-      doc.moveDown(1.5);
+      const startX = 40;
+      const width = 515;
 
-      // --- DATA ---
-      doc.fontSize(10).font('Helvetica').text(`Emissão: ${new Date().toLocaleDateString('pt-MZ')} às ${new Date().toLocaleTimeString('pt-MZ')}`, { align: 'right' });
-      doc.moveDown(1.5);
+      // Cabeçalho Primavera V10 (Empresa esquerda + Quadro Documento direita)
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(dadosEmpresa.nome.toUpperCase(), startX, 40, { width: 295 });
+      doc.fontSize(8).font('Helvetica').fillColor('#475569');
+      doc.text(`NUIT: ${dadosEmpresa.nuit || 'N/A'}`, startX, 58, { width: 295 });
+      doc.text(`Endereço: ${dadosEmpresa.endereco || 'Maputo, Moçambique'}`, startX, 70, { width: 295 });
 
-      // --- TÍTULO ---
-      doc.fontSize(13).font('Helvetica-Bold').fillColor('#111827').text('COMPROVATIVO DE ADIANTAMENTO SALARIAL (VALE)', { align: 'center' });
-      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#475569').text(`Código de Referência: ${vale.vale_id}`, { align: 'center' });
-      doc.moveDown(1.5);
+      const boxX = 355;
+      const boxW = 200;
+      const boxY = 38;
+      doc.rect(boxX, boxY, boxW, 64).strokeColor('#0f172a').lineWidth(1).stroke();
+      doc.rect(boxX, boxY, boxW, 18).fill('#0f172a');
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff').text('RECIBO DE ADIANTAMENTO', boxX + 6, boxY + 5);
+      doc.fontSize(7).text('ORIGINAL', boxX + boxW - 52, boxY + 5, { width: 46, align: 'right' });
 
-      // --- QUADRO DO BENEFICIÁRIO ---
-      const topoQuadro = doc.y;
-      doc.rect(50, topoQuadro, 495, 120).fill('#f8fafc').stroke('#e2e8f0');
-      
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#1e3a8a').text('DADOS DO BENEFICIÁRIO:', 65, topoQuadro + 12);
-      
-      doc.fontSize(9).font('Helvetica').fillColor('#1e293b');
-      doc.text('Nome do Colaborador:', 65, topoQuadro + 32);
-      doc.font('Helvetica-Bold').text(vale.nome.toUpperCase(), 190, topoQuadro + 32);
-      
-      doc.font('Helvetica').text('Cargo / Função:', 65, topoQuadro + 48);
-      doc.font('Helvetica-Bold').text(vale.cargo || 'Não especificado', 190, topoQuadro + 48);
-      
-      doc.font('Helvetica').text('Carteira de Pagamento:', 65, topoQuadro + 64);
-      doc.font('Helvetica-Bold').text(vale.carteira_movel, 190, topoQuadro + 64);
+      doc.strokeColor('#cbd5e1').lineWidth(0.5);
+      doc.moveTo(boxX, boxY + 40).lineTo(boxX + boxW, boxY + 40).stroke();
+      doc.moveTo(boxX + 100, boxY + 40).lineTo(boxX + 100, boxY + 64).stroke();
 
-      doc.font('Helvetica').text('Data de Lançamento:', 65, topoQuadro + 80);
-      doc.font('Helvetica-Bold').text(vale.data_lancamento, 190, topoQuadro + 80);
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Documento N.º', boxX + 6, boxY + 21);
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a').text(vale.vale_id, boxX + 6, boxY + 29);
 
-      doc.font('Helvetica').text('Estado do Desconto:', 65, topoQuadro + 96);
-      const labelStatus = vale.status === "APROVADO_E_TRANSFERIDO" ? 'Pendente de Abate na Folha' : 'Já Abatido / Processado';
-      doc.font('Helvetica-Bold').fillColor(vale.status === "APROVADO_E_TRANSFERIDO" ? '#b45309' : '#047857').text(labelStatus, 190, topoQuadro + 96);
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Data Lançamento', boxX + 6, boxY + 43);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text(vale.data_lancamento, boxX + 6, boxY + 51);
 
-      doc.moveDown(4.5);
+      doc.fontSize(6.5).font('Helvetica').fillColor('#64748b').text('Moeda / Pág.', boxX + 105, boxY + 43);
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text('MZN · 1 / 1', boxX + 105, boxY + 51);
 
-      // --- QUADRO DO VALOR ---
-      const topoValor = doc.y;
-      doc.rect(50, topoValor, 495, 45).fill('#eff6ff').stroke('#bfdbfe');
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a').text('VALOR ADIANTADO INTEGRAL:', 65, topoValor + 18);
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a').text(`${vale.valor.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`, 380, topoValor + 17, { width: 150, align: 'right' });
-      
-      doc.moveDown(3.5);
+      doc.strokeColor('#0f172a').lineWidth(1.2).moveTo(startX, 114).lineTo(startX + width, 114).stroke();
 
-      // --- NOTA LEGAL JURÍDICA ---
-      doc.fontSize(9).font('Helvetica').fillColor('#334155');
-      doc.text('Declaração de Consentimento de Desconto Automático:', 50, doc.y, { underline: true });
-      doc.moveDown(0.5);
-      
-      const textoDeclaracao = `Declaramos que o colaborador acima identificado recebeu, a título de adiantamento de salário (vale) a meio do mês, o montante indicado neste comprovativo através de transferência imediata de fundos para a sua conta de carteira móvel associada no ERP.
+      // Quadro Beneficiário
+      const benY = 128;
+      doc.rect(startX, benY, width, 68).strokeColor('#0f172a').lineWidth(0.8).stroke();
+      doc.rect(startX, benY, width, 16).fill('#f1f5f9').strokeColor('#0f172a').lineWidth(0.8).stroke();
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#0f172a').text('DADOS DO(A) BENEFICIÁRIO(A)', startX + 8, benY + 5);
 
-Nos termos do artigo 113 da Lei do Trabalho vigente em Moçambique, o colaborador concorda e autoriza expressamente o desconto integral de ${vale.valor.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT do seu salário líquido final referente ao processamento da folha salarial subsequente, sem necessidade de notificações adicionais.`;
+      const labelStatus = vale.status === 'APROVADO_E_TRANSFERIDO' ? 'Pendente de Abate na Folha' : 'Já Abatido / Processado';
+      doc.fontSize(8).font('Helvetica').fillColor('#334155');
+      doc.text('Nome:', startX + 8, benY + 24);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(vale.nome.toUpperCase(), startX + 80, benY + 24);
+      doc.font('Helvetica').fillColor('#334155').text('Cargo:', startX + 8, benY + 38);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(vale.cargo || 'Colaborador', startX + 80, benY + 38);
+      doc.font('Helvetica').fillColor('#334155').text('Carteira Móvel:', startX + 310, benY + 24);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(vale.carteira_movel, startX + 385, benY + 24);
+      doc.font('Helvetica').fillColor('#334155').text('Estado:', startX + 310, benY + 38);
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(labelStatus, startX + 385, benY + 38, { width: 125 });
 
-      doc.fontSize(8.5).font('Helvetica').text(textoDeclaracao, 50, doc.y, { align: 'justify', lineGap: 3 });
-      doc.moveDown(4);
+      // Tabela de Adiantamento Primavera V10
+      const tblY = 212;
+      doc.rect(startX, tblY, width, 20).fill('#0f172a');
+      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff');
+      doc.text('Cód.', startX + 6, tblY + 6, { width: 45 });
+      doc.text('Descrição da Operação', startX + 55, tblY + 6, { width: 290 });
+      doc.text('Referência', startX + 350, tblY + 6, { width: 65, align: 'center' });
+      doc.text('Montante (MT)', startX + 420, tblY + 6, { width: 88, align: 'right' });
 
-      // --- ASSINATURAS ---
-      const topoAssinaturas = doc.y;
-      doc.moveTo(50, topoAssinaturas + 35).lineTo(230, topoAssinaturas + 35).stroke('#94a3b8');
-      doc.moveTo(365, topoAssinaturas + 35).lineTo(545, topoAssinaturas + 35).stroke('#94a3b8');
+      doc.rect(startX, tblY + 20, width, 26).strokeColor('#0f172a').lineWidth(0.8).stroke();
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#475569').text('V001', startX + 6, tblY + 29);
+      doc.font('Helvetica').fillColor('#0f172a').text('Adiantamento Salarial (Vale) — Liquidação Imediata', startX + 55, tblY + 29);
+      doc.fillColor('#475569').text('Art. 113', startX + 350, tblY + 29, { width: 65, align: 'center' });
+      doc.font('Helvetica-Bold').fillColor('#0f172a').text(vale.valor.toLocaleString('pt-MZ', { minimumFractionDigits: 2 }), startX + 420, tblY + 29, { width: 88, align: 'right' });
 
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#475569');
-      doc.text('PELO COLABORADOR', 50, topoAssinaturas + 40, { width: 180, align: 'center' });
-      doc.text('PELA ADMINISTRAÇÃO / RH', 365, topoAssinaturas + 40, { width: 180, align: 'center' });
+      // Total Destacado
+      doc.rect(startX + 295, tblY + 56, 220, 26).fill('#0f172a');
+      doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#ffffff').text('TOTAL ADIANTADO:', startX + 303, tblY + 65);
+      doc.fontSize(10).text(`${vale.valor.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`, startX + 405, tblY + 64, { width: 102, align: 'right' });
 
-      doc.fontSize(7.5).font('Helvetica-Oblique').fillColor('#94a3b8');
-      doc.text('(Assinatura e Impressão Digital)', 50, topoAssinaturas + 50, { width: 180, align: 'center' });
-      doc.text('(Assinado Digitalmente no ERP)', 365, topoAssinaturas + 50, { width: 180, align: 'center' });
+      // Nota Legal Jurídica
+      doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#0f172a').text('DECLARAÇÃO DE CONSENTIMENTO DE DESCONTO AUTOMÁTICO', startX, tblY + 104);
+      const textoDeclaracao = `Declaramos que o colaborador acima identificado recebeu, a título de adiantamento de salário (vale), o montante indicado neste comprovativo através de transferência imediata para a carteira móvel associada no ERP.\n\nNos termos do Artigo 113 da Lei do Trabalho vigente na República de Moçambique (Lei n.º 13/2023), o colaborador concorda e autoriza expressamente o desconto integral de ${vale.valor.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT no processamento salarial subsequente.`;
+      doc.fontSize(8).font('Helvetica').fillColor('#334155').text(textoDeclaracao, startX, tblY + 120, { width, align: 'justify', lineGap: 3 });
 
-      // Software de Faturação Certificado nº 01/AT/2026. PRIMAVERA ERP V10
-      doc.moveDown(2);
-      doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#cbd5e1');
-      doc.text('Emitido por PRIMAVERA ERP V10 | Software de Faturação Certificado nº 01/AT/2026 | Processado por Computador', 50, doc.y, { align: 'center', width: 495 });
+      // Assinaturas
+      doc.strokeColor('#64748b').lineWidth(0.6);
+      doc.moveTo(65, 695).lineTo(245, 695).stroke();
+      doc.moveTo(350, 695).lineTo(530, 695).stroke();
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#0f172a');
+      doc.text('PELO COLABORADOR', 65, 702, { width: 180, align: 'center' });
+      doc.text('PELA ADMINISTRAÇÃO / RH', 350, 702, { width: 180, align: 'center' });
 
-      // Finaliza o documento
+      drawPrimaveraFooter(doc, vale.vale_id, {
+        x: startX,
+        width,
+        y: 774,
+        total: vale.valor,
+        nuit: dadosEmpresa.nuit
+      });
+
       doc.end();
 
       stream.on('finish', () => {
@@ -763,6 +937,14 @@ export function criarRelatorioValesPDF(
           yLinha += 24;
         });
       }
+
+      drawPrimaveraFooter(doc, `VALES-${new Date().getFullYear()}`, {
+        x: 50,
+        width: 495,
+        y: 770,
+        total: totalVales,
+        nuit: dadosEmpresa.nuit
+      });
 
       // Finaliza o documento
       doc.end();
@@ -953,6 +1135,14 @@ export function criarMapaSalariosPDF(
       doc.fontSize(7).font('Helvetica-Bold').fillColor('#1e293b').text('Departamento de Contabilidade / RH', xAssinatura, yLinha + 29, { align: 'center', width: 230 });
       doc.font('Helvetica').fillColor('#64748b').text('ERP Moçambique (Assinatura Eletrónica)', xAssinatura, yLinha + 39, { align: 'center', width: 230 });
 
+      drawPrimaveraFooter(doc, `MAPA-${periodo}`, {
+        x: 40,
+        width: 762,
+        y: 538,
+        total: somaLiquido,
+        nuit: nuitEmp
+      });
+
       doc.end();
 
       stream.on('finish', () => {
@@ -1112,7 +1302,13 @@ export function criarRelatorioHistoricoPDF(
         .text('Este relatório contém os dados agregados das folhas de remunerações fechadas e autorizadas no sistema ERP. As retenções do IRPS e INSS aqui sumariadas são as declarações legais correspondentes sob a legislação fiscal de Moçambique, servindo como base fiel de informação para envio à Autoridade Tributária e INSS.', 50, yLinha + 15, { width: 495, align: 'justify' });
 
       // Rodapé de Emissão
-      doc.fontSize(7).font('Helvetica-Oblique').fillColor('#94a3b8').text(`Ficheiro auditado digitalmente pela plataforma Fintech em ${new Date().toLocaleDateString('pt-MZ')}.`, 50, yLinha + 65, { align: 'center', width: 495 });
+      drawPrimaveraFooter(doc, `HIST-${new Date().getFullYear()}`, {
+        x: 50,
+        width: 495,
+        y: 770,
+        total: totalLiquido,
+        nuit: nuitEmp
+      });
 
       doc.end();
 
@@ -1485,6 +1681,15 @@ export function criarGuiaRecolhimentoInssPDF(
       // Desenhar a Segunda Via (Via do Contribuinte) abaixo
       desenharViaGPC(doc, 430);
 
+      drawPrimaveraFooter(doc, dadosGuia.referenciaPagamento || `INSS-${dadosGuia.periodo}`, {
+        x: 40,
+        width: 515,
+        y: 790,
+        total: dadosGuia.totalPagar,
+        nuit: dadosEmpresa.nuit,
+        compact: true
+      });
+
       doc.end();
 
       stream.on('finish', () => {
@@ -1816,9 +2021,18 @@ export function criarGuiaIrpsPDF(
       doc.text('Ass: ___________________________', box3X + 5, bottomY + 78);
 
       // --- NOTAS DE RODAPÉ ---
-      const footerY = 765;
+      const footerY = 758;
       doc.fontSize(5.5).font('Helvetica-Oblique').fillColor('#94a3b8');
-      doc.text('Declaração gerada electronicamente pelo sistema integrado PayrollTech MZ. Os valores declarados de Trabalho Dependente correspondem fielmente às folhas de salário fechadas e liquidadas para o período selecionado. A submissão e quitação devem ser efetuadas em conformidade com as regras fiscais da Direcção Geral dos Impostos e Autoridade Tributária da República de Moçambique.', startX, footerY, { align: 'justify', width: width });
+      doc.text('Declaração gerada electronicamente pelo sistema integrado ClickPay ERP. Os valores declarados de Trabalho Dependente correspondem fielmente às folhas de salário fechadas e liquidadas para o período selecionado.', startX, footerY, { align: 'justify', width: width });
+
+      drawPrimaveraFooter(doc, dadosGuia.referenciaPagamento || `IRPS-${dadosGuia.periodo}`, {
+        x: startX,
+        width,
+        y: 786,
+        total: dadosGuia.totalPagar,
+        nuit: dadosEmpresa.nuit,
+        compact: true
+      });
 
       doc.end();
 
@@ -2208,10 +2422,14 @@ export function criarRelatorioAgrupadoERPPDF(
         doc.text('Este relatório obedece estritamente aos Princípios Contabilísticos do PGC Moçambique: Especialização do Exercício (Accrual Basis), Partidas Dobradas, Não Compensação de Saldos, Continuidade e Prudência. Todas as obrigações tributárias (IRPS, INSS e IVA) foram devidamente apuradas.', 45, yLinha + 16, { width: 505 });
       }
 
-      // Rodapé
-      yLinha += 40;
-      doc.fontSize(7).font('Helvetica-Oblique').fillColor('#94a3b8');
-      doc.text(`Relatório oficial emitido electronicamente por ClickPay ERP Moçambique em ${new Date().toLocaleDateString('pt-MZ')}. Ficheiro auditado conforme regulamento fiscal da AT.`, 40, 780, { align: 'center', width: 515 });
+      // Rodapé Primavera V10 + Processado por computador
+      drawPrimaveraFooter(doc, `${tipoRelatorio.toUpperCase()}-${periodo || 'GERAL'}`, {
+        x: 40,
+        width: 515,
+        y: 785,
+        nuit: dadosEmpresa.nuit,
+        compact: true
+      });
 
       doc.end();
 

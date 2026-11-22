@@ -116,3 +116,21 @@ export function numeroParaExtenso(num: number): string {
 
   return resultado;
 }
+
+export const PRIMAVERA_COMPUTER_NOTE =
+  'Processado por computador · Formato A4 (PRIMAVERA ERP V10)';
+
+/**
+ * Gera um hash curto determinístico para controlo interno do documento.
+ */
+export function computeDocumentHashCode(numeroDocumento: string, total: number, nuit?: string): string {
+  const seed = `${numeroDocumento}|${Number(total || 0).toFixed(2)}|${nuit || '402302399'}|CLICKPAY`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hex = (hash >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(0, 6);
+  return `${hex.slice(0, 4)}-${numeroDocumento.replace(/[^A-Z0-9]/gi, '').slice(-4) || 'MZ26'}`;
+}
+

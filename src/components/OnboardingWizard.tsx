@@ -177,7 +177,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       });
 
       if (fbResult.syncedCollections.length === 0) {
-        setFormError('Não foi possível gravar os dados no Firebase. Verifique a ligação e tente novamente.');
+        setFormError('Não foi possível gravar os dados na nuvem ClickPay. Verifique a ligação e tente novamente.');
         setIsCreatingAccount(false);
         return;
       }
@@ -197,10 +197,10 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       localStorage.setItem('paytek_company_name', cleanEmpresa);
 
       setStage('WIZARD');
-      showToast('Conta ClickPay criada e gravada no Firebase com sucesso!');
+      showToast('Conta ClickPay criada e gravada com sucesso!');
     } catch (err: any) {
       console.error('Erro ao criar conta ClickPay:', err);
-      setFormError('Erro ao registar a conta no Firebase. Tente novamente.');
+      setFormError('Erro ao registar a conta. Tente novamente.');
     } finally {
       setIsCreatingAccount(false);
     }
@@ -350,7 +350,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       onSuccess(fallbackUser);
     } catch (err) {
       console.error(err);
-      setFormError('Erro ao concluir a configuração no Firebase. Tente novamente.');
+      setFormError('Erro ao concluir a configuração da conta. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -582,7 +582,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                   {isCreatingAccount ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>A criar conta no Firebase...</span>
+                      <span>A criar conta ClickPay...</span>
                     </>
                   ) : (
                     <>
@@ -670,7 +670,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
               </div>
               <div>
                 <p className="text-xs font-extrabold text-emerald-950">
-                  Conta ClickPay criada e sincronizada no Firebase ({nomeEmpresa})
+                  Conta ClickPay criada e sincronizada na nuvem ({nomeEmpresa})
                 </p>
                 <p className="text-[11px] text-emerald-800">
                   Pode concluir a configuração fiscal/armazém abaixo ou aceder diretamente ao painel ERP.

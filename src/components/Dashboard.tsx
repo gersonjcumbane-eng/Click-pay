@@ -21,7 +21,8 @@ import {
   ShoppingCart,
   TrendingUp,
   Wallet,
-  X
+  X,
+  Printer
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -43,9 +44,11 @@ import {
   comprasStore,
   caixaStore,
   getCurrentPeriod,
-  getAvailablePeriods
+  getAvailablePeriods,
+  calcularFolhaSalario
 } from '../db_tax';
 import { useToast } from '../context/ToastContext';
+import PayslipA4Modal, { PayslipA4Data } from './PayslipA4Modal';
 
 interface DashboardProps {
   employees: Employee[];
@@ -92,6 +95,56 @@ export default function Dashboard({
   const [modalDetalhesMetrics, setModalDetalhesMetrics] = useState<
     'saldo' | 'receitas' | 'custos' | 'despesas' | 'lucro' | null
   >(null);
+  const [selectedPayslipA4, setSelectedPayslipA4] = useState<PayslipA4Data | null>(null);
+
+  const handleOpenLogPayslipA4 = (log: PaymentLog) => {
+    const matchedEmp =
+      employees.find((e) => e.id === log.employeeId) ||
+      employees.find((e) => e.nome.toLowerCase() === log.employeeName.toLowerCase());
+    const baseSalary = matchedEmp ? matchedEmp.salario_base : Math.round((log.salarioLiquido / 0.88) * 100) / 100;
+    const deps = matchedEmp ? matchedEmp.numero_dependentes : 0;
+    const calc = calcularFolhaSalario(baseSalary, 0, deps);
+    const shortId = (log.employeeId || log.id || '001').replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '001';
+    const pdfUrl = `/download/recibo_${log.employeeId}_${log.periodo.replace(/\s+/g, '_')}.pdf`;
+
+    setSelectedPayslipA4({
+      numeroRecibo: `RV-${log.periodo.replace(/\s+/g, '').slice(0, 6).toUpperCase()}/${shortId}`,
+      periodo: log.periodo,
+      dataEmissao: log.timestamp ? new Date(log.timestamp).toLocaleDateString('pt-PT') : new Date().toLocaleDateString('pt-PT'),
+      empresa: {
+        nome: company.nome || 'ClickPay Moçambique, Lda',
+        nuit: company.nuit,
+        nuel: company.nuel,
+        endereco: company.endereco,
+        provincia: company.provincia,
+        email: company.email,
+        telefone: company.telefone,
+        logo: company.logo
+      },
+      colaborador: {
+        nome: log.employeeName,
+        cargo: matchedEmp?.cargo || 'Colaborador',
+        nuit: matchedEmp?.nuit,
+        inss_numero: matchedEmp?.inss_numero,
+        numero_dependentes: deps,
+        carteira_movel: log.carteira_movel || matchedEmp?.carteira_movel
+      },
+      valores: {
+        salarioBase: baseSalary,
+        descontoFaltas: matchedEmp ? calc.descontoFaltas : 0,
+        diasFaltas: 0,
+        inssTrabalhador: matchedEmp ? calc.inssTrabalhador : Math.round(baseSalary * 0.03 * 100) / 100,
+        inssEmpresa: matchedEmp ? calc.inssEmpresa : Math.round(baseSalary * 0.04 * 100) / 100,
+        irpsConstatado: matchedEmp
+          ? calc.irpsConstatado
+          : Math.max(0, Math.round((baseSalary - baseSalary * 0.03 - log.salarioLiquido) * 100) / 100),
+        descontoVales: 0,
+        totalDescontos: matchedEmp ? calc.totalDescontos : Math.max(0, Math.round((baseSalary - log.salarioLiquido) * 100) / 100),
+        salarioLiquido: log.salarioLiquido
+      },
+      pdfDownloadUrl: pdfUrl
+    });
+  };
 
   const greeting = (() => {
     const hour = new Date().getHours();
@@ -1176,15 +1229,25 @@ export default function Dashboard({
                       <td className="py-2.5 pr-3 text-slate-600">{log.periodo}</td>
                       <td className="py-2.5 pr-3 font-medium text-emerald-800">{log.status}</td>
                       <td className="py-2.5 text-right">
-                        <a
-                          href={`/download/recibo_${log.employeeId}_${log.periodo.replace(
-                            /\s+/g,
-                            '_'
-                          )}.pdf`}
-                          className="inline-flex items-center gap-1 font-medium text-blue-900 hover:underline"
-                        >
-                          Recibo <Download size={11} />
-                        </a>
+                        <div className="inline-flex items-center gap-3 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenLogPayslipA4(log)}
+                            className="inline-flex items-center gap-1 font-semibold text-slate-900 hover:text-blue-900 cursor-pointer"
+                            title="Abrir Recibo A4 Estilo Primavera V10"
+                          >
+                            <Printer size={12} /> A4
+                          </button>
+                          <a
+                            href={`/download/recibo_${log.employeeId}_${log.periodo.replace(
+                              /\s+/g,
+                              '_'
+                            )}.pdf`}
+                            className="inline-flex items-center gap-1 font-medium text-blue-900 hover:underline"
+                          >
+                            PDF <Download size={11} />
+                          </a>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1280,6 +1343,12 @@ export default function Dashboard({
           <ArrowRight size={13} />
         </button>
       </section>
+
+      <PayslipA4Modal
+        isOpen={!!selectedPayslipA4}
+        onClose={() => setSelectedPayslipA4(null)}
+        data={selectedPayslipA4}
+      />
     </div>
   );
 }

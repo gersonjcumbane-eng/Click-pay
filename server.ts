@@ -180,7 +180,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       [
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.googleapis.com https://accounts.google.com https://*.gstatic.com",
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
         "font-src 'self' data: https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
         "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://accounts.google.com https://apis.google.com wss://*.firebaseio.com",
@@ -1661,38 +1661,75 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     });
   });
 
-  // AUTENTICAÇÃO VIA CONTA GOOGLE / FIREBASE ID TOKEN
-  app.post('/api/auth/google-firebase', async (req: Request, res: Response) => {
-    const { idToken } = req.body || {};
-    if (!idToken || typeof idToken !== 'string' || idToken.length < 20) {
-      return res.status(400).json({ erro: 'Token Google/Firebase inválido ou ausente.' });
-    }
-    if (!firebaseConfig || !firebaseConfig.apiKey) {
-      return res.status(503).json({ erro: 'Configuração Firebase indisponível neste servidor.' });
+  // AUTENTICAÇÃO VIA CONTA GOOGLE / GMAIL (COM SUPORTE A OAUTH DIRETO E FALLBACK SILENCIOSO)
+  const handleGoogleAuth = async (req: Request, res: Response) => {
+    const { googleAccessToken, idToken } = req.body || {};
+    const hasAccessToken = typeof googleAccessToken === 'string' && googleAccessToken.length >= 20;
+    const hasIdToken = typeof idToken === 'string' && idToken.length >= 20;
+
+    if (!hasAccessToken && !hasIdToken) {
+      return res.status(400).json({ erro: 'Sessão Google inválida ou ausente.' });
     }
 
     try {
-      const lookupRes = await fetch(
-        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken })
+      let emailNorm = '';
+      let emailVerified = false;
+      let displayName = '';
+
+      if (hasAccessToken) {
+        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${googleAccessToken}` }
+        });
+        const userInfo: any = await userInfoRes.json().catch(() => ({}));
+        if (!userInfoRes.ok || !userInfo?.email) {
+          return res.status(401).json({ erro: 'Sessão Gmail inválida ou expirada. Tente autenticar novamente.' });
         }
-      );
-      const lookupData: any = await lookupRes.json().catch(() => ({}));
-      const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
-      if (!lookupRes.ok || !fbUser || !fbUser.email) {
-        return res.status(401).json({ erro: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' });
-      }
-      if (fbUser.disabled) {
-        return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
-      }
-      if (fbUser.emailVerified !== true) {
-        return res.status(403).json({ erro: 'O e-mail da conta Google não está verificado.' });
+
+        // Validar audiência OAuth quando configurado
+        if (firebaseConfig?.oAuthClientId) {
+          const tokenInfoRes = await fetch(
+            `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(googleAccessToken)}`
+          ).catch(() => null);
+          if (tokenInfoRes && tokenInfoRes.ok) {
+            const tokenInfo: any = await tokenInfoRes.json().catch(() => ({}));
+            const tokenClient = tokenInfo?.azp || tokenInfo?.aud;
+            if (tokenClient && tokenClient !== firebaseConfig.oAuthClientId) {
+              return res.status(401).json({ erro: 'Token Google não pertence a esta aplicação.' });
+            }
+          }
+        }
+
+        emailNorm = String(userInfo.email).toLowerCase().trim();
+        emailVerified = Boolean(userInfo.email_verified);
+        displayName = String(userInfo.name || '');
+      } else if (hasIdToken) {
+        if (!firebaseConfig || !firebaseConfig.apiKey) {
+          return res.status(503).json({ erro: 'Serviço de validação Google temporariamente indisponível.' });
+        }
+        const lookupRes = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken })
+          }
+        );
+        const lookupData: any = await lookupRes.json().catch(() => ({}));
+        const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
+        if (!lookupRes.ok || !fbUser || !fbUser.email) {
+          return res.status(401).json({ erro: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' });
+        }
+        if (fbUser.disabled) {
+          return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
+        }
+        emailNorm = String(fbUser.email).toLowerCase().trim();
+        emailVerified = fbUser.emailVerified === true;
+        displayName = String(fbUser.displayName || '');
       }
 
-      const emailNorm = String(fbUser.email).toLowerCase().trim();
+      if (!emailVerified) {
+        return res.status(403).json({ erro: 'O e-mail da conta Gmail não está verificado.' });
+      }
 
       // 1. Fundador (Super Admin)
       if (isFounderEmail(emailNorm)) {
@@ -1702,7 +1739,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           mensagem: "Acesso de Fundador autenticado via Conta Google Verificada!",
           token: signSessionToken({ email: emailNorm, role: "SUPER_ADMIN_PAYROLL", empresa_id: "cli_founders" }),
           usuario: {
-            nome: fbUser.displayName || "Gerson Cumbane (Fundador ClickPay)",
+            nome: displayName || "Gerson Cumbane (Fundador ClickPay)",
             email: emailNorm,
             funcao: "SUPER_ADMIN_PAYROLL",
             empresa_id: "cli_founders",
@@ -1713,7 +1750,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           }
         };
         notifyFounder(
-          'Login do Fundador via Google Auth',
+          'Login do Fundador via Gmail / Google',
           `Autenticação direta concluída com conta Google verificada: ${emailNorm}.`,
           { userEmail: emailNorm, status: 'sucesso' }
         );
@@ -1728,10 +1765,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         }
         const targetCompanyId = sysUser.role === 'CLIENTE_EMPRESA' ? 'cli_bronze' : 'cli_founders';
         selecionarClienteEmpresa(targetCompanyId);
-        sysUser.lastLogin = 'Agora (Google Auth)';
+        sysUser.lastLogin = 'Agora (Gmail)';
         const sessionPayload = {
           sucesso: true,
-          mensagem: `Sessão iniciada via Google como ${sysUser.roleLabel || sysUser.role}`,
+          mensagem: `Sessão iniciada via Gmail como ${sysUser.roleLabel || sysUser.role}`,
           token: signSessionToken({ email: emailNorm, role: sysUser.role, empresa_id: targetCompanyId }),
           usuario: {
             nome: sysUser.name,
@@ -1744,57 +1781,62 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             next_billing_date: getDefaultNextBillingDate()
           }
         };
-        notifyFounder('Login via Google Auth', `Acesso autorizado para ${emailNorm} (${sysUser.role}).`, { userEmail: emailNorm, status: 'sucesso' });
+        notifyFounder('Login via Gmail', `Acesso autorizado para ${emailNorm} (${sysUser.role}).`, { userEmail: emailNorm, status: 'sucesso' });
         return res.json(sessionPayload);
       }
 
-      // 3. Cliente empresarial (memória ou Firestore saas_clients)
+      // 3. Cliente empresarial (memória ou base de dados cloud saas_clients / erp_clients)
       let clienteErp = baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm);
       if (!clienteErp && firebaseConfig.projectId) {
         const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
         const queryUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
-        const fsRes = await fetch(queryUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            structuredQuery: {
-              from: [{ collectionId: 'saas_clients' }],
-              where: {
-                fieldFilter: {
-                  field: { fieldPath: 'email' },
-                  op: 'EQUAL',
-                  value: { stringValue: emailNorm }
-                }
-              },
-              limit: 1
+        for (const colName of ['saas_clients', 'erp_clients']) {
+          if (clienteErp) break;
+          const fsRes = await fetch(queryUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              structuredQuery: {
+                from: [{ collectionId: colName }],
+                where: {
+                  fieldFilter: {
+                    field: { fieldPath: 'email' },
+                    op: 'EQUAL',
+                    value: { stringValue: emailNorm }
+                  }
+                },
+                limit: 1
+              }
+            })
+          }).catch(() => null);
+          if (fsRes && fsRes.ok) {
+            const fsRows: any = await fsRes.json().catch(() => []);
+            const matchedDoc = Array.isArray(fsRows) ? fsRows.find((r: any) => r?.document?.fields) : null;
+            if (matchedDoc) {
+              const f = matchedDoc.document.fields;
+              const docId = f.id?.stringValue || matchedDoc.document.name?.split('/').pop() || `cli_fs_${Date.now()}`;
+              const rawPlan = f.plan?.stringValue || f.subscription_plan?.stringValue || 'Bronze';
+              const rawStatus = f.status?.stringValue || f.subscription_status?.stringValue || 'ativo';
+              clienteErp = adicionarClienteEmpresa({
+                id: docId,
+                nome: f.companyName?.stringValue || f.tradeName?.stringValue || f.nome?.stringValue || 'Empresa ClickPay',
+                nuit: f.nuit?.stringValue || '400000000',
+                endereco: f.address?.stringValue || 'Maputo, Moçambique',
+                provincia: 'Maputo Cidade',
+                distrito: 'KaMpfumo',
+                regime_iva: 'Geral (16%)',
+                nuel: '100000000',
+                email: emailNorm,
+                telefone: f.phone?.stringValue || f.telefone?.stringValue || '+258 84 000 0000',
+                logo: '/clickpay-logo.png',
+                password: '',
+                subscription_status: (String(rawStatus).toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo') as any,
+                subscription_plan: rawPlan as any,
+                next_billing_date: getDefaultNextBillingDate(),
+                fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || f.fee_base?.integerValue || f.fee_base?.doubleValue || getPlanFeeMzn(rawPlan)),
+                fee_por_slip: getPlanExtraSlipFeeMzn(rawPlan)
+              });
             }
-          })
-        }).catch(() => null);
-        if (fsRes && fsRes.ok) {
-          const fsRows: any = await fsRes.json().catch(() => []);
-          const matchedDoc = Array.isArray(fsRows) ? fsRows.find((r: any) => r?.document?.fields) : null;
-          if (matchedDoc) {
-            const f = matchedDoc.document.fields;
-            const docId = f.id?.stringValue || matchedDoc.document.name?.split('/').pop() || `cli_fs_${Date.now()}`;
-            clienteErp = adicionarClienteEmpresa({
-              id: docId,
-              nome: f.companyName?.stringValue || f.tradeName?.stringValue || 'Empresa ClickPay',
-              nuit: f.nuit?.stringValue || '400000000',
-              endereco: f.address?.stringValue || 'Maputo, Moçambique',
-              provincia: 'Maputo Cidade',
-              distrito: 'KaMpfumo',
-              regime_iva: 'Geral (16%)',
-              nuel: '100000000',
-              email: emailNorm,
-              telefone: f.phone?.stringValue || '+258 84 000 0000',
-              logo: '/clickpay-logo.png',
-              password: '',
-              subscription_status: (String(f.status?.stringValue || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo') as any,
-              subscription_plan: (f.plan?.stringValue || 'Bronze') as any,
-              next_billing_date: getDefaultNextBillingDate(),
-              fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || getPlanFeeMzn(f.plan?.stringValue)),
-              fee_por_slip: getPlanExtraSlipFeeMzn(f.plan?.stringValue)
-            });
           }
         }
       }
@@ -1803,7 +1845,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         selecionarClienteEmpresa(clienteErp.id);
         const sessionPayload = {
           sucesso: true,
-          mensagem: `Sessão iniciada via Google para ${clienteErp.nome}`,
+          mensagem: `Sessão iniciada via Gmail para ${clienteErp.nome}`,
           token: signSessionToken({ email: emailNorm, role: 'CLIENTE_EMPRESA', empresa_id: clienteErp.id }),
           usuario: {
             email: emailNorm,
@@ -1815,18 +1857,21 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             next_billing_date: clienteErp.next_billing_date || getDefaultNextBillingDate()
           }
         };
-        notifyFounder('Login de Cliente via Google Auth', `Acesso autorizado para ${clienteErp.nome} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
+        notifyFounder('Login de Cliente via Gmail', `Acesso autorizado para ${clienteErp.nome} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
         return res.json(sessionPayload);
       }
 
       return res.status(403).json({
-        erro: `A conta Google (${emailNorm}) não está associada a nenhuma empresa registada no ClickPay ERP.`
+        erro: `A conta Gmail (${emailNorm}) não está associada a nenhuma empresa registada no ClickPay ERP.`
       });
     } catch (err: any) {
       console.error('[Google Auth Error]:', err);
-      return res.status(500).json({ erro: 'Erro ao validar a autenticação Google.' });
+      return res.status(500).json({ erro: 'Erro ao validar a autenticação Gmail.' });
     }
-  });
+  };
+
+  app.post('/api/auth/google', handleGoogleAuth);
+  app.post('/api/auth/google-firebase', handleGoogleAuth);
 
   // =========================================================================
   // ENDPOINTS DE GESTÃO DE ACESSO, TOKENS DE API & IDENTIFICADORES FISCAIS (EXCLUSIVO SUPER ADMIN)

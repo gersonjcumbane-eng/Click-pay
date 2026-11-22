@@ -161,18 +161,18 @@ export default function CorporateSettings({
 
   const handleTriggerBackup = async () => {
     setTriggeringBackup(true);
-    setBackupStep('A ligar ao Firebase Cloud Firestore com encriptação SSL...');
+    setBackupStep('A ligar à nuvem ClickPay com encriptação SSL...');
     await new Promise(resolve => setTimeout(resolve, 600));
     setBackupStep('A ler tabelas de colaboradores, contratos, senhas e remunerações...');
     await new Promise(resolve => setTimeout(resolve, 600));
-    setBackupStep('A sincronizar backup em tempo real com a base de dados Firebase...');
+    setBackupStep('A sincronizar cópia de segurança em tempo real na nuvem...');
     await new Promise(resolve => setTimeout(resolve, 500));
 
     try {
       const res = await fetch('/api/backup/trigger', {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ tipo: 'Manual (Firebase Cloud Sync)' })
+        body: JSON.stringify({ tipo: 'Manual (ClickPay Cloud Sync)' })
       });
       const data = await res.json();
       if (data.success) {
@@ -194,8 +194,8 @@ export default function CorporateSettings({
             console.warn('Aviso ao gravar backup no Firebase Firestore:', fbErr);
           }
         }
-        setBackupStep('Cópia de segurança sincronizada com sucesso no Firebase!');
-        showSuccess('Cópia de segurança gravada no servidor e na base de dados Firebase!');
+        setBackupStep('Cópia de segurança sincronizada com sucesso na nuvem!');
+        showSuccess('Cópia de segurança gravada no servidor e na nuvem ClickPay!');
         await new Promise(resolve => setTimeout(resolve, 800));
         loadBackupHistory();
       } else {
@@ -448,7 +448,7 @@ export default function CorporateSettings({
         }
 
         setShowPerfilSuccess(true);
-        showSuccess('Perfil da empresa guardado e sincronizado no Firebase com sucesso!');
+        showSuccess('Perfil da empresa guardado e sincronizado com sucesso!');
         setTimeout(() => setShowPerfilSuccess(false), 4000);
       } else {
         showError(dataPerfil.erro || "Erro ao salvar perfil da empresa.");

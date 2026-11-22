@@ -9,7 +9,7 @@ import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, Ar
 import {
   authenticateClientInFirebase,
   signInWithGoogleAccount,
-  lookupClientByEmailInFirebase
+  lookupClientByEmailInCloud
 } from '../lib/firebase';
 import SupportTicketModal, {
   buildSupportMailtoUrl,
@@ -86,11 +86,11 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const authenticateViaCloudFallback = async (cleanEmail: string, cleanPassword: string): Promise<FallbackSession | null> => {
     const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    // Autenticar apenas contas empresariais registadas no Firebase Firestore / Firebase Auth (nunca credenciais de sistema)
+    // Autenticar apenas contas empresariais registadas na nuvem ClickPay (nunca credenciais de sistema)
     const fbAuth = await authenticateClientInFirebase(cleanEmail, cleanPassword);
     if (fbAuth.ok && fbAuth.client) {
       return {
-        token: `token_firebase_${fbAuth.client.id}`,
+        token: `token_cloud_${fbAuth.client.id}`,
         usuario: {
           email: fbAuth.client.email,
           funcao: 'CLIENTE_EMPRESA',
@@ -136,17 +136,17 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       });
 
       const isJson = isJsonResponse(response);
-      // Em deploy estático (Firebase Hosting / Vercel), /api/* pode responder 200 HTML ou 404/405/500
+      // Em deploy estático, /api/* pode responder 200 HTML ou 404/405/500
       if (!isJson || response.status === 404 || response.status === 405 || response.status >= 500) {
         const ok = await triggerFallbackAuth();
         if (!ok) {
           if (response.status >= 500) {
             setError(
-              `O servidor de autenticação respondeu com erro interno (HTTP ${response.status}). Utilize "ENTRAR COM CONTA GOOGLE" ou contacte o suporte.`
+              `O servidor de autenticação respondeu com erro interno (HTTP ${response.status}). Utilize "ENTRAR COM GMAIL / CONTA GOOGLE" ou contacte o suporte.`
             );
           } else {
             setError(
-              `O serviço de autenticação backend não está disponível neste endereço (HTTP ${response.status}). Utilize "ENTRAR COM CONTA GOOGLE" ou aceda à versão publicada.`
+              `O serviço de autenticação backend não está disponível neste endereço (HTTP ${response.status}). Utilize "ENTRAR COM GMAIL / CONTA GOOGLE" ou aceda à versão publicada.`
             );
           }
         }
@@ -180,7 +180,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         setError(errData.erro || 'Dados de início de sessão incorretos. Verifique o e-mail e a palavra-passe.');
       }
     } catch (err: any) {
-      console.warn('Backend indisponível, autenticando via Firebase/Nuvem:', err);
+      console.warn('Backend indisponível, autenticando via nuvem ClickPay:', err);
       const ok = await triggerFallbackAuth();
       if (!ok) {
         setError('Ligação ao servidor de autenticação indisponível ou credenciais incorretas.');
@@ -212,7 +212,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     };
 
     try {
-      // Se já estamos numa sessão OTP de fallback cloud/Firebase, validar diretamente
+      // Se já estamos numa sessão OTP de fallback cloud, validar diretamente
       if (pendingFallbackSession) {
         if (completeLocalOtp()) return;
         setError('Código OTP incorreto. Verifique o código exibido e tente novamente.');
@@ -304,8 +304,8 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     setGoogleLoading(true);
     try {
       const gRes = await signInWithGoogleAccount();
-      if (!gRes.ok || !gRes.idToken || !gRes.email) {
-        setError(gRes.error || 'Falha na autenticação com Google.');
+      if (!gRes.ok || (!gRes.googleAccessToken && !gRes.idToken) || !gRes.email) {
+        setError(gRes.error || 'Falha na autenticação com Gmail.');
         return;
       }
 
@@ -326,7 +326,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
           onLoginSuccess();
           return true;
         }
-        const lookup = await lookupClientByEmailInFirebase(gRes.email!);
+        const lookup = await lookupClientByEmailInCloud(gRes.email!);
         if (lookup.found && lookup.client) {
           persistUserSession(
             `token_google_${lookup.client.id}`,
@@ -347,16 +347,19 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       };
 
       try {
-        const res = await fetch('/api/auth/google-firebase', {
+        const res = await fetch('/api/auth/google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken: gRes.idToken })
+          body: JSON.stringify({
+            googleAccessToken: gRes.googleAccessToken,
+            idToken: gRes.idToken
+          })
         });
         const isJson = isJsonResponse(res);
         if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
           const ok = await completeStaticGoogleFallback();
           if (!ok) {
-            setError(`A conta Google (${gRes.email}) não está associada a nenhuma empresa registada no sistema.`);
+            setError(`O e-mail Gmail (${gRes.email}) não está associado a nenhuma empresa registada no sistema.`);
           }
           return;
         }
@@ -366,11 +369,11 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
           onLoginSuccess();
           return;
         }
-        setError(data.erro || 'Conta Google não autorizada neste portal.');
+        setError(data.erro || 'Conta Gmail não autorizada neste portal.');
       } catch {
         const ok = await completeStaticGoogleFallback();
         if (!ok) {
-          setError(`Não foi possível autenticar a conta Google (${gRes.email}).`);
+          setError(`Não foi possível autenticar a conta Gmail (${gRes.email}).`);
         }
       }
     } finally {
@@ -613,7 +616,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                 {googleLoading ? (
                   <>
                     <div className="w-4 h-4 border-2 border-slate-700 border-t-transparent rounded-full animate-spin" />
-                    <span>A validar Conta Google...</span>
+                    <span>A reconhecer conta Gmail...</span>
                   </>
                 ) : (
                   <>
@@ -635,7 +638,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                         d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
                       />
                     </svg>
-                    <span>ENTRAR COM CONTA GOOGLE</span>
+                    <span>ENTRAR COM GMAIL / CONTA GOOGLE</span>
                   </>
                 )}
               </button>

@@ -27,6 +27,11 @@ import {
 } from 'lucide-react';
 import { LeadItem, PropostaItem, ContratoComercialItem, CompanyData } from '../types';
 import { useConfirm } from '../context/ToastContext';
+import {
+  computeDocumentHashCode,
+  numeroParaExtenso,
+  PRIMAVERA_COMPUTER_NOTE
+} from '../utils/documentUtils';
 
 interface CRMVendasProps {
   companyData: CompanyData;
@@ -1272,150 +1277,203 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
         </div>
       )}
 
-      {/* MODAL 4: VISUALIZADOR DE PROPOSTA COMERCIAL (DOCUMENTO PRINT / PDF) */}
+      {/* MODAL 4: VISUALIZADOR DE PROPOSTA COMERCIAL (DOCUMENTO A4 PRIMAVERA V10) */}
       {selectedPropostaPDF && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-8 shadow-2xl border border-slate-300 space-y-6 my-6 print:m-0 print:p-0 print:shadow-none">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-start justify-center p-2 sm:p-4 md:p-6 z-50 overflow-y-auto print:p-0 print:bg-white print:static print:inset-auto">
+          <div className="bg-white rounded-lg max-w-[210mm] w-full shadow-2xl border border-slate-300 overflow-hidden my-4 sm:my-6 print:m-0 print:border-none print:shadow-none print:w-full print:max-w-none print:rounded-none">
             {/* Action Bar */}
-            <div className="flex items-center justify-between border-b border-slate-200 pb-4 print:hidden">
-              <span className="text-xs font-black text-blue-900 uppercase tracking-widest">
-                Documento Oficial de Proposta Comercial
-              </span>
+            <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 print:hidden no-print">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider block">
+                  Proposta Comercial A4 · Estilo Primavera ERP V10
+                </span>
+                <span className="text-[11px] text-slate-300">
+                  {selectedPropostaPDF.numero_proposta} · {selectedPropostaPDF.cliente_nome}
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => window.print()}
-                  className="px-3 py-1.5 bg-blue-900 text-white rounded-lg text-xs font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Printer size={14} /> Imprimir / PDF
+                  <Printer size={14} /> Imprimir / Guardar PDF (A4)
                 </button>
                 <button
+                  type="button"
                   onClick={() => setSelectedPropostaPDF(null)}
-                  className="px-3 py-1.5 border border-slate-300 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs font-semibold cursor-pointer"
                 >
                   Fechar
                 </button>
               </div>
             </div>
 
-            {/* Document Timbre / Header */}
-            <div className="border-b-2 border-blue-900 pb-4 flex justify-between items-start">
-              <div>
-                <h2 className="text-xl font-black text-blue-900 tracking-tight">{companyData.nome || 'ClickPay Cloud ERP'}</h2>
-                <p className="text-xs text-slate-600 font-medium">{companyData.endereco || 'Avenida 25 de Setembro, Maputo, Moçambique'}</p>
-                <p className="text-xs text-slate-600 font-mono">NUIT: {companyData.nuit || '400123456'}</p>
-              </div>
-
-              <div className="text-right space-y-1">
-                <span className="text-sm font-black text-slate-900 font-mono block">{selectedPropostaPDF.numero_proposta}</span>
-                <span className="text-[10px] bg-blue-50 text-blue-900 px-2 py-0.5 rounded font-bold uppercase border border-blue-200">
-                  Proposta Comercial
-                </span>
-                <p className="text-[10.5px] text-slate-500 block pt-1">
-                  Validade: {selectedPropostaPDF.data_validade}
-                </p>
-              </div>
-            </div>
-
-            {/* Client Info Block */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Entidade Destinatária</span>
-              <h4 className="text-sm font-black text-slate-900">{selectedPropostaPDF.cliente_nome}</h4>
-              <p className="text-xs text-slate-600 font-mono">NUIT: {selectedPropostaPDF.nuit_cliente}</p>
-              {selectedPropostaPDF.email_cliente && (
-                <p className="text-xs text-slate-500">{selectedPropostaPDF.email_cliente} | {selectedPropostaPDF.telefone_cliente}</p>
-              )}
-            </div>
-
-            {/* Proposal Items Table */}
-            <table className="w-full text-left text-xs border-collapse border border-slate-200">
-              <thead>
-                <tr className="bg-slate-100 font-bold text-slate-700 border-b border-slate-200">
-                  <th className="p-2 border-r border-slate-200">Item / Serviço</th>
-                  <th className="p-2 border-r border-slate-200 text-center w-16">Qtd</th>
-                  <th className="p-2 border-r border-slate-200 text-right w-28">Preço Unit.</th>
-                  <th className="p-2 text-right w-28">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {selectedPropostaPDF.itens.map((it, idx) => (
-                  <tr key={idx}>
-                    <td className="p-2 border-r border-slate-200 font-medium text-slate-800">{it.descricao}</td>
-                    <td className="p-2 border-r border-slate-200 text-center font-mono">{it.quantidade}</td>
-                    <td className="p-2 border-r border-slate-200 text-right font-mono">{it.preco_unitario.toLocaleString('pt-MZ')} MT</td>
-                    <td className="p-2 text-right font-mono font-bold text-slate-900">{it.total.toLocaleString('pt-MZ')} MT</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Financial Totals */}
-            <div className="flex justify-end">
-              <div className="w-64 space-y-1 text-xs border-t border-slate-200 pt-2">
-                <div className="flex justify-between text-slate-600">
-                  <span>Subtotal:</span>
-                  <span className="font-mono">{selectedPropostaPDF.subtotal.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT</span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>IVA (16%):</span>
-                  <span className="font-mono">{selectedPropostaPDF.valor_iva.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT</span>
-                </div>
-                <div className="flex justify-between font-black text-sm text-blue-900 border-t border-slate-300 pt-1">
-                  <span>Total Geral:</span>
-                  <span className="font-mono">{selectedPropostaPDF.total_geral.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Conditions, Bank Details & Signatures */}
-            <div className="pt-4 border-t border-slate-200 space-y-4 text-xs">
-              <div>
-                <span className="font-bold text-slate-800 block mb-0.5">Termos e Condições de Pagamento:</span>
-                <p className="text-slate-600 italic bg-slate-50 p-2.5 rounded border border-slate-200">
-                  {selectedPropostaPDF.condicoes_pagamento}
-                </p>
-              </div>
-
-              {/* Bank Coordinates */}
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-1 text-slate-800">
-                <span className="font-bold text-blue-900 block text-[11px] uppercase tracking-wider">
-                  Coordenadas Bancárias para Liquidação (ClickPay Moçambique, Lda):
-                </span>
-                <div className="grid grid-cols-3 gap-2 font-mono text-[9px] pt-1">
-                  <div className="bg-white p-2 rounded border border-blue-150">
-                    <b className="text-blue-900 block">MILLENNIUM BIM</b>
-                    Conta: 9944-8833-MZ<br />
-                    NIB: 0001 0000 9944 8833 01
+            {/* A4 Sheet Primavera ERP V10 */}
+            <div
+              data-a4-print-sheet="true"
+              className="w-full max-w-[210mm] min-h-[297mm] mx-auto px-7 py-7 sm:px-10 sm:py-9 bg-white text-slate-900 flex flex-col justify-between gap-5 print:px-2 print:py-2"
+            >
+              <div className="space-y-5">
+                {/* Document Timbre / Header */}
+                <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row justify-between items-start gap-4">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-bold text-slate-950 uppercase tracking-tight">
+                      {companyData.nome || 'ClickPay Moçambique, Lda'}
+                    </h2>
+                    <p className="text-[10px] text-slate-700">
+                      {companyData.endereco || 'Avenida 25 de Setembro, Maputo, Moçambique'}
+                    </p>
+                    <p className="text-[10px] text-slate-700 font-mono tabular-nums">
+                      <b>NUIT:</b> {companyData.nuit || '402302399'}
+                      {companyData.telefone ? ` · Tel: ${companyData.telefone}` : ''}
+                    </p>
                   </div>
-                  <div className="bg-white p-2 rounded border border-blue-150">
-                    <b className="text-blue-900 block">BCI FOMENTO</b>
-                    Conta: 1122-3344-MZ<br />
-                    NIB: 0008 0000 1122 3344 02
-                  </div>
-                  <div className="bg-white p-2 rounded border border-blue-150">
-                    <b className="text-blue-900 block">CARTEIRAS MÓVEIS</b>
-                    M-Pesa: +258 861390061<br />
-                    E-Mola: +258 871234567
+
+                  {/* Metadata Box Primavera V10 */}
+                  <div className="border border-slate-900 w-full sm:w-64 text-[10px] bg-white shrink-0">
+                    <div className="bg-slate-900 text-white px-3 py-1.5 flex justify-between items-center font-bold uppercase tracking-wider">
+                      <span>Proposta Comercial</span>
+                      <span className="font-mono text-[9px] text-slate-300">ORIGINAL</span>
+                    </div>
+                    <div className="grid grid-cols-2 divide-x divide-y divide-slate-300 border-t border-slate-900">
+                      <div className="col-span-2 p-1.5 bg-slate-50 flex justify-between items-center">
+                        <span className="text-[8.5px] uppercase font-semibold text-slate-500">N.º Documento</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-950">{selectedPropostaPDF.numero_proposta}</span>
+                      </div>
+                      <div className="p-1.5">
+                        <span className="text-[8px] uppercase font-semibold text-slate-500 block">Validade</span>
+                        <span className="font-mono tabular-nums font-semibold text-slate-950">{selectedPropostaPDF.data_validade}</span>
+                      </div>
+                      <div className="p-1.5">
+                        <span className="text-[8px] uppercase font-semibold text-slate-500 block">Moeda / Pág.</span>
+                        <span className="font-mono tabular-nums font-semibold text-slate-950">MZN · 1/1</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
+
+                {/* Client Info Block */}
+                <div className="border border-slate-900 p-3 bg-slate-50 space-y-1 text-[10px]">
+                  <span className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Exmo.(s) Senhor(es) — Entidade Destinatária
+                  </span>
+                  <h4 className="text-xs font-bold text-slate-950 uppercase">{selectedPropostaPDF.cliente_nome}</h4>
+                  <p className="text-[10px] text-slate-700 font-mono tabular-nums">
+                    <b>NUIT:</b> {selectedPropostaPDF.nuit_cliente || 'N/D'}
+                  </p>
+                  {selectedPropostaPDF.email_cliente && (
+                    <p className="text-[10px] text-slate-600">
+                      {selectedPropostaPDF.email_cliente} {selectedPropostaPDF.telefone_cliente ? `| ${selectedPropostaPDF.telefone_cliente}` : ''}
+                    </p>
+                  )}
+                </div>
+
+                {/* Proposal Items Table */}
+                <div className="border border-slate-900 overflow-hidden">
+                  <table className="w-full text-left text-[10px] border-collapse">
+                    <thead>
+                      <tr className="bg-slate-900 font-bold text-white uppercase text-[9px] tracking-wider">
+                        <th className="p-2 border-r border-slate-700 w-10 text-center">#</th>
+                        <th className="p-2 border-r border-slate-700">Descrição do Artigo / Serviço</th>
+                        <th className="p-2 border-r border-slate-700 text-center w-16">Qtd.</th>
+                        <th className="p-2 border-r border-slate-700 text-right w-28">Pr. Unit.</th>
+                        <th className="p-2 text-right w-28">Total (MT)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {selectedPropostaPDF.itens.map((it, idx) => (
+                        <tr key={idx} className="divide-x divide-slate-200">
+                          <td className="p-2 text-center font-mono tabular-nums text-slate-500">{String(idx + 1).padStart(2, '0')}</td>
+                          <td className="p-2 font-medium text-slate-900">{it.descricao}</td>
+                          <td className="p-2 text-center font-mono tabular-nums">{it.quantidade}</td>
+                          <td className="p-2 text-right font-mono tabular-nums">
+                            {it.preco_unitario.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="p-2 text-right font-mono tabular-nums font-bold text-slate-950">
+                            {it.total.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs">
-                <div>
-                  <div className="border-t border-slate-400 pt-1 font-bold text-slate-800">
-                    Pelo Departamento Comercial
+              {/* Footer pinned to bottom of A4 sheet */}
+              <div className="space-y-4 pt-3 border-t-2 border-slate-900 a4-avoid-break">
+                <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+                  <div className="flex-1 text-[9.5px] bg-slate-50 p-3 border border-slate-300 space-y-1">
+                    <span className="font-bold text-slate-900 uppercase block text-[8.5px]">Valor por Extenso</span>
+                    <p className="italic text-slate-800">{numeroParaExtenso(selectedPropostaPDF.total_geral)}</p>
+                    <span className="font-bold text-slate-900 uppercase block text-[8.5px] pt-1">Condições de Pagamento</span>
+                    <p className="text-slate-700">{selectedPropostaPDF.condicoes_pagamento}</p>
                   </div>
-                  <span className="text-[10px] text-slate-500 block">{selectedPropostaPDF.vendedor}</span>
-                </div>
-                <div>
-                  <div className="border-t border-slate-400 pt-1 font-bold text-slate-800">
-                    Aceite do Cliente
-                  </div>
-                  <span className="text-[10px] text-slate-500 block">Assinatura / Carimbo</span>
-                </div>
-              </div>
 
-              <div className="pt-2 text-center text-[8px] font-bold text-slate-400 border-t border-slate-200">
-                Emitido por PRIMAVERA ERP V10 | Software Certificado nº 01/AT/2026 | Processado por Computador
+                  <div className="w-full sm:w-64 border border-slate-900 text-[10px] bg-white">
+                    <div className="p-1.5 flex justify-between border-b border-slate-200 text-slate-700">
+                      <span>Subtotal Ilíquido</span>
+                      <span className="font-mono tabular-nums font-semibold">
+                        {selectedPropostaPDF.subtotal.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                      </span>
+                    </div>
+                    <div className="p-1.5 flex justify-between border-b border-slate-900 text-slate-700 bg-slate-50">
+                      <span>IVA (16%)</span>
+                      <span className="font-mono tabular-nums font-semibold">
+                        {selectedPropostaPDF.valor_iva.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                      </span>
+                    </div>
+                    <div className="p-2 flex justify-between bg-slate-900 text-white font-bold">
+                      <span className="uppercase text-[9px]">Total Proposta</span>
+                      <span className="font-mono tabular-nums text-xs">
+                        {selectedPropostaPDF.total_geral.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bank Coordinates */}
+                <div className="p-2.5 bg-slate-50 border border-slate-300 space-y-1 text-slate-800">
+                  <span className="font-bold text-slate-950 block text-[9px] uppercase tracking-wider">
+                    Coordenadas Bancárias para Liquidação (ClickPay Moçambique, Lda)
+                  </span>
+                  <div className="grid grid-cols-3 gap-2 font-mono tabular-nums text-[8.5px]">
+                    <div className="bg-white p-1.5 border border-slate-200">
+                      <b className="text-slate-950 block">MILLENNIUM BIM</b>
+                      Conta: 9944-8833-MZ · NIB: 0001 0000 9944 8833 01
+                    </div>
+                    <div className="bg-white p-1.5 border border-slate-200">
+                      <b className="text-slate-950 block">BCI FOMENTO</b>
+                      Conta: 1122-3344-MZ · NIB: 0008 0000 1122 3344 02
+                    </div>
+                    <div className="bg-white p-1.5 border border-slate-200">
+                      <b className="text-slate-950 block">CARTEIRAS MÓVEIS</b>
+                      M-Pesa: +258 861390061 · E-Mola: +258 871234567
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 grid grid-cols-2 gap-8 text-center text-[10px]">
+                  <div>
+                    <div className="border-b border-slate-400 h-6 w-44 mx-auto mb-1" />
+                    <div className="font-bold text-slate-900 uppercase">Pelo Departamento Comercial</div>
+                    <span className="text-[9px] text-slate-500 block">{selectedPropostaPDF.vendedor}</span>
+                  </div>
+                  <div>
+                    <div className="border-b border-slate-400 h-6 w-44 mx-auto mb-1" />
+                    <div className="font-bold text-slate-900 uppercase">Aceite do Cliente</div>
+                    <span className="text-[9px] text-slate-500 block">Assinatura / Carimbo</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-900 flex flex-wrap justify-between items-center gap-2 text-[8.5px] text-slate-600">
+                  <span className="font-bold text-slate-950 uppercase tracking-wide">
+                    {PRIMAVERA_COMPUTER_NOTE}
+                  </span>
+                  <span className="font-mono tabular-nums">
+                    Ref. Controlo: {computeDocumentHashCode(selectedPropostaPDF.numero_proposta, selectedPropostaPDF.total_geral, companyData.nuit)} · Página 1 / 1
+                  </span>
+                </div>
               </div>
             </div>
           </div>

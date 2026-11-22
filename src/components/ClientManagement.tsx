@@ -30,6 +30,10 @@ import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
 import { hashPassword } from '../lib/security';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
 import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from '../lib/pricing';
+import {
+  computeDocumentHashCode,
+  PRIMAVERA_COMPUTER_NOTE
+} from '../utils/documentUtils';
 
 interface ClientCompany {
   id: string;
@@ -1343,290 +1347,291 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
           )}
 
           {selectedInvoiceClient ? (
-            <div className="bg-white border-2 border-slate-300 rounded-lg p-6 shadow-sm space-y-6 text-slate-800 relative overflow-hidden print:border-0 print:shadow-none print:p-0">
-              
-              {/* Primavera ERP V10 Header Layout */}
-              <div className="flex justify-between items-start border-b-2 border-slate-300 pb-5 gap-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <img src="/clickpay-logo.png" alt="ClickPay" className="h-10 w-auto object-contain" referrerPolicy="no-referrer" />
-                    <div>
-                      <span className="text-xs font-black text-slate-900 block uppercase tracking-wide">ClickPay Moçambique</span>
-                      <span className="text-[8px] font-bold text-slate-400 font-mono tracking-wider">ERP & FINTECH · NUEL 105086659</span>
-                    </div>
-                  </div>
-                  <p className="text-[9px] text-slate-600 leading-tight">
-                    Av. 24 de Julho, nº 1500, 5º Andar<br />
-                    Maputo Cidade, Moçambique<br />
-                    <b>NUIT:</b> 402302399 | <b>Tel:</b> +258 86 139 0061<br />
-                    <b>E-mail:</b> gersonjcumbane@gmail.com
-                  </p>
-                </div>
+            (() => {
+              const docNumber = `${documentType === 'fatura' ? 'FT' : 'RC'}-OUT-2026-06/${selectedInvoiceClient.nuit.substring(5)}`;
+              const isExempt = selectedInvoiceClient.regime_iva === 'Isento';
+              const subtotalVal = selectedInvoiceClient.billingFeeMzn;
+              const ivaVal = isExempt ? 0 : subtotalVal * 0.16;
+              const totalComIva = subtotalVal + ivaVal;
+              const hashControlo = computeDocumentHashCode(docNumber, totalComIva, '402302399');
 
-                {/* Primavera Doc Type and Metadata Box */}
-                <div className="border border-slate-400 rounded w-64 overflow-hidden text-[10px] bg-white">
-                  <div className="bg-slate-800 text-white font-extrabold px-3 py-1 text-center tracking-wider uppercase text-[10px]">
-                    {documentType === 'fatura' ? 'Fatura Proforma' : 'Recibo de Liquidação'}
-                  </div>
-                  <div className="grid grid-cols-2 divide-x divide-y divide-slate-300 border-t border-slate-300 bg-slate-50/30 text-slate-700">
-                    <div className="p-1.5 col-span-2">
-                      <span className="text-[7.5px] text-slate-500 block uppercase font-black tracking-wider">Documento / N.º</span>
-                      <span className="font-mono font-bold text-slate-900 text-xs">
-                        {documentType === 'fatura' ? 'FT-OUT-2026-06/' : 'RC-OUT-2026-06/'}{selectedInvoiceClient.nuit.substring(5)}
-                      </span>
+              return (
+                <div
+                  data-a4-print-sheet="true"
+                  className="bg-white border border-slate-900 w-full max-w-[210mm] min-h-[297mm] mx-auto px-6 py-6 sm:px-8 sm:py-8 shadow-sm flex flex-col justify-between gap-5 text-slate-900 relative print:border-none print:shadow-none print:p-2 print:max-w-none print:w-full"
+                >
+                  <div className="space-y-5">
+                    {/* Primavera ERP V10 Header Layout */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-4 gap-4">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2.5">
+                          <img src="/clickpay-logo.png" alt="ClickPay" className="h-11 w-auto object-contain" referrerPolicy="no-referrer" />
+                          <div>
+                            <span className="text-sm font-bold text-slate-950 block uppercase tracking-tight">ClickPay Moçambique, Lda</span>
+                            <span className="text-[9px] font-mono text-slate-500 tracking-wider uppercase">ERP &amp; Fintech · NUEL 105086659</span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-700 leading-snug">
+                          Av. 24 de Julho, nº 1500, 5º Andar · Maputo Cidade, Moçambique<br />
+                          <span className="font-mono tabular-nums"><b>NUIT:</b> 402302399</span> | <b>Tel:</b> +258 86 139 0061<br />
+                          <b>E-mail:</b> gersonjcumbane@gmail.com
+                        </p>
+                      </div>
+
+                      {/* Primavera Doc Type and Metadata Box */}
+                      <div className="border border-slate-900 w-full sm:w-64 overflow-hidden text-[10px] bg-white shrink-0">
+                        <div className="bg-slate-900 text-white font-bold px-3 py-1.5 flex items-center justify-between uppercase text-[10px] tracking-wider">
+                          <span>{documentType === 'fatura' ? 'Fatura Proforma' : 'Recibo de Liquidação'}</span>
+                          <span className="font-mono text-[9px] text-slate-300">ORIGINAL</span>
+                        </div>
+                        <div className="grid grid-cols-2 divide-x divide-y divide-slate-300 border-t border-slate-900 bg-white text-slate-800">
+                          <div className="p-1.5 col-span-2 bg-slate-50 flex items-center justify-between">
+                            <span className="text-[8.5px] text-slate-500 uppercase font-semibold">Documento N.º</span>
+                            <span className="font-mono tabular-nums font-bold text-slate-950 text-[11px]">
+                              {docNumber}
+                            </span>
+                          </div>
+                          <div className="p-1.5">
+                            <span className="text-[8px] text-slate-500 block uppercase font-semibold">Data Emissão</span>
+                            <span className="font-mono tabular-nums font-semibold text-slate-950">28-06-2026</span>
+                          </div>
+                          {documentType === 'fatura' ? (
+                            <div className="p-1.5">
+                              <span className="text-[8px] text-slate-500 block uppercase font-semibold">Vencimento</span>
+                              <span className="font-mono tabular-nums font-semibold text-rose-700">10-07-2026</span>
+                            </div>
+                          ) : (
+                            <div className="p-1.5">
+                              <span className="text-[8px] text-slate-500 block uppercase font-semibold">Ref. Fatura</span>
+                              <span className="font-mono tabular-nums font-semibold text-slate-950">FT-OUT-2026-06/{selectedInvoiceClient.nuit.substring(5)}</span>
+                            </div>
+                          )}
+                          <div className="p-1.5">
+                            <span className="text-[8px] text-slate-500 block uppercase font-semibold">Moeda</span>
+                            <span className="font-semibold text-slate-950">MZN (Metical)</span>
+                          </div>
+                          <div className="p-1.5">
+                            <span className="text-[8px] text-slate-500 block uppercase font-semibold">Página</span>
+                            <span className="font-mono tabular-nums font-semibold text-slate-950">1 / 1</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-1.5">
-                      <span className="text-[7.5px] text-slate-500 block uppercase font-black tracking-wider">Data Emissão</span>
-                      <span className="font-bold text-slate-900">28-06-2026</span>
+
+                    {/* Envelope Window & Conditions Layout */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[10px]">
+                      <div className="text-[9.5px] text-slate-600 space-y-1 bg-slate-50 p-3 border border-slate-300">
+                        <p className="font-bold text-slate-900 uppercase tracking-wider text-[8.5px]">Condições Gerais &amp; Enquadramento</p>
+                        <p><b>Regime Fiscal:</b> {isExempt ? 'Isento de IVA' : 'IVA Normal (16%) — Moçambique'}</p>
+                        <p><b>Vencimento:</b> Liquidar até à data limite indicada no documento.</p>
+                        <p><b>Liquidação:</b> Transferência bancária, NIB ou Carteira Móvel M-Pesa / e-Mola.</p>
+                      </div>
+
+                      <div className="border border-slate-900 p-3 bg-white">
+                        <span className="text-[8.5px] text-slate-500 font-bold uppercase tracking-wider block mb-1">Exmo.(s) Senhor(es)</span>
+                        <h5 className="font-bold text-slate-950 text-xs uppercase">{selectedInvoiceClient.nome}</h5>
+                        <div className="text-[9.5px] text-slate-700 mt-1 space-y-0.5 leading-snug">
+                          <p className="font-mono tabular-nums"><b>NUIT:</b> {selectedInvoiceClient.nuit}</p>
+                          <p><b>Endereço:</b> {selectedInvoiceClient.endereco || 'Maputo, Moçambique'}</p>
+                          <p><b>E-mail:</b> {selectedInvoiceClient.email || 'N/D'}</p>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Document Specific Content */}
                     {documentType === 'fatura' ? (
-                      <div className="p-1.5">
-                        <span className="text-[7.5px] text-slate-500 block uppercase font-black tracking-wider">Vencimento</span>
-                        <span className="font-bold text-red-600">10-07-2026</span>
+                      <div className="space-y-2">
+                        <span className="text-[8.5px] text-slate-600 font-bold uppercase tracking-wider block">
+                          Discriminação de Artigos / Serviços
+                        </span>
+                        <div className="border border-slate-900 overflow-hidden text-[10px]">
+                          <table className="w-full text-left border-collapse">
+                            <thead className="bg-slate-900 text-white font-bold text-[9px] uppercase tracking-wider">
+                              <tr className="divide-x divide-slate-700">
+                                <th className="p-2 w-16">Artigo</th>
+                                <th className="p-2">Descrição / Serviço Prestado</th>
+                                <th className="p-2 w-14 text-center">Qtd.</th>
+                                <th className="p-2 w-24 text-right">Pr. Unit.</th>
+                                <th className="p-2 w-14 text-center">Desc.%</th>
+                                <th className="p-2 w-16 text-center">IVA</th>
+                                <th className="p-2 w-24 text-right">Total (MT)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 text-slate-800 bg-white">
+                              <tr className="divide-x divide-slate-200">
+                                <td className="p-2 font-mono tabular-nums font-bold text-slate-950">SO-001</td>
+                                <td className="p-2">
+                                  <span className="font-semibold text-slate-950 block uppercase text-[9.5px]">Honorário Fixo Mensal (Plataforma SaaS)</span>
+                                  <span className="text-[8.5px] text-slate-500 block mt-0.5">Subscrição e manutenção base do portal ERP de salários e faturação.</span>
+                                </td>
+                                <td className="p-2 text-center font-mono tabular-nums">1,00</td>
+                                <td className="p-2 text-right font-mono tabular-nums">{selectedInvoiceClient.fee_base.toFixed(2)}</td>
+                                <td className="p-2 text-center font-mono tabular-nums">0,00</td>
+                                <td className="p-2 text-center font-mono tabular-nums">{!isExempt ? '16,0%' : 'Isento'}</td>
+                                <td className="p-2 text-right font-mono tabular-nums font-bold text-slate-950">{selectedInvoiceClient.fee_base.toFixed(2)}</td>
+                              </tr>
+                              <tr className="divide-x divide-slate-200">
+                                <td className="p-2 font-mono tabular-nums font-bold text-slate-950">SO-002</td>
+                                <td className="p-2">
+                                  <span className="font-semibold text-slate-950 block uppercase text-[9.5px]">Processamento de Recibos (Payslips)</span>
+                                  <span className="text-[8.5px] text-slate-500 block mt-0.5">Emissão e cálculo fiscal auditado ({selectedInvoiceClient.countEmployees} colaboradores ativos).</span>
+                                </td>
+                                <td className="p-2 text-center font-mono tabular-nums">{selectedInvoiceClient.countEmployees.toFixed(2)}</td>
+                                <td className="p-2 text-right font-mono tabular-nums">{selectedInvoiceClient.fee_por_slip.toFixed(2)}</td>
+                                <td className="p-2 text-center font-mono tabular-nums">0,00</td>
+                                <td className="p-2 text-center font-mono tabular-nums">{!isExempt ? '16,0%' : 'Isento'}</td>
+                                <td className="p-2 text-right font-mono tabular-nums font-bold text-slate-950">{(selectedInvoiceClient.fee_por_slip * selectedInvoiceClient.countEmployees).toFixed(2)}</td>
+                              </tr>
+                              <tr className="divide-x divide-slate-200">
+                                <td className="p-2 font-mono tabular-nums font-bold text-slate-950">SO-003</td>
+                                <td className="p-2">
+                                  <span className="font-semibold text-slate-950 block uppercase text-[9.5px]">Gestão de Guias INSS &amp; IRPS</span>
+                                  <span className="text-[8.5px] text-slate-500 block mt-0.5">Geração e conformidade mensal da folha SISSMO e Modelo M/19.</span>
+                                </td>
+                                <td className="p-2 text-center font-mono tabular-nums">1,00</td>
+                                <td className="p-2 text-right font-mono tabular-nums">0,00</td>
+                                <td className="p-2 text-center font-mono tabular-nums">0,00</td>
+                                <td className="p-2 text-center font-mono tabular-nums">Isento</td>
+                                <td className="p-2 text-right font-mono tabular-nums text-slate-500 font-semibold">0,00</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     ) : (
-                      <div className="p-1.5">
-                        <span className="text-[7.5px] text-slate-500 block uppercase font-black tracking-wider">Ref. Fatura</span>
-                        <span className="font-bold text-slate-900 font-mono">FT-OUT-2026-06/{selectedInvoiceClient.nuit.substring(5)}</span>
+                      <div className="space-y-3">
+                        <div className="p-3 bg-slate-50 border border-slate-300 text-slate-800 text-[10px] leading-relaxed">
+                          Declaramos que recebemos de <b className="text-slate-950 uppercase">{selectedInvoiceClient.nome}</b> (NUIT <b className="font-mono tabular-nums">{selectedInvoiceClient.nuit}</b>) a quantia total de{' '}
+                          <b className="text-slate-950 font-mono tabular-nums">
+                            {totalComIva.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                          </b>{' '}
+                          (<b>{numeroParaExtenso(totalComIva)}</b>) referente à liquidação integral do documento abaixo especificado.
+                        </div>
+
+                        <div className="border border-slate-900 overflow-hidden text-[10px]">
+                          <table className="w-full text-left border-collapse">
+                            <thead className="bg-slate-900 text-white font-bold text-[9px] uppercase tracking-wider">
+                              <tr className="divide-x divide-slate-700">
+                                <th className="p-2 w-32">N.º Documento</th>
+                                <th className="p-2">Descrição / Detalhe</th>
+                                <th className="p-2 w-24 text-center">Emissão</th>
+                                <th className="p-2 w-28 text-right">Valor Original</th>
+                                <th className="p-2 w-28 text-right">Liquidado (MT)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 text-slate-800 bg-white">
+                              <tr className="divide-x divide-slate-200">
+                                <td className="p-2 font-mono tabular-nums font-bold text-slate-950">FT-OUT-2026-06/{selectedInvoiceClient.nuit.substring(5)}</td>
+                                <td className="p-2">
+                                  <span className="font-semibold text-slate-950 block uppercase text-[9.5px]">Liquidação de Honorários Mensais</span>
+                                  <span className="text-[8.5px] text-slate-500 block mt-0.5">Processamento mensal SaaS ClickPay ERP</span>
+                                </td>
+                                <td className="p-2 text-center font-mono tabular-nums font-semibold">28-06-2026</td>
+                                <td className="p-2 text-right font-mono tabular-nums">{totalComIva.toFixed(2)}</td>
+                                <td className="p-2 text-right font-mono tabular-nums font-bold text-emerald-800">{totalComIva.toFixed(2)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
-                    <div className="p-1.5">
-                      <span className="text-[7.5px] text-slate-500 block uppercase font-black tracking-wider">Moeda</span>
-                      <span className="font-bold text-slate-900">Metical (MT)</span>
+                  </div>
+
+                  {/* Footer pinned to bottom of A4 sheet */}
+                  <div className="space-y-4 pt-3 border-t-2 border-slate-900 a4-avoid-break">
+                    <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+                      {/* Quadro de Resumo de Impostos */}
+                      <div className="border border-slate-900 overflow-hidden w-full sm:w-64 text-[9px] bg-white">
+                        <div className="bg-slate-100 border-b border-slate-900 text-slate-950 font-bold p-1.5 text-center uppercase tracking-wider">
+                          Quadro de Resumo de Impostos
+                        </div>
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-300">
+                              <th className="p-1.5">Taxa</th>
+                              <th className="p-1.5 text-right">Incidência</th>
+                              <th className="p-1.5 text-right">Imposto</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 text-slate-800 font-mono tabular-nums">
+                            <tr>
+                              <td className="p-1.5 font-semibold">{!isExempt ? 'IVA 16%' : 'Isento'}</td>
+                              <td className="p-1.5 text-right">{subtotalVal.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })}</td>
+                              <td className="p-1.5 text-right">{ivaVal.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Quadro de Totais */}
+                      <div className="w-full sm:w-64 border border-slate-900 text-[10px] overflow-hidden bg-white">
+                        <div className="p-1.5 flex justify-between border-b border-slate-200">
+                          <span className="text-slate-600 font-semibold">Total Ilíquido</span>
+                          <span className="font-mono tabular-nums font-semibold text-slate-950">{subtotalVal.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT</span>
+                        </div>
+                        <div className="p-1.5 flex justify-between border-b border-slate-200">
+                          <span className="text-slate-600 font-semibold">Total Desconto</span>
+                          <span className="font-mono tabular-nums font-semibold text-slate-950">0,00 MT</span>
+                        </div>
+                        <div className="p-1.5 flex justify-between border-b border-slate-900 bg-slate-50">
+                          <span className="text-slate-600 font-semibold">Total Impostos (IVA)</span>
+                          <span className="font-mono tabular-nums font-semibold text-slate-950">{ivaVal.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT</span>
+                        </div>
+                        <div className="p-2 flex justify-between bg-slate-900 text-white font-bold items-center">
+                          <span className="uppercase text-[9px] tracking-wider">Total Documento</span>
+                          <span className="font-mono tabular-nums text-xs">
+                            {totalComIva.toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-1.5">
-                      <span className="text-[7.5px] text-slate-500 block uppercase font-black tracking-wider">Página</span>
-                      <span className="font-bold text-slate-900">1 de 1</span>
+
+                    {/* Coordenadas Bancárias */}
+                    <div className="p-2.5 bg-slate-50 border border-slate-300 space-y-1 text-[9px] text-slate-700">
+                      <span className="font-bold text-slate-950 block uppercase tracking-wide">
+                        Coordenadas Bancárias &amp; Carteiras Móveis (ClickPay Moçambique, Lda)
+                      </span>
+                      <div className="grid grid-cols-3 gap-2 pt-0.5 font-mono tabular-nums text-[8.5px] text-slate-800">
+                        <div className="p-1.5 bg-white border border-slate-200">
+                          <b className="text-slate-950 block">MILLENNIUM BIM</b>
+                          Conta: 9944-8833-MZ · NIB: 0001 0000 9944 8833 01
+                        </div>
+                        <div className="p-1.5 bg-white border border-slate-200">
+                          <b className="text-slate-950 block">BCI FOMENTO</b>
+                          Conta: 1122-3344-MZ · NIB: 0008 0000 1122 3344 02
+                        </div>
+                        <div className="p-1.5 bg-white border border-slate-200">
+                          <b className="text-slate-950 block">M-PESA / E-MOLA</b>
+                          M-Pesa: +258 861390061 · E-Mola: +258 871234567
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Assinaturas */}
+                    <div className="grid grid-cols-2 gap-8 text-center pt-1">
+                      <div className="space-y-1">
+                        <div className="border-b border-slate-400 w-48 mx-auto h-5" />
+                        <p className="text-[8.5px] text-slate-700 uppercase font-semibold">Assinatura Autorizada (ClickPay)</p>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="border-b border-slate-400 w-48 mx-auto h-5" />
+                        <p className="text-[8.5px] text-slate-700 uppercase font-semibold">Exmo.(s) Senhor(es) (O Cliente)</p>
+                      </div>
+                    </div>
+
+                    {/* Rodapé Primavera ERP V10 + Processado por computador */}
+                    <div className="border-t border-slate-900 pt-2 flex flex-wrap justify-between items-center gap-2 text-[8.5px] text-slate-600">
+                      <span className="font-bold text-slate-950 uppercase tracking-wide">
+                        {PRIMAVERA_COMPUTER_NOTE}
+                      </span>
+                      <span className="font-mono tabular-nums">
+                        Ref. Controlo: {hashControlo} · Original · Página 1 / 1
+                      </span>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Envelope Window & Conditions Layout */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1 text-xs">
-                <div className="text-[9.5px] text-slate-500 space-y-1 bg-slate-50/50 p-3 rounded border border-slate-150">
-                  <p className="font-extrabold text-slate-700 uppercase tracking-wider text-[8px]">REQUISITOS LEGAIS & PAGAMENTO</p>
-                  <p><b>Regime Fiscal:</b> Enquadrado no IVA Normal de Moçambique.</p>
-                  <p><b>Vencimento:</b> Liquidar até à data de vencimento indicada.</p>
-                  <p><b>Modo Pagamento:</b> Transferência para as contas do emitente.</p>
-                  <p className="text-[8.5px] text-slate-400 font-medium">As faturas e recibos gerados neste portal seguem estritamente os padrões técnicos da versão Primavera ERP V10.</p>
-                </div>
-
-                <div className="border border-slate-400 rounded-lg p-3 bg-slate-50/50 shadow-xs relative">
-                  <span className="text-[7.5px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Exmo.(s) Senhor(es)</span>
-                  <h5 className="font-black text-slate-900 text-[11px] uppercase">{selectedInvoiceClient.nome}</h5>
-                  <div className="text-[9.5px] text-slate-600 mt-1.5 space-y-0.5 leading-relaxed">
-                    <p><b>NUIT:</b> {selectedInvoiceClient.nuit}</p>
-                    <p><b>Endereço:</b> {selectedInvoiceClient.endereco || 'Maputo, Moçambique'}</p>
-                    <p><b>E-mail:</b> {selectedInvoiceClient.email || 'N/D'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Document Specific Content */}
-              {documentType === 'fatura' ? (
-                /* FATURA VIEW */
-                <div className="space-y-3">
-                  <span className="text-[8px] text-slate-500 font-extrabold uppercase tracking-widest block">DISCRIMINAÇÃO DOS SERVIÇOS PRESTADOS</span>
-                  
-                  <div className="border border-slate-400 rounded overflow-hidden text-[10px]">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-800 text-white font-extrabold text-[8.5px] uppercase tracking-wider">
-                        <tr className="divide-x divide-slate-400">
-                          <th className="p-2 w-16">Artigo</th>
-                          <th className="p-2">Descrição / Serviço Prestado</th>
-                          <th className="p-2 w-12 text-center">Quant.</th>
-                          <th className="p-2 w-24 text-right">Preço Un.</th>
-                          <th className="p-2 w-16 text-center">Desc.%</th>
-                          <th className="p-2 w-16 text-center">Taxa IVA</th>
-                          <th className="p-2 w-28 text-right">Total (MT)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-300 text-slate-700 bg-white">
-                        <tr className="divide-x divide-slate-300">
-                          <td className="p-2 font-mono font-bold text-slate-900">SO-001</td>
-                          <td className="p-2">
-                            <span className="font-bold text-slate-900 block uppercase text-[10px]">Honorário Fixo Mensal</span>
-                            <span className="text-[9px] text-slate-400 leading-tight block mt-0.5">Taxa de administração base da conta e infraestrutura do ERP de salários.</span>
-                          </td>
-                          <td className="p-2 text-center font-mono">1.00</td>
-                          <td className="p-2 text-right font-mono">{selectedInvoiceClient.fee_base.toFixed(2)} MT</td>
-                          <td className="p-2 text-center font-mono">0.00</td>
-                          <td className="p-2 text-center font-mono">{selectedInvoiceClient.regime_iva !== 'Isento' ? '16.0%' : 'Isento'}</td>
-                          <td className="p-2 text-right font-mono font-bold text-slate-900">{selectedInvoiceClient.fee_base.toFixed(2)} MT</td>
-                        </tr>
-                        <tr className="divide-x divide-slate-300">
-                          <td className="p-2 font-mono font-bold text-slate-900">SO-002</td>
-                          <td className="p-2">
-                            <span className="font-bold text-slate-900 block uppercase text-[10px]">Processamento de Recibos (Payslips)</span>
-                            <span className="text-[9px] text-slate-400 leading-tight block mt-0.5">Emissão de recibos de salários auditados e cálculo fiscal por colaborador ativo ({selectedInvoiceClient.countEmployees} colaboradores).</span>
-                          </td>
-                          <td className="p-2 text-center font-mono">{selectedInvoiceClient.countEmployees.toFixed(2)}</td>
-                          <td className="p-2 text-right font-mono">{selectedInvoiceClient.fee_por_slip.toFixed(2)} MT</td>
-                          <td className="p-2 text-center font-mono">0.00</td>
-                          <td className="p-2 text-center font-mono">{selectedInvoiceClient.regime_iva !== 'Isento' ? '16.0%' : 'Isento'}</td>
-                          <td className="p-2 text-right font-mono font-bold text-slate-900">{(selectedInvoiceClient.fee_por_slip * selectedInvoiceClient.countEmployees).toFixed(2)} MT</td>
-                        </tr>
-                        <tr className="divide-x divide-slate-300">
-                          <td className="p-2 font-mono font-bold text-slate-900">SO-003</td>
-                          <td className="p-2">
-                            <span className="font-bold text-slate-900 block uppercase text-[10px]">Gestão de Guias de INSS & IRPS</span>
-                            <span className="text-[9px] text-slate-400 leading-tight block mt-0.5">Geração e submissão automatizada da folha SISSMO e conformidade legal.</span>
-                          </td>
-                          <td className="p-2 text-center font-mono">1.00</td>
-                          <td className="p-2 text-right font-mono">0.00 MT</td>
-                          <td className="p-2 text-center font-mono">0.00</td>
-                          <td className="p-2 text-center font-mono">Isento</td>
-                          <td className="p-2 text-right font-mono text-slate-400 font-bold">Incluído</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                /* RECIBO VIEW */
-                <div className="space-y-4">
-                  <div className="p-3 bg-slate-50 border border-slate-300 rounded text-slate-800 text-[10px] leading-relaxed">
-                    Declaramos para fins comerciais que recebemos de <b className="text-slate-950 uppercase">{selectedInvoiceClient.nome}</b>, com o NUIT <b className="text-slate-950">{selectedInvoiceClient.nuit}</b>, a quantia líquida total de <b className="text-slate-950 font-mono">
-                      {(selectedInvoiceClient.regime_iva !== 'Isento' ? selectedInvoiceClient.billingFeeMzn * 1.16 : selectedInvoiceClient.billingFeeMzn).toLocaleString('pt-PT', { minimumFractionDigits: 2 })} MT
-                    </b> (<b>{numeroParaExtenso(selectedInvoiceClient.regime_iva !== 'Isento' ? selectedInvoiceClient.billingFeeMzn * 1.16 : selectedInvoiceClient.billingFeeMzn)}</b>) para a integral liquidação do documento de faturação abaixo especificado.
-                  </div>
-
-                  <span className="text-[8px] text-slate-500 font-extrabold uppercase tracking-widest block">DOCUMENTOS LIQUIDADOS & QUITADOS</span>
-                  <div className="border border-slate-400 rounded overflow-hidden text-[10px]">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-800 text-white font-extrabold text-[8.5px] uppercase tracking-wider">
-                        <tr className="divide-x divide-slate-400">
-                          <th className="p-2 w-32">N.º Documento</th>
-                          <th className="p-2">Descrição / Detalhe de Serviço</th>
-                          <th className="p-2 w-28 text-center">Data Emissão</th>
-                          <th className="p-2 w-28 text-right">Valor Original</th>
-                          <th className="p-2 w-28 text-right">Valor Liquidado</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-300 text-slate-700 bg-white">
-                        <tr className="divide-x divide-slate-300">
-                          <td className="p-2 font-mono font-bold text-slate-900">FT-OUT-2026-06/{selectedInvoiceClient.nuit.substring(5)}</td>
-                          <td className="p-2">
-                            <span className="font-bold text-slate-900 block uppercase text-[10px]">Liquidação de Honorários de Outsourcing Mensal</span>
-                            <span className="text-[9px] text-slate-400 block mt-0.5">Referente ao mês de Junho de 2026 (Processamento SaaS)</span>
-                          </td>
-                          <td className="p-2 text-center font-semibold">28-06-2026</td>
-                          <td className="p-2 text-right font-mono">{(selectedInvoiceClient.regime_iva !== 'Isento' ? selectedInvoiceClient.billingFeeMzn * 1.16 : selectedInvoiceClient.billingFeeMzn).toFixed(2)} MT</td>
-                          <td className="p-2 text-right font-mono font-black text-emerald-700">{(selectedInvoiceClient.regime_iva !== 'Isento' ? selectedInvoiceClient.billingFeeMzn * 1.16 : selectedInvoiceClient.billingFeeMzn).toFixed(2)} MT</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Summary Layout: Left Tax Summary, Right Totals (Classic Primavera ERP design) */}
-              <div className="flex flex-col sm:flex-row justify-between items-start gap-4 pt-4 border-t-2 border-slate-300">
-                {/* Resumo de Impostos (Tax Summary) */}
-                <div className="border border-slate-300 rounded overflow-hidden w-full sm:w-64 text-[8.5px] bg-slate-50/50">
-                  <div className="bg-slate-700 text-white font-black p-1 text-center uppercase tracking-wide">
-                    Quadro de Resumo de Impostos
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-200 text-slate-600 font-bold border-b border-slate-300">
-                        <th className="p-1">Cód. Taxa</th>
-                        <th className="p-1 text-right">Incidência (MT)</th>
-                        <th className="p-1 text-right">Valor Imposto</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-300 text-slate-700 font-mono">
-                      <tr>
-                        <td className="p-1 font-semibold">{selectedInvoiceClient.regime_iva !== 'Isento' ? 'IVA (16.0%)' : 'Isento (Art.9)'}</td>
-                        <td className="p-1 text-right">{selectedInvoiceClient.billingFeeMzn.toLocaleString('pt-PT', { minimumFractionDigits: 2 })}</td>
-                        <td className="p-1 text-right">
-                          {selectedInvoiceClient.regime_iva !== 'Isento' 
-                            ? (selectedInvoiceClient.billingFeeMzn * 0.16).toLocaleString('pt-PT', { minimumFractionDigits: 2 })
-                            : '0.00'
-                          }
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Totals Block */}
-                <div className="w-full sm:w-64 border border-slate-400 rounded text-[10px] overflow-hidden bg-white">
-                  <div className="p-1.5 flex justify-between border-b border-slate-300">
-                    <span className="text-slate-500 font-bold uppercase text-[9px]">Total Ilíquido:</span>
-                    <span className="font-mono font-bold text-slate-900">{selectedInvoiceClient.billingFeeMzn.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} MT</span>
-                  </div>
-                  <div className="p-1.5 flex justify-between border-b border-slate-300">
-                    <span className="text-slate-500 font-bold uppercase text-[9px]">Total Desconto:</span>
-                    <span className="font-mono font-bold text-slate-900">0.00 MT</span>
-                  </div>
-                  <div className="p-1.5 flex justify-between border-b border-slate-300 bg-slate-50">
-                    <span className="text-slate-500 font-bold uppercase text-[9px]">Total Impostos (IVA):</span>
-                    <span className="font-mono font-bold text-slate-900">
-                      {selectedInvoiceClient.regime_iva !== 'Isento' 
-                        ? (selectedInvoiceClient.billingFeeMzn * 0.16).toLocaleString('pt-PT', { minimumFractionDigits: 2 })
-                        : '0.00'
-                      } MT
-                    </span>
-                  </div>
-                  <div className="p-2 flex justify-between bg-slate-800 text-white font-extrabold items-center">
-                    <span className="uppercase text-[8px] tracking-widest block font-black">Total a Pagar (MT):</span>
-                    <span className="font-mono text-xs block font-black">
-                      {(selectedInvoiceClient.regime_iva !== 'Isento' ? selectedInvoiceClient.billingFeeMzn * 1.16 : selectedInvoiceClient.billingFeeMzn).toLocaleString('pt-PT', { minimumFractionDigits: 2 })} MT
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Coordenadas Bancárias & Instruções */}
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-1.5 text-[9.5px] text-slate-700 leading-relaxed">
-                <span className="font-bold text-slate-900 block flex items-center gap-1 text-[10px]">
-                  <ShieldCheck size={13} className="text-blue-900" />
-                  Coordenadas Bancárias Oficiais para Transferência / M-Pesa (ClickPay Moçambique, Lda)
-                </span>
-                <p className="text-[9px]">
-                  Efectue a transferência bancária para uma das contas abaixo e envie o comprovativo para: <b>gersonjcumbane@gmail.com</b>
-                </p>
-                <div className="grid grid-cols-3 gap-2 pt-1 font-mono text-[8.5px] text-slate-800">
-                  <div className="p-1.5 bg-white rounded border border-blue-150">
-                    <b className="text-blue-900 block">MILLENNIUM BIM</b>
-                    Conta: 9944-8833-MZ<br />
-                    NIB: 0001 0000 9944 8833 01
-                  </div>
-                  <div className="p-1.5 bg-white rounded border border-blue-150">
-                    <b className="text-blue-900 block">BCI FOMENTO</b>
-                    Conta: 1122-3344-MZ<br />
-                    NIB: 0008 0000 1122 3344 02
-                  </div>
-                  <div className="p-1.5 bg-white rounded border border-blue-150">
-                    <b className="text-blue-900 block">M-PESA / E-MOLA</b>
-                    M-Pesa: +258 861390061<br />
-                    E-Mola: +258 871234567
-                  </div>
-                </div>
-              </div>
-
-              {/* Certified Software & Watermark Block */}
-              <div className="border-t border-slate-300 pt-3 space-y-4 text-[9px] text-slate-500">
-                <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400">
-                  <span>Processado por Computador | Software Certificado nº 01/AT/2026 | PRIMAVERA ERP V10</span>
-                  <span className="uppercase tracking-wider">Original</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4 text-center pt-2">
-                  <div className="space-y-1">
-                    <div className="border-b border-dashed border-slate-300 w-48 mx-auto h-5"></div>
-                    <p className="text-[7.5px] text-slate-400 uppercase tracking-widest font-bold">Assinatura Autorizada (ClickPay)</p>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="border-b border-dashed border-slate-300 w-48 mx-auto h-5"></div>
-                    <p className="text-[7.5px] text-slate-400 uppercase tracking-widest font-bold">Exmo.(s) Senhor(es) (O Cliente)</p>
-                  </div>
-                </div>
-              </div>
-
-            </div>
+              );
+            })()
           ) : (
             <div className="bg-white rounded-2xl p-12 border border-slate-100 text-center">
               <p className="text-xs text-slate-400">Selecione um cliente para visualizar o seu demonstrativo de faturação mensal.</p>
