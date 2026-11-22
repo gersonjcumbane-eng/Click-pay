@@ -32,7 +32,8 @@ import {
   Zap,
   Server,
   Layers,
-  PhoneCall
+  PhoneCall,
+  ExternalLink
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { useToast, useConfirm } from '../context/ToastContext';
@@ -982,6 +983,59 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* 5B. Domínios Autorizados para Login Google (Firebase Auth) */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Globe size={18} className="text-blue-900" />
+              <h2 className="text-base font-bold text-slate-950">
+                Domínios Autorizados (Firebase Auth & Login Google)
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500">
+              Para o botão &quot;Entrar com Conta Google&quot; funcionar em todos os endereços publicados, adicione estes domínios em <strong>Authentication → Settings → Authorized domains</strong> na Consola Firebase (Projeto <code className="font-mono text-slate-700">future-charter-96ppv</code>).
+            </p>
+          </div>
+          <a
+            href="https://console.firebase.google.com/project/future-charter-96ppv/authentication/settings"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="py-2 px-3.5 bg-blue-900 hover:bg-blue-950 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 shrink-0 transition-colors"
+          >
+            <span>Abrir Consola Firebase</span>
+            <ExternalLink size={13} />
+          </a>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          {Array.from(
+            new Set([
+              ...(typeof window !== 'undefined' && window.location.hostname ? [window.location.hostname] : []),
+              'clickpay.co.mz',
+              'www.clickpay.co.mz',
+              'ais-pre-onyr2rcwkiimgztjcry6l7-754110288282.us-east1.run.app',
+              'ais-dev-onyr2rcwkiimgztjcry6l7-754110288282.us-east1.run.app'
+            ])
+          ).map((domain) => (
+            <div
+              key={domain}
+              className="flex items-center justify-between gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+            >
+              <code className="font-mono font-semibold text-slate-800 truncate">{domain}</code>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(domain, `dom_${domain}`, 'Domínio')}
+                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 rounded-lg transition-colors cursor-pointer shrink-0"
+                title="Copiar domínio"
+              >
+                {copiedKey === `dom_${domain}` ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 
