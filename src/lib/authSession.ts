@@ -5,9 +5,20 @@
 
 export const SUPER_ADMIN_ROLE = 'SUPER_ADMIN_PAYROLL';
 
+export const FOUNDER_EMAILS = [
+  'gersonjcumbane@gmail.com',
+  'admin@clickpay.co.mz',
+  'admin@payrolltech.co.mz'
+] as const;
+
 export function getAuthToken(): string {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('paytek_token') || '';
+}
+
+export function getAuthUserEmail(): string {
+  if (typeof window === 'undefined') return '';
+  return String(localStorage.getItem('paytek_user') || '').toLowerCase().trim();
 }
 
 export function getAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
@@ -22,4 +33,17 @@ export function isSuperAdminRole(role?: string | null): boolean {
   const localRole = typeof window !== 'undefined' ? localStorage.getItem('paytek_role') : null;
   const effective = role !== undefined && role !== null ? role : localRole;
   return effective === SUPER_ADMIN_ROLE;
+}
+
+export function isFounderEmail(email?: string | null): boolean {
+  const localEmail = getAuthUserEmail();
+  const effective = String(email !== undefined && email !== null ? email : localEmail)
+    .toLowerCase()
+    .trim();
+  if (!effective) return false;
+  return (FOUNDER_EMAILS as readonly string[]).includes(effective);
+}
+
+export function isFounderUser(role?: string | null, email?: string | null): boolean {
+  return isSuperAdminRole(role) && isFounderEmail(email);
 }

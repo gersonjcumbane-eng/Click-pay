@@ -28,7 +28,7 @@ import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
 import { hashPassword } from '../lib/security';
-import { getAuthHeaders, isSuperAdminRole } from '../lib/authSession';
+import { getAuthHeaders, isFounderUser } from '../lib/authSession';
 
 interface ClientCompany {
   id: string;
@@ -136,7 +136,7 @@ interface ClientManagementProps {
 export default function ClientManagement({ onCompanySwitched, userRole }: ClientManagementProps) {
   const { showSuccess, showError } = useToast();
   const confirmAction = useConfirm();
-  const isSuperAdmin = isSuperAdminRole(userRole);
+  const isSuperAdmin = isFounderUser(userRole);
   const [clients, setClients] = useState<ClientCompany[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -366,7 +366,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
       if (unsubReq) unsubReq();
       if (unsubClients) unsubClients();
     };
-  }, []);
+  }, [isSuperAdmin]);
 
   const handleCreateFbUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -662,9 +662,9 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
         <div className="w-12 h-12 mx-auto rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
           <Lock size={22} />
         </div>
-        <h2 className="text-lg font-bold text-slate-950">Acesso Restrito</h2>
+        <h2 className="text-lg font-bold text-slate-950">Acesso Restrito ao Fundador</h2>
         <p className="text-xs text-slate-600 leading-relaxed">
-          O painel multi-cliente e gestão de contas é exclusivo do Administrador Principal da plataforma.
+          O Gestor de Clientes e o painel multi-empresa são exclusivos do Fundador da plataforma.
         </p>
       </div>
     );
@@ -1714,7 +1714,6 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 >
                   <option value="CLIENTE_EMPRESA">Cliente Empresa (Gestor de RH da Empresa Cliente)</option>
-                  <option value="SUPER_ADMIN_PAYROLL">Founders Super Admin (Acesso Global Multitask)</option>
                 </select>
               </div>
 

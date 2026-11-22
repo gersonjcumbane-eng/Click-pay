@@ -17,10 +17,13 @@ import {
   Trash2,
   Lock,
   KeyRound,
-  MessageCircle
+  MessageCircle,
+  Building2,
+  ShieldCheck
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { getFormattedCurrentDateLong } from '../db_tax';
+import { isFounderUser } from '../lib/authSession';
 
 export interface LeftModuleNavProps {
   activeTab: string;
@@ -54,13 +57,12 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   onResetCosts,
   onOpenSupport
 }) => {
-  const isSuperAdmin = userRole === 'SUPER_ADMIN_PAYROLL';
+  const isFounder = isFounderUser(userRole);
   const subPlan = company?.subscription_plan || 'Bronze';
   const isBronze = subPlan === 'Bronze';
   const isSilver = subPlan === 'Silver';
 
-  const isM1Active =
-    (activeTab === 'financial' && financialSubTab === 'vendas') || activeTab === 'clients';
+  const isM1Active = activeTab === 'financial' && financialSubTab === 'vendas';
   const isM2Active = activeTab === 'financial' && financialSubTab === 'compras';
   const isM3Active = ['employees', 'sissmo', 'simulator', 'fintech', 'contracts'].includes(
     activeTab
@@ -126,7 +128,7 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              {isSuperAdmin && availableCompanies && availableCompanies.length > 1 && onSwitchCompany ? (
+              {isFounder && availableCompanies && availableCompanies.length > 1 && onSwitchCompany ? (
                 <select
                   value={availableCompanies.find((c) => c.isActive)?.id || ''}
                   onChange={(e) => onSwitchCompany(e.target.value)}
@@ -228,67 +230,23 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
         </button>
 
         {/* 4. Facturação & Vendas */}
-        <div className="flex flex-col gap-0.5">
-          <button
-            type="button"
-            onClick={() => {
-              onSelectTab('financial', 'vendas');
-              onCloseMobile();
-            }}
-            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
-              isM1Active
-                ? 'bg-blue-900 text-white font-semibold'
-                : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
-            }`}
-          >
-            <span className="flex items-center gap-2.5 min-w-0">
-              <Tag size={15} className="shrink-0" />
-              <span className="text-xs truncate">Facturação &amp; Vendas</span>
-            </span>
-            <ChevronRight
-              size={13}
-              className={`shrink-0 transition-transform ${
-                isM1Active ? 'text-white rotate-90' : 'text-slate-400'
-              }`}
-            />
-          </button>
-
-          {isM1Active && (
-            <div className="ml-3.5 pl-2.5 border-l border-slate-200 flex flex-col gap-0.5 py-1">
-              <button
-                type="button"
-                onClick={() => {
-                  onSelectTab('financial', 'vendas');
-                  onCloseMobile();
-                }}
-                className={`text-[11px] px-2.5 py-1.5 rounded-md text-left transition-colors cursor-pointer ${
-                  activeTab === 'financial' && financialSubTab === 'vendas'
-                    ? 'bg-slate-100 text-blue-900 font-semibold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-medium'
-                }`}
-              >
-                Vendas &amp; Facturação
-              </button>
-
-              {isSuperAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelectTab('clients');
-                    onCloseMobile();
-                  }}
-                  className={`text-[11px] px-2.5 py-1.5 rounded-md text-left transition-colors cursor-pointer ${
-                    activeTab === 'clients'
-                      ? 'bg-slate-100 text-blue-900 font-semibold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-medium'
-                  }`}
-                >
-                  Gestão de Clientes
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            onSelectTab('financial', 'vendas');
+            onCloseMobile();
+          }}
+          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+            isM1Active
+              ? 'bg-blue-900 text-white font-semibold'
+              : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
+          }`}
+        >
+          <span className="flex items-center gap-2.5 min-w-0">
+            <Tag size={15} className="shrink-0" />
+            <span className="text-xs truncate">Facturação &amp; Vendas</span>
+          </span>
+        </button>
 
         {/* 5. Compras & Stocks */}
         <button
@@ -570,25 +528,50 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
           </span>
         </button>
 
-        {/* 10. Acesso & Credenciais (Exclusivo Super Admin) */}
-        {isSuperAdmin && (
-          <button
-            type="button"
-            onClick={() => {
-              onSelectTab('credentials');
-              onCloseMobile();
-            }}
-            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
-              activeTab === 'credentials'
-                ? 'bg-blue-900 text-white font-semibold'
-                : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
-            }`}
-          >
-            <span className="flex items-center gap-2.5 min-w-0">
-              <KeyRound size={15} className="shrink-0" />
-              <span className="text-xs truncate">Acesso &amp; Credenciais</span>
+        {/* Administração Exclusiva do Fundador */}
+        {isFounder && (
+          <div className="pt-2 mt-2 border-t border-slate-200 flex flex-col gap-0.5">
+            <span className="text-[10px] font-semibold text-blue-900 px-2 pb-1 flex items-center gap-1 uppercase tracking-wider">
+              <ShieldCheck size={11} className="shrink-0" />
+              Fundador
             </span>
-          </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onSelectTab('clients');
+                onCloseMobile();
+              }}
+              className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                activeTab === 'clients'
+                  ? 'bg-blue-900 text-white font-semibold'
+                  : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 min-w-0">
+                <Building2 size={15} className="shrink-0" />
+                <span className="text-xs truncate">Gestor de Clientes</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onSelectTab('credentials');
+                onCloseMobile();
+              }}
+              className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                activeTab === 'credentials'
+                  ? 'bg-blue-900 text-white font-semibold'
+                  : 'text-slate-700 hover:text-slate-950 hover:bg-slate-100 font-medium'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 min-w-0">
+                <KeyRound size={15} className="shrink-0" />
+                <span className="text-xs truncate">Acesso &amp; Credenciais</span>
+              </span>
+            </button>
+          </div>
         )}
       </nav>
 

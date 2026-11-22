@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 
 import { Employee, CompanyData, ConfigFiscal, PayrollSummary, PaymentLog } from './types';
-import { getAuthHeaders, isSuperAdminRole } from './lib/authSession';
+import { getAuthHeaders, isFounderUser } from './lib/authSession';
 import Dashboard from './components/Dashboard';
 import EmployeeDirectory from './components/EmployeeDirectory';
 import TaxSimulator from './components/TaxSimulator';
@@ -173,7 +173,7 @@ export default function App() {
   const [availableCompanies, setAvailableCompanies] = useState<any[]>([]);
 
   const loadCompanies = async () => {
-    if (!isSuperAdminRole()) {
+    if (!isFounderUser()) {
       setAvailableCompanies([]);
       return;
     }
@@ -195,7 +195,7 @@ export default function App() {
   };
 
   const handleSwitchCompany = async (companyId: string) => {
-    if (!isSuperAdminRole()) return;
+    if (!isFounderUser()) return;
     try {
       const res = await fetch('/api/clients/select', {
         method: 'POST',
@@ -211,7 +211,7 @@ export default function App() {
     } catch (err) {
       console.warn('Alternando empresa em modo local:', err);
     }
-    // Fallback local instantâneo apenas para Super Admin
+    // Fallback local instantâneo apenas para Fundador
     selecionarClienteEmpresa(companyId);
     await loadData();
     await loadCompanies();
@@ -238,11 +238,12 @@ export default function App() {
 
   const loadData = async () => {
     try {
+      const authHeaders = getAuthHeaders();
       const [empRes, configRes, summaryRes, logsRes] = await Promise.all([
-        fetch('/api/employees').catch(() => null),
-        fetch('/api/config').catch(() => null),
-        fetch(`/api/dashboard/resumo-financeiro?periodo=${encodeURIComponent(selectedPeriod)}`).catch(() => null),
-        fetch('/api/logs').catch(() => null)
+        fetch('/api/employees', { headers: authHeaders }).catch(() => null),
+        fetch('/api/config', { headers: authHeaders }).catch(() => null),
+        fetch(`/api/dashboard/resumo-financeiro?periodo=${encodeURIComponent(selectedPeriod)}`, { headers: authHeaders }).catch(() => null),
+        fetch('/api/logs', { headers: authHeaders }).catch(() => null)
       ]);
 
       const isJson = (res: Response | null) => res && res.ok && (res.headers.get('content-type') || '').includes('application/json');
@@ -330,7 +331,7 @@ export default function App() {
 
   useEffect(() => {
     loadData();
-    if (isSuperAdminRole()) {
+    if (isFounderUser()) {
       loadCompanies();
     } else {
       setAvailableCompanies([]);
@@ -381,7 +382,7 @@ export default function App() {
     try {
       const res = await fetch('/api/employees', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(newEmp)
       });
       if (!res.ok) throw new Error('Não foi possível adicionar o colaborador.');
@@ -395,7 +396,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/employees/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(updatedFields)
       });
       if (!res.ok) throw new Error('Não foi possível atualizar o colaborador.');
@@ -408,7 +409,8 @@ export default function App() {
   const handleDeleteEmployee = async (id: string) => {
     try {
       const res = await fetch(`/api/employees/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       if (!res.ok) throw new Error('Não foi possível remover o colaborador.');
       await loadData();
@@ -422,7 +424,7 @@ export default function App() {
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           config: newConfig,
           empresa: newCompany
@@ -497,10 +499,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!isSuperAdminRole(userRole) && (activeTab === 'clients' || activeTab === 'credentials')) {
+    if (!isFounderUser(userRole) && (activeTab === 'clients' || activeTab === 'credentials')) {
       setActiveTab('dashboard');
     }
-  }, [userRole, activeTab]);
+  }, [userRole, activeTab, authenticated]);
 
   const handleEnterPlanDemo = (plan: 'Bronze' | 'Silver' | 'Gold') => {
     setSelectedPlan(plan);
@@ -839,7 +841,7 @@ export default function App() {
                     />
                   )}
                   {activeTab === 'credentials' && (
-                    isSuperAdminRole(userRole) ? (
+                    isFounderUser(userRole) ? (
                       <AccessCredentialManagement
                         company={company}
                         onUpdateCompany={(updated) => setCompany(updated)}
@@ -848,8 +850,8 @@ export default function App() {
                     ) : (
                       <div className="bg-white rounded-xl border border-rose-200 p-8 text-center max-w-lg mx-auto my-8 space-y-2">
                         <Lock size={20} className="mx-auto text-rose-700" />
-                        <h3 className="text-sm font-bold text-slate-900">Acesso Restrito</h3>
-                        <p className="text-xs text-slate-600">Esta secção é reservada ao Administrador Principal do sistema.</p>
+                        <h3 className="text-sm font-bold text-slate-900">Acesso Restrito ao Fundador</h3>
+                        <p className="text-xs text-slate-600">Esta secção é reservada exclusivamente ao Fundador do sistema.</p>
                       </div>
                     )
                   )}
@@ -899,7 +901,7 @@ export default function App() {
                     )
                   )}
                   {activeTab === 'clients' && (
-                    isSuperAdminRole(userRole) ? (
+                    isFounderUser(userRole) ? (
                       <ClientManagement
                         onCompanySwitched={loadData}
                         userRole={userRole}
@@ -907,8 +909,8 @@ export default function App() {
                     ) : (
                       <div className="bg-white rounded-xl border border-rose-200 p-8 text-center max-w-lg mx-auto my-8 space-y-2">
                         <Lock size={20} className="mx-auto text-rose-700" />
-                        <h3 className="text-sm font-bold text-slate-900">Acesso Restrito</h3>
-                        <p className="text-xs text-slate-600">Esta secção é reservada ao Administrador Principal do sistema.</p>
+                        <h3 className="text-sm font-bold text-slate-900">Acesso Restrito ao Fundador</h3>
+                        <p className="text-xs text-slate-600">O Gestor de Clientes é reservado exclusivamente ao Fundador do sistema.</p>
                       </div>
                     )
                   )}

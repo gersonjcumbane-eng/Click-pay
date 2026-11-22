@@ -80,11 +80,13 @@ import {
 import { criarReciboSalarioPDF, criarAvisoPrevioPDF, criarExtratoFintechPDF, criarRelatorioAuditoriaPDF, criarReciboValePDF, criarRelatorioValesPDF, criarMapaSalariosPDF, criarRelatorioHistoricoPDF, criarGuiaRecolhimentoInssPDF, criarGuiaIrpsPDF, criarRelatorioAgrupadoERPPDF } from './src/pdfService';
 import { gerarCartaApoioDocx } from './src/docxService';
 import {
+  hashPassword,
   verifyPassword,
   scanFileForMalware,
   inspectPayloadForThreats,
   sanitizeObjectDeep
 } from './src/lib/security';
+import embeddedFirebaseConfig from './firebase-applet-config.json';
 
 export async function createApp(options?: { skipStatic?: boolean }) {
   const app = express();
@@ -99,7 +101,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     path.resolve(safeDirname, '..', 'firebase-applet-config.json')
   ];
   const configPath = configCandidates.find((p) => fs.existsSync(p));
-  let firebaseConfig: any = null;
+  let firebaseConfig: any = embeddedFirebaseConfig || null;
   let isEmailPasswordProviderDisabled = false;
 
   if (configPath) {
@@ -109,6 +111,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     } catch (err) {
       console.error('[Firebase Error] Erro ao analisar as credenciais:', err);
     }
+  } else if (firebaseConfig) {
+    console.log('[Firebase Integration] Configurações Firebase embutidas carregadas:', firebaseConfig.projectId);
   }
 
   // Sincronizar contas do ERP com Firebase Authentication via REST API
@@ -160,12 +164,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       'Content-Security-Policy',
       [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.googleapis.com https://accounts.google.com",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.googleapis.com https://accounts.google.com https://*.gstatic.com",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' data: https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
-        "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com wss://*.firebaseio.com",
-        "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
+        "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://accounts.google.com https://apis.google.com wss://*.firebaseio.com",
+        "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://*.google.com",
         "object-src 'none'",
         "base-uri 'self'"
       ].join('; ')
@@ -390,25 +394,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     next();
   };
 
-  const requireSuperAdmin = (req: Request, res: Response, next: any) => {
-    const session = extractSessionFromRequest(req);
-    if (!session) {
-      return res.status(401).json({
-        erro: 'Autenticação obrigatória para aceder às credenciais e administração do sistema.',
-        error: 'Unauthorized'
-      });
-    }
-    if (session.role !== 'SUPER_ADMIN_PAYROLL') {
-      return res.status(403).json({
-        erro: 'Acesso Proibido: Apenas o Administrador Principal do sistema tem permissão para aceder a estas credenciais.',
-        error: 'Forbidden'
-      });
-    }
-    (req as any).authSession = session;
-    next();
-  };
-
-  // CREDENCIAIS MESTRE DOS FUNDADORES (EXCLUSIVAS NO SERVIDOR)
+  // CREDENCIAIS MESTRE DO FUNDADOR (EXCLUSIVAS NO SERVIDOR)
   const INITIAL_FOUNDER_PASSWORD = process.env.FOUNDER_ADMIN_PASSWORD || "ClickPay@2026MZ!";
   const CREDENCIAIS_FOUNDERS = {
     email: "gersonjcumbane@gmail.com",
@@ -418,11 +404,66 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       "admin@clickpay.co.mz",
       "admin@payrolltech.co.mz"
     ],
-    passwords: [
+    passwords: Array.from(new Set([
       INITIAL_FOUNDER_PASSWORD,
+      "ClickPay@2026MZ!",
       "UEM_Finanças_Engenharia_2026!"
-    ]
+    ]))
   };
+
+  function isFounderEmail(email?: string | null): boolean {
+    const emailNorm = String(email || '').toLowerCase().trim();
+    if (!emailNorm) return false;
+    return CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm);
+  }
+
+  const CREDENTIAL_STORE_PATH = path.join(tmpDir, 'clickpay-rotated-creds.json');
+  let rotatedPasswordHashes: Record<string, string> = {};
+  try {
+    if (fs.existsSync(CREDENTIAL_STORE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(CREDENTIAL_STORE_PATH, 'utf8'));
+      if (parsed && typeof parsed === 'object') {
+        rotatedPasswordHashes = parsed;
+      }
+    }
+  } catch {
+    rotatedPasswordHashes = {};
+  }
+
+  async function persistRotatedCredential(emailNorm: string, rawPass: string) {
+    try {
+      const hashed = await hashPassword(rawPass);
+      rotatedPasswordHashes[emailNorm] = hashed;
+      if (isFounderEmail(emailNorm)) {
+        for (const fe of CREDENCIAIS_FOUNDERS.emails) {
+          rotatedPasswordHashes[fe.toLowerCase().trim()] = hashed;
+        }
+      }
+      fs.writeFileSync(CREDENTIAL_STORE_PATH, JSON.stringify(rotatedPasswordHashes), 'utf8');
+    } catch (err) {
+      console.warn('[CredStore Warning]:', err);
+    }
+  }
+
+  const requireSuperAdmin = (req: Request, res: Response, next: any) => {
+    const session = extractSessionFromRequest(req);
+    if (!session) {
+      return res.status(401).json({
+        erro: 'Autenticação obrigatória para aceder às credenciais e administração do sistema.',
+        error: 'Unauthorized'
+      });
+    }
+    if (session.role !== 'SUPER_ADMIN_PAYROLL' || !isFounderEmail(session.email)) {
+      return res.status(403).json({
+        erro: 'Acesso Proibido: Apenas o Fundador do sistema tem permissão para aceder a esta opção.',
+        error: 'Forbidden'
+      });
+    }
+    (req as any).authSession = session;
+    next();
+  };
+
+  const requireFounder = requireSuperAdmin;
 
   // Base de dados simulada de clientes que VOCÊS vão registar manualmente
   const clientesRegistadosPelosFounders: any[] = [];
@@ -979,8 +1020,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     let isFirebaseAuthed = false;
     let firebaseErrorMsg = '';
 
-    // Tentar autenticar o utilizador via Firebase Auth REST API se disponível (sem bloquear contas locais válidas)
-    if (firebaseConfig && firebaseConfig.apiKey) {
+    // Tentar autenticar o utilizador via Firebase Auth REST API apenas se o provedor Email/Password não estiver desativado
+    if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
       try {
         const fbRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`, {
           method: 'POST',
@@ -998,6 +1039,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           console.log(`[Firebase Login Success] Autenticado com sucesso via Firebase Auth: ${emailNorm}`);
         } else {
           firebaseErrorMsg = fbData.error ? fbData.error.message : 'Falha na autenticação do Firebase.';
+          if (firebaseErrorMsg === 'OPERATION_NOT_ALLOWED') {
+            isEmailPasswordProviderDisabled = true;
+          }
           console.warn(`[Firebase Login Info] Fallback local para ${emailNorm} (${firebaseErrorMsg})`);
         }
       } catch (fbErr) {
@@ -1005,16 +1049,25 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
     }
 
+    // Verificar hash persistido de senha rotacionada pelo Fundador (sobrevive a reinícios)
+    const rotatedHash = rotatedPasswordHashes[emailNorm];
+    const matchesRotatedHash = rotatedHash
+      ? (await verifyPassword(passwordClean, rotatedHash)) || (await verifyPassword(passwordRaw, rotatedHash))
+      : false;
+
     // 1. Acesso Mestre: Verifica se é o Fundador (Super Admin / Gerson Cumbane)
-    if (CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm)) {
+    if (isFounderEmail(emailNorm)) {
       const isCorrectPassword =
-        CREDENCIAIS_FOUNDERS.password === passwordClean ||
-        CREDENCIAIS_FOUNDERS.passwords.includes(passwordClean) ||
-        CREDENCIAIS_FOUNDERS.passwords.includes(passwordRaw) ||
+        matchesRotatedHash ||
+        (!rotatedHash && (
+          CREDENCIAIS_FOUNDERS.password === passwordClean ||
+          CREDENCIAIS_FOUNDERS.passwords.includes(passwordClean) ||
+          CREDENCIAIS_FOUNDERS.passwords.includes(passwordRaw)
+        )) ||
         isFirebaseAuthed;
 
       if (isCorrectPassword) {
-        if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
+        if (!isFirebaseAuthed && !isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
           syncUserToFirebase(emailNorm, passwordClean);
         }
 
@@ -1028,6 +1081,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             nome: "Gerson Cumbane (Fundador ClickPay)",
             email: emailNorm,
             funcao: "SUPER_ADMIN_PAYROLL",
+            empresa_id: "cli_founders",
             area_visualizacao: "Painel Executivo Global",
             nome_empresa: empresaAtual.nome || "ClickPay Moçambique Lda",
             subscription_status: "ativo",
@@ -1058,9 +1112,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         [];
 
       const isCorrectSystemPassword =
-        systemUser.rawPassword === passwordClean ||
-        systemUser.rawPassword === passwordRaw ||
-        planTierAliases.includes(passwordClean) ||
+        matchesRotatedHash ||
+        (!rotatedHash && (
+          systemUser.rawPassword === passwordClean ||
+          systemUser.rawPassword === passwordRaw ||
+          planTierAliases.includes(passwordClean)
+        )) ||
         isFirebaseAuthed;
 
       if (isCorrectSystemPassword) {
@@ -1617,7 +1674,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const emailNorm = String(fbUser.email).toLowerCase().trim();
 
       // 1. Fundador (Super Admin)
-      if (CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm)) {
+      if (isFounderEmail(emailNorm)) {
         selecionarClienteEmpresa("cli_founders");
         const sessionPayload = {
           sucesso: true,
@@ -1627,6 +1684,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             nome: fbUser.displayName || "Gerson Cumbane (Fundador ClickPay)",
             email: emailNorm,
             funcao: "SUPER_ADMIN_PAYROLL",
+            empresa_id: "cli_founders",
             area_visualizacao: "Painel Executivo Global",
             nome_empresa: empresaAtual.nome || "ClickPay Moçambique Lda",
             subscription_status: "ativo",
@@ -1802,7 +1860,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       'CLIENTE_EMPRESA': 'Cliente Empresa (Portal Completo)'
     };
 
-    const selectedRole = role || 'GESTOR_RH';
+    const requestedRole = String(role || 'GESTOR_RH');
+    const selectedRole =
+      requestedRole === 'SUPER_ADMIN_PAYROLL' && !isFounderEmail(emailNorm)
+        ? 'GESTOR_RH'
+        : requestedRole;
     const selectedPlan = plan || 'Silver';
     const compName = companyName || empresaAtual.nome;
     const userPhone = phone || '+258 84 000 0000';
@@ -2136,13 +2198,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.status(404).json({ erro: `Utilizador "${emailNorm}" não encontrado.` });
     }
 
+    await persistRotatedCredential(cleanNewEmail || emailNorm, cleanNewPass);
+
     if (firebaseConfig && firebaseConfig.apiKey) {
       await syncUserToFirebase(cleanNewEmail || emailNorm, cleanNewPass);
     }
 
     notifyFounder(
       'Credenciais de Acesso Atualizadas',
-      `A palavra-passe da conta "${emailNorm}" foi atualizada com sucesso pelo Administrador Principal.`,
+      `A palavra-passe da conta "${emailNorm}" foi atualizada com sucesso pelo Fundador.`,
       { userEmail: cleanNewEmail || emailNorm, status: 'sucesso' }
     );
 
@@ -2152,7 +2216,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     });
   });
 
-  app.put('/api/firebase-auth/users', requireSuperAdmin, async (req: Request, res: Response) => {
+  app.put('/api/firebase-auth/users', requireFounder, async (req: Request, res: Response) => {
     const { email, password } = req.body;
     const emailNorm = String(email || '').toLowerCase().trim();
     const cleanPass = String(password || '').trim();
@@ -2161,7 +2225,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
 
     try {
-      const superAdmin = CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm);
+      const superAdmin = isFounderEmail(emailNorm);
       if (superAdmin) {
         CREDENCIAIS_FOUNDERS.password = cleanPass;
         CREDENCIAIS_FOUNDERS.passwords = [cleanPass];
@@ -2181,6 +2245,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       baseDadosClientes.forEach(c => {
         if (String(c.email || '').toLowerCase().trim() === emailNorm) c.password = cleanPass;
       });
+
+      await persistRotatedCredential(emailNorm, cleanPass);
 
       // Sincronizar de forma forçada no Firebase Auth
       await syncUserToFirebase(emailNorm, cleanPass);
@@ -2468,10 +2534,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // =========================================================================
-  // GESTÃO MULTI-CLIENTE (EXCLUSIVO SUPER ADMIN)
+  // GESTÃO MULTI-CLIENTE (EXCLUSIVO FUNDADOR)
   // =========================================================================
 
-  app.get('/api/clients', requireSuperAdmin, (req: Request, res: Response) => {
+  app.get('/api/clients', requireFounder, (req: Request, res: Response) => {
     try {
       // Calculate current stats on-the-fly for rich representation
       const listagem = baseDadosClientes.map(c => {
@@ -2507,7 +2573,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.post('/api/clients/select', requireSuperAdmin, (req: Request, res: Response) => {
+  app.post('/api/clients/select', requireFounder, (req: Request, res: Response) => {
     try {
       const { id } = req.body;
       if (!id) {
@@ -2536,7 +2602,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.post('/api/clients', requireSuperAdmin, (req: Request, res: Response) => {
+  app.post('/api/clients', requireFounder, (req: Request, res: Response) => {
     try {
       const { nome, nuit, endereco, provincia, distrito, regime_iva, nuel, email, telefone, logo, fee_base, fee_por_slip, password, subscription_status, subscription_plan, next_billing_date } = req.body;
       if (!nome || !nuit) {
@@ -2572,8 +2638,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  // UPDATE CLIENT SUBSCRIPTION DETAILS (Platform Owner Control)
-  app.post('/api/clients/update-subscription', requireSuperAdmin, (req: Request, res: Response) => {
+  // UPDATE CLIENT SUBSCRIPTION DETAILS (Platform Founder Control)
+  app.post('/api/clients/update-subscription', requireFounder, (req: Request, res: Response) => {
     try {
       const { id, status, plan, fee_base, fee_por_slip, next_billing_date, password } = req.body;
       if (!id) {
@@ -2600,7 +2666,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  app.delete('/api/clients/:id', requireSuperAdmin, (req: Request, res: Response) => {
+  app.delete('/api/clients/:id', requireFounder, (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const index = baseDadosClientes.findIndex(c => c.id === id);

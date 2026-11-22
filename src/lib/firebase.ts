@@ -423,16 +423,32 @@ export async function signInWithGoogleAccount(): Promise<{
     };
   } catch (err: any) {
     const code = err?.code || '';
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
       return { ok: false, error: 'Janela de autenticação Google fechada antes de concluir.' };
+    }
+    if (code === 'auth/popup-blocked') {
+      return {
+        ok: false,
+        error: 'O navegador bloqueou a janela popup do Google. Permita popups para este site ou autentique-se com e-mail e palavra-passe.'
+      };
     }
     if (code === 'auth/unauthorized-domain') {
       return {
         ok: false,
-        error: 'Este domínio ainda não está autorizado no Firebase Auth. Use e-mail e palavra-passe ou autorize o domínio na consola Firebase.'
+        error: `O domínio "${hostname}" não está autorizado no Firebase Authentication. Adicione-o em Domínios Autorizados na Consola Firebase ou entre com e-mail e palavra-passe.`
       };
     }
-    return { ok: false, error: 'Não foi possível concluir a autenticação com a Conta Google.' };
+    if (code === 'auth/network-request-failed') {
+      return {
+        ok: false,
+        error: 'Falha de ligação ao contactar a autenticação Google. Verifique a internet ou utilize e-mail e palavra-passe.'
+      };
+    }
+    return {
+      ok: false,
+      error: `Não foi possível concluir a autenticação com a Conta Google${code ? ` (${code})` : ''}. Utilize e-mail e palavra-passe.`
+    };
   }
 }
 

@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { useToast, useConfirm } from '../context/ToastContext';
-import { getAuthHeaders, isSuperAdminRole } from '../lib/authSession';
+import { getAuthHeaders, isFounderUser } from '../lib/authSession';
 
 interface AccessCredentialManagementProps {
   company: CompanyData;
@@ -91,7 +91,7 @@ export default function AccessCredentialManagement({
 }: AccessCredentialManagementProps) {
   const { showSuccess, showError, showInfo } = useToast();
   const confirmAction = useConfirm();
-  const isSuperAdmin = isSuperAdminRole(userRole);
+  const isSuperAdmin = isFounderUser(userRole);
 
   // 1. Identificadores Oficiais ClickPayroll
   const [nuit, setNuit] = useState<string>(company.nuit || '402302399');
@@ -481,9 +481,9 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
         <div className="w-12 h-12 mx-auto rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center">
           <Lock size={22} />
         </div>
-        <h2 className="text-lg font-bold text-slate-950">Acesso Restrito</h2>
+        <h2 className="text-lg font-bold text-slate-950">Acesso Restrito ao Fundador</h2>
         <p className="text-xs text-slate-600 leading-relaxed">
-          As credenciais, chaves de API e configurações de segurança do sistema são exclusivas do Administrador Principal.
+          As credenciais, chaves de API e configurações de segurança do sistema são exclusivas do Fundador.
         </p>
       </div>
     );
@@ -1199,7 +1199,6 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                         <option value="CONTABILISTA">Contabilista Certificado (PGC & Impostos)</option>
                         <option value="OPERADOR_VENDAS">Operador de Facturação & Vendas</option>
                         <option value="CLIENTE_EMPRESA">Cliente Empresa (Portal Completo)</option>
-                        <option value="SUPER_ADMIN_PAYROLL">Super Administrador (Fundador)</option>
                       </select>
                     </div>
 

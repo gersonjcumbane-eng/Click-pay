@@ -36,7 +36,7 @@ import { useToast } from '../context/ToastContext';
 import EnvironmentMasking from './EnvironmentMasking';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
-import { getAuthHeaders, isSuperAdminRole } from '../lib/authSession';
+import { getAuthHeaders, isFounderUser } from '../lib/authSession';
 
 interface CorporateSettingsProps {
   company: CompanyData;
@@ -64,7 +64,7 @@ export default function CorporateSettings({
   const { showSuccess, showError, showInfo } = useToast();
   const localUserRole = localStorage.getItem('paytek_role');
   const userRole = propUserRole || localUserRole;
-  const isSuperAdmin = isSuperAdminRole(userRole);
+  const isSuperAdmin = isFounderUser(userRole);
   const isClient = !isSuperAdmin;
 
   // Company state

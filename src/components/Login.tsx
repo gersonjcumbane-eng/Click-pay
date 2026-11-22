@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send, MessageCircle } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send, MessageCircle, Eye, EyeOff } from 'lucide-react';
 import {
   authenticateClientInFirebase,
   signInWithGoogleAccount,
@@ -45,6 +45,8 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [googleLoading, setGoogleLoading] = useState(false);
   const [supportModalOpen, setSupportModalOpen] = useState(false);
 
+  const [showPassword, setShowPassword] = useState(false);
+
   // Estados para Verificação de 2 Fatores (OTP)
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -57,16 +59,18 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [pendingFallbackSession, setPendingFallbackSession] = useState<FallbackSession | null>(null);
 
   const persistUserSession = (token: string, usuario: any, fallbackEmail: string) => {
+    const resolvedEmail = String(usuario?.email || fallbackEmail || '').toLowerCase().trim();
+    const resolvedRole = usuario?.funcao || 'CLIENTE_EMPRESA';
     localStorage.setItem('paytek_auth', 'true');
     localStorage.setItem('paytek_token', token || `token_clickpay_${Date.now()}`);
-    localStorage.setItem('paytek_user', usuario?.email || fallbackEmail);
-    if (usuario?.funcao) {
-      localStorage.setItem('paytek_role', usuario.funcao);
-    } else {
-      localStorage.setItem('paytek_role', 'CLIENTE_EMPRESA');
-    }
+    localStorage.setItem('paytek_user', resolvedEmail);
+    localStorage.setItem('paytek_role', resolvedRole);
     if (usuario?.empresa_id) {
       localStorage.setItem('paytek_company_id', usuario.empresa_id);
+    } else if (resolvedRole === 'SUPER_ADMIN_PAYROLL') {
+      localStorage.setItem('paytek_company_id', 'cli_founders');
+    } else {
+      localStorage.removeItem('paytek_company_id');
     }
     localStorage.setItem('paytek_sub_status', usuario?.subscription_status || 'ativo');
     localStorage.setItem('paytek_sub_plan', usuario?.subscription_plan || selectedPlan || 'Bronze');
@@ -163,17 +167,14 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
           return;
         }
       } else {
-        // Caso o servidor tenha reiniciado (401 em memória), tentar ainda autenticar no Firebase Firestore
-        const cloudOk = await triggerFallbackAuth();
-        if (cloudOk) return;
         const errData = await response.json().catch(() => ({}));
-        setError(errData.erro || 'Dados de início de sessão incorretos.');
+        setError(errData.erro || 'Dados de início de sessão incorretos. Verifique o e-mail e a palavra-passe.');
       }
     } catch (err: any) {
       console.warn('Backend indisponível, autenticando via Firebase/Nuvem:', err);
       const ok = await triggerFallbackAuth();
       if (!ok) {
-        setError('Dados de início de sessão incorretos ou ligação indisponível.');
+        setError('Ligação ao servidor de autenticação indisponível ou credenciais incorretas.');
       }
     } finally {
       setLoading(false);
@@ -547,15 +548,25 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                   <Lock size={13} className="text-slate-400" />
                   Palavra-passe / Senha
                 </label>
-                <input
-                  type="password"
-                  required
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Digite a sua palavra-passe"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 transition-all"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Digite a sua palavra-passe"
+                    className="w-full px-3.5 py-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Ocultar palavra-passe' : 'Mostrar palavra-passe'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
               </div>
 
               <button

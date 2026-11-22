@@ -29,8 +29,9 @@ COPY package*.json ./
 # Instalar apenas dependências de produção para manter a imagem leve
 RUN npm ci --only=production
 
-# Copiar os arquivos compilados do estágio anterior
+# Copiar os arquivos compilados e configuração Firebase do estágio anterior
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/firebase-applet-config.json ./firebase-applet-config.json
 
 # Expor a porta que o servidor Express escuta (padrão: 3000)
 EXPOSE 3000
