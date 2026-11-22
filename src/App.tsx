@@ -519,6 +519,7 @@ export default function App() {
             setShowLogin(true);
           }}
           onSuccess={async () => {
+            setUserRole(localStorage.getItem('paytek_role'));
             setAuthenticated(true);
             setShowOnboarding(false);
             await loadData();
@@ -550,6 +551,7 @@ export default function App() {
               setShowOnboarding(true);
             }}
             onLoginSuccess={async () => {
+              setUserRole(localStorage.getItem('paytek_role'));
               setAuthenticated(true);
               setShowLogin(false);
               await loadData();

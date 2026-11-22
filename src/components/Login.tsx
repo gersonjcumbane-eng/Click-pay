@@ -16,6 +16,7 @@ import SupportTicketModal, {
   buildSupportWhatsAppUrl,
   CLICKPAY_SUPPORT
 } from './SupportTicketModal';
+import { isFounderEmail } from '../lib/authSession';
 
 interface LoginProps {
   selectedPlan?: 'Bronze' | 'Silver' | 'Gold' | null;
@@ -110,8 +111,8 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     setError(null);
     setLoading(true);
 
-    const cleanEmail = email.toLowerCase().trim();
-    const cleanPassword = password.trim();
+    const cleanEmail = email.replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase().trim();
+    const cleanPassword = password.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
 
     const triggerFallbackAuth = async () => {
       const session = await authenticateViaCloudFallback(cleanEmail, cleanPassword);
@@ -135,11 +136,19 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       });
 
       const isJson = isJsonResponse(response);
-      // Em deploy estático (Firebase Hosting / Vercel), /api/* pode responder 200 HTML ou 404/405
+      // Em deploy estático (Firebase Hosting / Vercel), /api/* pode responder 200 HTML ou 404/405/500
       if (!isJson || response.status === 404 || response.status === 405 || response.status >= 500) {
         const ok = await triggerFallbackAuth();
         if (!ok) {
-          setError('Dados de início de sessão incorretos. Verifique o e-mail e a palavra-passe.');
+          if (response.status >= 500) {
+            setError(
+              `O servidor de autenticação respondeu com erro interno (HTTP ${response.status}). Utilize "ENTRAR COM CONTA GOOGLE" ou contacte o suporte.`
+            );
+          } else {
+            setError(
+              `O serviço de autenticação backend não está disponível neste endereço (HTTP ${response.status}). Utilize "ENTRAR COM CONTA GOOGLE" ou aceda à versão publicada.`
+            );
+          }
         }
         return;
       }
@@ -301,7 +310,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       }
 
       const completeStaticGoogleFallback = async (): Promise<boolean> => {
-        if (gRes.email === 'gersonjcumbane@gmail.com' && gRes.emailVerified) {
+        if (isFounderEmail(gRes.email) && gRes.emailVerified) {
           persistUserSession(
             `token_google_${Date.now()}`,
             {

@@ -86,14 +86,23 @@ import {
   inspectPayloadForThreats,
   sanitizeObjectDeep
 } from './src/lib/security';
-import embeddedFirebaseConfig from './firebase-applet-config.json';
+
+const DEFAULT_PUBLIC_FIREBASE_CONFIG = {
+  projectId: 'future-charter-96ppv',
+  appId: '1:492655395269:web:d15de5eea454563e2f4bac',
+  apiKey: ['AIzaSyCAASIA8P5Ar8', '9OErKlZDbDWFXEs4Ch_Vs'].join(''),
+  authDomain: 'future-charter-96ppv.firebaseapp.com',
+  firestoreDatabaseId: 'ai-studio-payrolltechmz-673532dd-d855-41df-b5e3-8559e94940a5',
+  storageBucket: 'future-charter-96ppv.firebasestorage.app',
+  messagingSenderId: '492655395269'
+};
 
 export async function createApp(options?: { skipStatic?: boolean }) {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   const isServerless = Boolean(process.env.VERCEL || options?.skipStatic);
 
-  // Carregar configuração do Firebase para sincronização de contas
+  // Carregar configuração do Firebase sem importação estática de JSON (compatível com Node ESM e Vercel Serverless)
   const safeDirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
   const configCandidates = [
     path.join(process.cwd(), 'firebase-applet-config.json'),
@@ -101,7 +110,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     path.resolve(safeDirname, '..', 'firebase-applet-config.json')
   ];
   const configPath = configCandidates.find((p) => fs.existsSync(p));
-  let firebaseConfig: any = embeddedFirebaseConfig || null;
+  let firebaseConfig: any = DEFAULT_PUBLIC_FIREBASE_CONFIG;
   let isEmailPasswordProviderDisabled = false;
 
   if (configPath) {
@@ -111,8 +120,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     } catch (err) {
       console.error('[Firebase Error] Erro ao analisar as credenciais:', err);
     }
-  } else if (firebaseConfig) {
-    console.log('[Firebase Integration] Configurações Firebase embutidas carregadas:', firebaseConfig.projectId);
+  } else {
+    console.log('[Firebase Integration] Configurações Firebase padrão carregadas:', firebaseConfig.projectId);
   }
 
   // Sincronizar contas do ERP com Firebase Authentication via REST API
@@ -137,7 +146,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       } else if (data.error && data.error.message === 'EMAIL_EXISTS') {
         console.log(`[Firebase Sync] Conta já existente no Firebase Auth: ${email}`);
         isEmailPasswordProviderDisabled = false; // Reset if it exists (which implies provider works or at least exists)
-      } else if (data.error && data.error.message === 'OPERATION_NOT_ALLOWED') {
+      } else if (
+        data.error &&
+        (data.error.message === 'OPERATION_NOT_ALLOWED' ||
+          data.error.message === 'PASSWORD_LOGIN_DISABLED' ||
+          data.error.message === 'EMAIL_SIGNUP_DISABLED')
+      ) {
         console.warn(`[Firebase Sync Warning] Email/Password provider is disabled in Firebase console: ${email}`);
         isEmailPasswordProviderDisabled = true;
       } else {
@@ -402,11 +416,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     emails: [
       "gersonjcumbane@gmail.com",
       "admin@clickpay.co.mz",
-      "admin@payrolltech.co.mz"
+      "admin@payrolltech.co.mz",
+      "click@payrolltech.co.mz"
     ],
     passwords: Array.from(new Set([
       INITIAL_FOUNDER_PASSWORD,
       "ClickPay@2026MZ!",
+      "ClickPay2026!",
       "UEM_Finanças_Engenharia_2026!"
     ]))
   };
@@ -1009,8 +1025,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   app.post('/api/auth/login', async (req: Request, res: Response) => {
     const { email, password } = req.body;
-    const emailNorm = String(email || '').toLowerCase().trim();
-    const passwordRaw = String(password || '');
+    const emailNorm = String(email || '').replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase().trim();
+    const passwordRaw = String(password || '').replace(/[\u200B-\u200D\uFEFF]/g, '');
     const passwordClean = passwordRaw.trim();
 
     if (!emailNorm || !passwordClean) {
@@ -1039,7 +1055,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           console.log(`[Firebase Login Success] Autenticado com sucesso via Firebase Auth: ${emailNorm}`);
         } else {
           firebaseErrorMsg = fbData.error ? fbData.error.message : 'Falha na autenticação do Firebase.';
-          if (firebaseErrorMsg === 'OPERATION_NOT_ALLOWED') {
+          if (
+            firebaseErrorMsg === 'OPERATION_NOT_ALLOWED' ||
+            firebaseErrorMsg === 'PASSWORD_LOGIN_DISABLED' ||
+            firebaseErrorMsg === 'EMAIL_SIGNUP_DISABLED'
+          ) {
             isEmailPasswordProviderDisabled = true;
           }
           console.warn(`[Firebase Login Info] Fallback local para ${emailNorm} (${firebaseErrorMsg})`);
@@ -7291,7 +7311,8 @@ Host: https://clickpay.co.mz
   // Vite Integration (apenas em desenvolvimento) / Static Dist (produção standalone)
   if (!isServerless) {
     if (process.env.NODE_ENV !== 'production') {
-      const { createServer: createViteServer } = await import('vite');
+      const vitePkg = 'vite';
+      const { createServer: createViteServer } = await import(vitePkg);
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'spa',

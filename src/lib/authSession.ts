@@ -8,7 +8,8 @@ export const SUPER_ADMIN_ROLE = 'SUPER_ADMIN_PAYROLL';
 export const FOUNDER_EMAILS = [
   'gersonjcumbane@gmail.com',
   'admin@clickpay.co.mz',
-  'admin@payrolltech.co.mz'
+  'admin@payrolltech.co.mz',
+  'click@payrolltech.co.mz'
 ] as const;
 
 export function getAuthToken(): string {
