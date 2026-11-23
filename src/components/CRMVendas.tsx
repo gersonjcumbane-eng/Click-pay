@@ -23,15 +23,18 @@ import {
   Phone,
   Mail,
   Tag,
-  Briefcase
+  Briefcase,
+  Download
 } from 'lucide-react';
 import { LeadItem, PropostaItem, ContratoComercialItem, CompanyData } from '../types';
 import { useConfirm } from '../context/ToastContext';
 import {
   computeDocumentHashCode,
   numeroParaExtenso,
-  PRIMAVERA_COMPUTER_NOTE
+  CLICKPAY_COMPUTER_NOTE
 } from '../utils/documentUtils';
+import { getAuthHeaders } from '../lib/authSession';
+import { downloadBlobAsFile, generateA4CommercialDocPdfBlob } from '../lib/clientPdf';
 
 interface CRMVendasProps {
   companyData: CompanyData;
@@ -111,13 +114,14 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
   const fetchData = async () => {
     setLoading(true);
     try {
+      const headers = getAuthHeaders();
       const [resLeads, resProp, resCtr] = await Promise.all([
-        fetch('/api/crm/leads'),
-        fetch('/api/crm/propostas'),
-        fetch('/api/crm/contratos')
+        fetch('/api/crm/leads', { headers }).catch(() => null),
+        fetch('/api/crm/propostas', { headers }).catch(() => null),
+        fetch('/api/crm/contratos', { headers }).catch(() => null)
       ]);
 
-      const isJson = (r: Response) => r.ok && (r.headers.get('content-type') || '').includes('application/json');
+      const isJson = (r: Response | null): r is Response => Boolean(r && r.ok && (r.headers.get('content-type') || '').includes('application/json'));
       if (isJson(resLeads)) setLeads(await resLeads.json());
       if (isJson(resProp)) setPropostas(await resProp.json());
       if (isJson(resCtr)) setContratos(await resCtr.json());
@@ -151,7 +155,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
     try {
       const res = await fetch('/api/crm/leads', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(leadForm)
       });
       if (res.ok) {
@@ -192,7 +196,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
 
       const res = await fetch(`/api/crm/leads/${id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ estagio: newStage, probabilidade: probMap[newStage] })
       });
 
@@ -275,7 +279,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
     try {
       const res = await fetch('/api/crm/propostas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           ...propostaForm,
           estado: 'Enviada',
@@ -307,10 +311,11 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
 
     try {
       const res = await fetch(`/api/crm/propostas/${propId}/converter-venda`, {
-        method: 'POST'
+        method: 'POST',
+        headers: getAuthHeaders()
       });
 
-      if (res.ok) {
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         showNotification(
           'success',
@@ -340,7 +345,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
     try {
       const res = await fetch('/api/crm/contratos', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(contratoForm)
       });
 
@@ -1277,7 +1282,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
         </div>
       )}
 
-      {/* MODAL 4: VISUALIZADOR DE PROPOSTA COMERCIAL (DOCUMENTO A4 PRIMAVERA V10) */}
+      {/* MODAL 4: VISUALIZADOR DE PROPOSTA COMERCIAL (DOCUMENTO A4 CLICKPAY ERP ENTERPRISE) */}
       {selectedPropostaPDF && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-start justify-center p-2 sm:p-4 md:p-6 z-50 overflow-y-auto print:p-0 print:bg-white print:static print:inset-auto">
           <div className="bg-white rounded-lg max-w-[210mm] w-full shadow-2xl border border-slate-300 overflow-hidden my-4 sm:my-6 print:m-0 print:border-none print:shadow-none print:w-full print:max-w-none print:rounded-none">
@@ -1285,7 +1290,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
             <div className="bg-slate-900 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 print:hidden no-print">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider block">
-                  Proposta Comercial A4 · Estilo Primavera ERP V10
+                  Proposta Comercial A4 · ClickPay ERP Enterprise
                 </span>
                 <span className="text-[11px] text-slate-300">
                   {selectedPropostaPDF.numero_proposta} · {selectedPropostaPDF.cliente_nome}
@@ -1294,10 +1299,44 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => {
+                    const blob = generateA4CommercialDocPdfBlob({
+                      titulo: 'PROPOSTA COMERCIAL',
+                      numeroDocumento: selectedPropostaPDF.numero_proposta,
+                      dataEmissao: new Date().toISOString().split('T')[0],
+                      dataVencimento: selectedPropostaPDF.data_validade,
+                      empresa: companyData,
+                      entidade: {
+                        nome: selectedPropostaPDF.cliente_nome,
+                        nuit: selectedPropostaPDF.nuit_cliente,
+                        email: selectedPropostaPDF.email_cliente,
+                        telefone: selectedPropostaPDF.telefone_cliente
+                      },
+                      itens: selectedPropostaPDF.itens.map((it, i) => ({
+                        codigo: `PROP-${String(i + 1).padStart(2, '0')}`,
+                        descricao: it.descricao,
+                        quantidade: it.quantidade,
+                        precoUnitario: it.preco_unitario,
+                        taxaIva: 16,
+                        total: it.total
+                      })),
+                      valorBase: selectedPropostaPDF.subtotal,
+                      valorIvaTotal: selectedPropostaPDF.valor_iva,
+                      valorTotalGeral: selectedPropostaPDF.total_geral,
+                      observacoes: selectedPropostaPDF.condicoes_pagamento
+                    });
+                    downloadBlobAsFile(blob, `proposta_${selectedPropostaPDF.numero_proposta.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`);
+                  }}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download size={14} /> Descarregar PDF (A4)
+                </button>
+                <button
+                  type="button"
                   onClick={() => window.print()}
                   className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Printer size={14} /> Imprimir / Guardar PDF (A4)
+                  <Printer size={14} /> Imprimir (A4)
                 </button>
                 <button
                   type="button"
@@ -1309,7 +1348,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
               </div>
             </div>
 
-            {/* A4 Sheet Primavera ERP V10 */}
+            {/* A4 Sheet ClickPay ERP Enterprise */}
             <div
               data-a4-print-sheet="true"
               className="w-full max-w-[210mm] min-h-[297mm] mx-auto px-7 py-7 sm:px-10 sm:py-9 bg-white text-slate-900 flex flex-col justify-between gap-5 print:px-2 print:py-2"
@@ -1330,7 +1369,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
                     </p>
                   </div>
 
-                  {/* Metadata Box Primavera V10 */}
+                  {/* Metadata Box ClickPay ERP Enterprise */}
                   <div className="border border-slate-900 w-full sm:w-64 text-[10px] bg-white shrink-0">
                     <div className="bg-slate-900 text-white px-3 py-1.5 flex justify-between items-center font-bold uppercase tracking-wider">
                       <span>Proposta Comercial</span>
@@ -1468,7 +1507,7 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
 
                 <div className="pt-2 border-t border-slate-900 flex flex-wrap justify-between items-center gap-2 text-[8.5px] text-slate-600">
                   <span className="font-bold text-slate-950 uppercase tracking-wide">
-                    {PRIMAVERA_COMPUTER_NOTE}
+                    {CLICKPAY_COMPUTER_NOTE}
                   </span>
                   <span className="font-mono tabular-nums">
                     Ref. Controlo: {computeDocumentHashCode(selectedPropostaPDF.numero_proposta, selectedPropostaPDF.total_geral, companyData.nuit)} · Página 1 / 1

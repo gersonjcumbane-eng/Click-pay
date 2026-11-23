@@ -31,7 +31,7 @@ import {
   KeyRound
 } from 'lucide-react';
 import { CompanyData, ConfigFiscal, EscalaoFiscalMoz } from '../types';
-import { matrizFiscaisMoçambique } from '../db_tax';
+import { matrizFiscaisMoçambique, employees as defaultEmployees, paymentLogs as defaultLogs } from '../db_tax';
 import { useToast } from '../context/ToastContext';
 import EnvironmentMasking from './EnvironmentMasking';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
@@ -297,14 +297,61 @@ export default function CorporateSettings({
     document.body.removeChild(link);
   };
 
+  const readLocalTenantArrays = () => {
+    const cid = localStorage.getItem('paytek_company_id') || 'cli_founders';
+    const founderMode = isFounderUser(localStorage.getItem('paytek_role'));
+    const tenantRaw = localStorage.getItem(`clickpay_tenant_${cid}`);
+    if (tenantRaw) {
+      try {
+        const parsed = JSON.parse(tenantRaw);
+        return {
+          employees: Array.isArray(parsed.employees) ? parsed.employees : [],
+          logs: Array.isArray(parsed.logs) ? parsed.logs : [],
+        };
+      } catch {}
+    }
+    if (founderMode && cid === 'cli_founders') {
+      let deletedIds: string[] = [];
+      try {
+        deletedIds = JSON.parse(localStorage.getItem('clickpay_deleted_seed_ids') || '[]');
+      } catch {}
+      const deletedSet = new Set(deletedIds);
+      const filteredEmps = defaultEmployees.filter((e: any) => !deletedSet.has(e.id));
+      const allowedNames = new Set(filteredEmps.map((e: any) => e.nome));
+      const filteredLogs = defaultLogs.filter(
+        (l: any) => !deletedSet.has(l.employeeId) && allowedNames.has(l.employeeName)
+      );
+      return { employees: filteredEmps, logs: filteredLogs };
+    }
+    return { employees: [], logs: [] };
+  };
+
   const handleLocalExport = async (format: 'json' | 'csv-employees' | 'csv-salaries') => {
     setExporting(format);
     try {
-      const resEmp = await fetch('/api/employees');
-      const employeesList = await resEmp.json();
+      const headers = getAuthHeaders();
+      const [resEmp, resLogs] = await Promise.all([
+        fetch('/api/employees', { headers }).catch(() => null),
+        fetch('/api/logs', { headers }).catch(() => null),
+      ]);
 
-      const resLogs = await fetch('/api/logs');
-      const logsList = await resLogs.json();
+      let employeesList: any[] | null = null;
+      let logsList: any[] | null = null;
+
+      if (resEmp && resEmp.ok && (resEmp.headers.get('content-type') || '').includes('application/json')) {
+        const parsed = await resEmp.json();
+        if (Array.isArray(parsed)) employeesList = parsed;
+      }
+      if (resLogs && resLogs.ok && (resLogs.headers.get('content-type') || '').includes('application/json')) {
+        const parsed = await resLogs.json();
+        if (Array.isArray(parsed)) logsList = parsed;
+      }
+
+      if (!employeesList || !logsList) {
+        const local = readLocalTenantArrays();
+        if (!employeesList) employeesList = local.employees;
+        if (!logsList) logsList = local.logs;
+      }
 
       if (format === 'json') {
         const fullDb = {
@@ -318,20 +365,61 @@ export default function CorporateSettings({
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.setAttribute("href", url);
-        link.setAttribute("download", `erp_export_paytek_${company.nuit}.json`);
+        link.setAttribute("download", `erp_export_clickpay_${company.nuit}.json`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        URL.revokeObjectURL(url);
       } else if (format === 'csv-employees') {
         exportEmployeesCSV(employeesList);
       } else if (format === 'csv-salaries') {
         exportSalariesCSV(logsList);
       }
+      showSuccess('Exportação concluída com sucesso!');
     } catch (err) {
       console.error(err);
       showError('Erro ao processar exportação de dados.');
     } finally {
       setExporting(null);
+    }
+  };
+
+  const handleDownloadBackup = async (bkp: any) => {
+    try {
+      const res = await fetch(`/api/backup/download/${bkp.id}`, {
+        headers: getAuthHeaders()
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `backup_clickpay_${bkp.id}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      if (bkp.snapshot) {
+        const blob = new Blob([JSON.stringify(bkp.snapshot, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `backup_clickpay_${bkp.id}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      showError('Backup não disponível para descarregar neste ambiente.');
+    } catch (err) {
+      console.error(err);
+      showError('Erro ao descarregar cópia de segurança.');
     }
   };
 
@@ -390,17 +478,23 @@ export default function CorporateSettings({
     };
 
     try {
-      // 1. Send to the backend endpoint specified by the user
+      let apiSucceeded = true;
       const resPerfil = await fetch('/api/empresa/atualizar-perfil', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
-      });
+      }).catch(() => null);
 
-      const dataPerfil = await resPerfil.json();
+      const isJson = Boolean(resPerfil && (resPerfil.headers.get('content-type') || '').includes('application/json'));
+      if (resPerfil && isJson) {
+        const dataPerfil = await resPerfil.json();
+        if (!resPerfil.ok || !dataPerfil.sucesso) {
+          apiSucceeded = false;
+          showError(dataPerfil.erro || "Erro ao salvar perfil da empresa.");
+        }
+      }
 
-      if (dataPerfil.sucesso) {
-        // 2. Save in parent state to update standard company variables in the ERP
+      if (apiSucceeded) {
         await onSave({
           taxa_inss_trabalhador: Number(taxaInssTrabalhador),
           taxa_inss_entidade: Number(taxaInssEntidade),
@@ -444,14 +538,12 @@ export default function CorporateSettings({
             updatedAt: new Date().toISOString()
           }, { merge: true });
         } catch (fbErr) {
-          console.warn('Aviso ao sincronizar perfil no Firebase:', fbErr);
+          console.warn('Aviso ao sincronizar perfil na nuvem:', fbErr);
         }
 
         setShowPerfilSuccess(true);
         showSuccess('Perfil da empresa guardado e sincronizado com sucesso!');
         setTimeout(() => setShowPerfilSuccess(false), 4000);
-      } else {
-        showError(dataPerfil.erro || "Erro ao salvar perfil da empresa.");
       }
     } catch (err) {
       console.error(err);
@@ -1372,15 +1464,14 @@ export default function CorporateSettings({
                           </span>
 
                           <div className="flex items-center gap-2 shrink-0">
-                            <a
-                              href={`/api/backup/download/${bkp.id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline flex items-center gap-0.5"
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadBackup(bkp)}
+                              className="text-indigo-600 hover:text-indigo-800 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
                               title="Descarregar ficheiro JSON"
                             >
                               <Download size={10} /> Download
-                            </a>
+                            </button>
 
                             {bkp.snapshot && (
                               <>

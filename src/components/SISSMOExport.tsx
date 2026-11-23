@@ -25,6 +25,13 @@ import {
 } from 'lucide-react';
 import { Employee, CompanyData } from '../types';
 import { calcularFolhaSalario } from '../db_tax';
+import {
+  downloadOrFallbackCsv,
+  downloadOrFallbackPdf,
+  generateGuiaInssPdfBlob,
+  generateGuiaIrpsPdfBlob,
+  generateSissmoCsvContent
+} from '../lib/clientPdf';
 import { useToast } from '../context/ToastContext';
 
 interface SISSMOExportProps {
@@ -74,7 +81,11 @@ export default function SISSMOExport({
     setDownloading(true);
     try {
       const p = selectedPeriod.replace(/\s+/g, '_');
-      window.location.href = `/api/payroll/exportar-sissmo?periodo=${p}`;
+      await downloadOrFallbackCsv({
+        url: `/api/payroll/exportar-sissmo?periodo=${encodeURIComponent(p)}`,
+        filename: `sissmo_folha_${p}.csv`,
+        generateFallback: () => generateSissmoCsvContent(employees)
+      });
     } catch (e) {
       console.error(e);
       showError('Erro ao exportar ficheiro.');
@@ -83,32 +94,40 @@ export default function SISSMOExport({
     }
   };
 
-  const handleDownloadGuiaPdf = () => {
+  const handleDownloadGuiaPdf = async () => {
     setGeneratingPdf(true);
     try {
       const p = encodeURIComponent(selectedPeriod);
       const jVal = Number(juros) || 0;
       const mVal = Number(multas) || 0;
-      window.location.href = `/api/exportar/guia-inss-pdf?periodo=${p}&juros=${jVal}&multas=${mVal}`;
+      await downloadOrFallbackPdf({
+        url: `/api/exportar/guia-inss-pdf?periodo=${p}&juros=${jVal}&multas=${mVal}`,
+        filename: `guia_inss_${selectedPeriod.replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () => generateGuiaInssPdfBlob(company, employees, selectedPeriod, jVal, mVal)
+      });
     } catch (e) {
       console.error(e);
       showError('Erro ao exportar PDF.');
     } finally {
-      setTimeout(() => setGeneratingPdf(false), 2000);
+      setGeneratingPdf(false);
     }
   };
 
-  const handleDownloadIrpsPdf = () => {
+  const handleDownloadIrpsPdf = async () => {
     setGeneratingIrpsPdf(true);
     try {
       const p = encodeURIComponent(selectedPeriod);
       const jVal = Number(jurosIrps) || 0;
-      window.location.href = `/api/exportar/guia-irps-pdf?periodo=${p}&juros=${jVal}`;
+      await downloadOrFallbackPdf({
+        url: `/api/exportar/guia-irps-pdf?periodo=${p}&juros=${jVal}`,
+        filename: `guia_irps_m19_${selectedPeriod.replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () => generateGuiaIrpsPdfBlob(company, employees, selectedPeriod, jVal)
+      });
     } catch (e) {
       console.error(e);
       showError('Erro ao exportar PDF da Guia de IRPS.');
     } finally {
-      setTimeout(() => setGeneratingIrpsPdf(false), 2000);
+      setGeneratingIrpsPdf(false);
     }
   };
 

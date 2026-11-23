@@ -35,6 +35,7 @@ import {
   sendBrowserNotification 
 } from '../utils/notifications';
 import { useToast, useConfirm } from '../context/ToastContext';
+import { getAuthHeaders } from '../lib/authSession';
 
 interface AlertConfig {
   email_destino: string;
@@ -104,7 +105,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
     try {
       const res = await fetch('/api/copiloto/consultar', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ topico })
       });
       if (!res.ok) throw new Error('Não foi possível obter a resposta do copiloto.');
@@ -135,15 +136,15 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
     setLoadingHistory(true);
     try {
       const [configRes, historyRes] = await Promise.all([
-        fetch('/api/alerts/config'),
-        fetch('/api/alerts/history')
+        fetch('/api/alerts/config', { headers: getAuthHeaders() }),
+        fetch('/api/alerts/history', { headers: getAuthHeaders() })
       ]);
 
-      if (configRes.ok) {
+      if (configRes.ok && (configRes.headers.get('content-type') || '').includes('application/json')) {
         const configData = await configRes.json();
         setConfig(configData);
       }
-      if (historyRes.ok) {
+      if (historyRes.ok && (historyRes.headers.get('content-type') || '').includes('application/json')) {
         const historyData = await historyRes.json();
         setHistory(historyData);
       }
@@ -166,7 +167,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
     try {
       const res = await fetch('/api/alerts/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(config)
       });
       if (res.ok) {
@@ -188,7 +189,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
     try {
       const res = await fetch('/api/alerts/trigger-manual', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ dataSimulada: simulatedDate })
       });
       if (res.ok) {
@@ -236,7 +237,7 @@ export default function AlertScheduler({ company, onReloadMainMetrics }: AlertSc
     });
     if (confirmed) {
       try {
-        const res = await fetch('/api/alerts/clear-history', { method: 'POST' });
+        const res = await fetch('/api/alerts/clear-history', { method: 'POST', headers: getAuthHeaders() });
         if (res.ok) {
           setHistory([]);
           setExpandedAlertId(null);

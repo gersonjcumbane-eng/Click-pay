@@ -22,7 +22,8 @@ import {
   RefreshCw,
   ArrowUpRight,
   Bell,
-  Cloud
+  Cloud,
+  Download
 } from 'lucide-react';
 import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
@@ -32,8 +33,9 @@ import { getAuthHeaders, isFounderUser } from '../lib/authSession';
 import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from '../lib/pricing';
 import {
   computeDocumentHashCode,
-  PRIMAVERA_COMPUTER_NOTE
+  CLICKPAY_COMPUTER_NOTE
 } from '../utils/documentUtils';
+import { downloadBlobAsFile, generateA4CommercialDocPdfBlob } from '../lib/clientPdf';
 
 interface ClientCompany {
   id: string;
@@ -1311,13 +1313,71 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             </h3>
             
             {selectedInvoiceClient && (
-              <button
-                onClick={handlePrint}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-300 rounded-lg text-[10px] font-bold text-slate-700 hover:text-blue-900 transition-colors cursor-pointer shadow-xs"
-              >
-                <Printer size={12} className="text-rose-500" />
-                {documentType === 'fatura' ? 'Imprimir Fatura' : 'Imprimir Recibo'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const docNumber = `${documentType === 'fatura' ? 'FT' : 'RC'}-OUT-2026-06/${selectedInvoiceClient.nuit.substring(5)}`;
+                    const isExempt = selectedInvoiceClient.regime_iva === 'Isento';
+                    const subtotalVal = selectedInvoiceClient.billingFeeMzn;
+                    const ivaVal = isExempt ? 0 : subtotalVal * 0.16;
+                    const totalComIva = subtotalVal + ivaVal;
+                    const blob = generateA4CommercialDocPdfBlob({
+                      titulo: documentType === 'fatura' ? 'FACTURA PROFORMA' : 'RECIBO DE LIQUIDAÇÃO',
+                      numeroDocumento: docNumber,
+                      dataEmissao: '28-06-2026',
+                      dataVencimento: documentType === 'fatura' ? '10-07-2026' : undefined,
+                      empresa: {
+                        nome: 'ClickPay Moçambique, Lda',
+                        nuit: '402302399',
+                        nuel: '105086659',
+                        endereco: 'Av. 24 de Julho, nº 1500, 5º Andar, Maputo',
+                        telefone: '+258 86 139 0061',
+                        email: 'gersonjcumbane@gmail.com'
+                      },
+                      entidade: {
+                        nome: selectedInvoiceClient.nome,
+                        nuit: selectedInvoiceClient.nuit,
+                        endereco: selectedInvoiceClient.endereco,
+                        email: selectedInvoiceClient.email
+                      },
+                      itens: [
+                        {
+                          codigo: 'SO-001',
+                          descricao: 'Honorário Fixo Mensal (Plataforma SaaS ClickPay)',
+                          quantidade: 1,
+                          precoUnitario: selectedInvoiceClient.fee_base,
+                          taxaIva: isExempt ? 0 : 16,
+                          total: selectedInvoiceClient.fee_base
+                        },
+                        {
+                          codigo: 'SO-002',
+                          descricao: `Processamento de Recibos (${selectedInvoiceClient.countEmployees} colaboradores)`,
+                          quantidade: selectedInvoiceClient.countEmployees,
+                          precoUnitario: selectedInvoiceClient.fee_por_slip,
+                          taxaIva: isExempt ? 0 : 16,
+                          total: selectedInvoiceClient.fee_por_slip * selectedInvoiceClient.countEmployees
+                        }
+                      ],
+                      valorBase: subtotalVal,
+                      valorIvaTotal: ivaVal,
+                      valorTotalGeral: totalComIva
+                    });
+                    downloadBlobAsFile(blob, `${docNumber.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`);
+                  }}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer shadow-xs"
+                >
+                  <Download size={12} />
+                  PDF A4
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-300 rounded-lg text-[10px] font-bold text-slate-700 hover:text-blue-900 transition-colors cursor-pointer shadow-xs"
+                >
+                  <Printer size={12} className="text-rose-500" />
+                  {documentType === 'fatura' ? 'Imprimir Fatura' : 'Imprimir Recibo'}
+                </button>
+              </div>
             )}
           </div>
 
@@ -1341,7 +1401,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                💸 Recibo Primavera V10
+                💸 Recibo ClickPay ERP
               </button>
             </div>
           )}
@@ -1361,7 +1421,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                   className="bg-white border border-slate-900 w-full max-w-[210mm] min-h-[297mm] mx-auto px-6 py-6 sm:px-8 sm:py-8 shadow-sm flex flex-col justify-between gap-5 text-slate-900 relative print:border-none print:shadow-none print:p-2 print:max-w-none print:w-full"
                 >
                   <div className="space-y-5">
-                    {/* Primavera ERP V10 Header Layout */}
+                    {/* ClickPay ERP Enterprise Header Layout */}
                     <div className="flex flex-col sm:flex-row justify-between items-start border-b-2 border-slate-900 pb-4 gap-4">
                       <div className="space-y-1.5">
                         <div className="flex items-center gap-2.5">
@@ -1378,7 +1438,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                         </p>
                       </div>
 
-                      {/* Primavera Doc Type and Metadata Box */}
+                      {/* ClickPay ERP Doc Type and Metadata Box */}
                       <div className="border border-slate-900 w-full sm:w-64 overflow-hidden text-[10px] bg-white shrink-0">
                         <div className="bg-slate-900 text-white font-bold px-3 py-1.5 flex items-center justify-between uppercase text-[10px] tracking-wider">
                           <span>{documentType === 'fatura' ? 'Fatura Proforma' : 'Recibo de Liquidação'}</span>
@@ -1619,10 +1679,10 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                       </div>
                     </div>
 
-                    {/* Rodapé Primavera ERP V10 + Processado por computador */}
+                    {/* Rodapé ClickPay ERP Enterprise + Processado por computador */}
                     <div className="border-t border-slate-900 pt-2 flex flex-wrap justify-between items-center gap-2 text-[8.5px] text-slate-600">
                       <span className="font-bold text-slate-950 uppercase tracking-wide">
-                        {PRIMAVERA_COMPUTER_NOTE}
+                        {CLICKPAY_COMPUTER_NOTE}
                       </span>
                       <span className="font-mono tabular-nums">
                         Ref. Controlo: {hashControlo} · Original · Página 1 / 1

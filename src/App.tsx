@@ -236,8 +236,164 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  const getDeletedSeedIds = (): string[] => {
+    try {
+      const raw = localStorage.getItem('clickpay_deleted_seed_ids');
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const addDeletedSeedId = (id: string) => {
+    try {
+      const existing = new Set(getDeletedSeedIds());
+      existing.add(id);
+      localStorage.setItem('clickpay_deleted_seed_ids', JSON.stringify(Array.from(existing)));
+    } catch {
+      // ignore
+    }
+  };
+
+  const resolveActiveTenantId = (): string => {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('paytek_company_id') : '';
+    if (stored) return stored;
+    return isFounderUser() ? 'cli_founders' : 'cli_bronze';
+  };
+
+  const readTenantSnapshot = (cid: string) => {
+    try {
+      const raw = localStorage.getItem(`clickpay_tenant_${cid}`);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const saveTenantSnapshot = (cid: string, patch: Partial<{
+    employees: Employee[];
+    logs: PaymentLog[];
+    contracts: any[];
+    company: CompanyData;
+    config: ConfigFiscal;
+    deletedIds: string[];
+  }>) => {
+    try {
+      const prev = readTenantSnapshot(cid) || {};
+      localStorage.setItem(`clickpay_tenant_${cid}`, JSON.stringify({ ...prev, ...patch }));
+    } catch {
+      // ignore
+    }
+  };
+
+  const computeLocalSummary = (emps: Employee[]): PayrollSummary => {
+    let totalCusto = 0;
+    let totalLiquido = 0;
+    let totalEstado = 0;
+    emps.forEach(emp => {
+      const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
+      totalCusto += emp.salario_base + calc.inssEmpresa;
+      totalLiquido += calc.salarioLiquido;
+      totalEstado += calc.irpsConstatado + calc.inssTrabalhador + calc.inssEmpresa;
+    });
+    return {
+      periodoAtual: selectedPeriod,
+      kpis: {
+        custoEmpresaTotal: totalCusto,
+        totalPagoAosFuncionarios: totalLiquido,
+        retencaoEstadoTotal: totalEstado
+      },
+      dadosParaGraficoPizza: {
+        labels: ['Líquido Pago', 'IRPS Retido', 'INSS Total'],
+        valoresEmMeticais: [totalLiquido, totalEstado * 0.6, totalEstado * 0.4]
+      }
+    };
+  };
+
+  const loadLocalFallbackData = () => {
+    const cid = resolveActiveTenantId();
+    const snapshot = readTenantSnapshot(cid);
+    const globalDeleted = getDeletedSeedIds();
+    const tenantDeleted = new Set<string>([
+      ...globalDeleted,
+      ...(Array.isArray(snapshot?.deletedIds) ? snapshot.deletedIds : [])
+    ]);
+
+    const savedCompanyName = localStorage.getItem('paytek_company_name');
+    const savedPlan = localStorage.getItem('paytek_sub_plan') as any;
+    const savedStatus = localStorage.getItem('paytek_sub_status') as any;
+
+    let localEmployees: Employee[] = [];
+    let localLogs: PaymentLog[] = [];
+    let baseCompany: CompanyData = { ...empresaAtual };
+
+    if (snapshot && Array.isArray(snapshot.employees)) {
+      localEmployees = snapshot.employees.filter((e: Employee) => !tenantDeleted.has(e.id));
+      localLogs = Array.isArray(snapshot.logs) ? snapshot.logs : [];
+      if (snapshot.company) {
+        baseCompany = { ...baseCompany, ...snapshot.company };
+      }
+    } else if (cid === 'cli_founders' && isFounderUser()) {
+      localEmployees = defaultEmployees.filter(e => !tenantDeleted.has(e.id));
+      localLogs = [...paymentLogs];
+    } else if (cid === 'cli_bronze' || cid === 'cli_silver' || cid === 'cli_gold') {
+      const matched = baseDadosClientes.find(c => c.id === cid);
+      if (matched) {
+        localEmployees = (matched.employees || []).filter(e => !tenantDeleted.has(e.id));
+        localLogs = [...(matched.paymentLogs || [])];
+        baseCompany = {
+          nome: matched.nome,
+          nuit: matched.nuit,
+          endereco: matched.endereco,
+          provincia: matched.provincia,
+          distrito: matched.distrito,
+          regime_iva: matched.regime_iva,
+          nuel: matched.nuel,
+          email: matched.email,
+          telefone: matched.telefone,
+          logo: matched.logo,
+          subscription_status: matched.subscription_status,
+          subscription_plan: matched.subscription_plan,
+          next_billing_date: matched.next_billing_date,
+          fee_base: matched.fee_base,
+          fee_por_slip: matched.fee_por_slip
+        };
+      }
+    } else {
+      // Conta nova criada pelo cliente (Onboarding): começa 100% isolada e vazia!
+      localEmployees = [];
+      localLogs = [];
+      baseCompany = {
+        nome: savedCompanyName || 'Minha Empresa',
+        nuit: snapshot?.company?.nuit || '',
+        endereco: snapshot?.company?.endereco || 'Moçambique',
+        email: localStorage.getItem('paytek_user') || '',
+        subscription_plan: savedPlan || 'Bronze',
+        subscription_status: savedStatus || 'ativo'
+      };
+    }
+
+    const localCompany: CompanyData = {
+      ...baseCompany,
+      ...(savedCompanyName ? { nome: savedCompanyName } : {}),
+      ...(savedPlan ? { subscription_plan: savedPlan } : {}),
+      ...(savedStatus ? { subscription_status: savedStatus } : {})
+    };
+    const localConfig = snapshot?.config ? { ...configuracaoFiscal, ...snapshot.config } : { ...configuracaoFiscal };
+
+    setEmployees(localEmployees);
+    setCompany(localCompany);
+    setConfigFiscal(localConfig);
+    setSummary(computeLocalSummary(localEmployees));
+    setLogs(localLogs);
+    setError(null);
+  };
+
   const loadData = async () => {
     try {
+      const cid = resolveActiveTenantId();
       const authHeaders = getAuthHeaders();
       const [empRes, configRes, summaryRes, logsRes] = await Promise.all([
         fetch('/api/employees', { headers: authHeaders }).catch(() => null),
@@ -262,81 +418,36 @@ export default function App() {
         setSummary(summaryData);
         setLogs(logsData);
         setError(null);
-      } else {
-        // RESILIÊNCIA TOTAL PARA VERCEL (Sem backend Express Node em runtime estático):
-        // Carrega os dados locais do db_tax diretamente sem travar na tela com erro de JSON inválido
-        const savedCompanyName = localStorage.getItem('paytek_company_name');
-        const savedPlan = localStorage.getItem('paytek_sub_plan') as any;
-        const savedStatus = localStorage.getItem('paytek_sub_status') as any;
-        const localEmployees = [...defaultEmployees];
-        const localCompany = {
-          ...empresaAtual,
-          ...(savedCompanyName ? { nome: savedCompanyName } : {}),
-          ...(savedPlan ? { subscription_plan: savedPlan } : {}),
-          ...(savedStatus ? { subscription_status: savedStatus } : {})
-        };
-        const localConfig = { ...configuracaoFiscal };
-        const localLogs = [...paymentLogs];
 
-        // Calcular KPIs reais locais
-        let totalCusto = 0;
-        let totalLiquido = 0;
-        let totalEstado = 0;
-        localEmployees.forEach(emp => {
-          const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
-          totalCusto += (emp.salario_base + calc.inssEmpresa);
-          totalLiquido += calc.salarioLiquido;
-          totalEstado += (calc.irpsConstatado + calc.inssTrabalhador + calc.inssEmpresa);
+        saveTenantSnapshot(cid, {
+          employees: Array.isArray(employeesData) ? employeesData : [],
+          logs: Array.isArray(logsData) ? logsData : [],
+          company: configData.empresaAtual,
+          config: configData.configuracaoFiscal
         });
-
-        const localSummary: PayrollSummary = {
-          periodoAtual: selectedPeriod,
-          kpis: {
-            custoEmpresaTotal: totalCusto,
-            totalPagoAosFuncionarios: totalLiquido,
-            retencaoEstadoTotal: totalEstado
-          },
-          dadosParaGraficoPizza: {
-            labels: ['Líquido Pago', 'IRPS Retido', 'INSS Total'],
-            valoresEmMeticais: [totalLiquido, totalEstado * 0.6, totalEstado * 0.4]
-          }
-        };
-
-        setEmployees(localEmployees);
-        setCompany(localCompany);
-        setConfigFiscal(localConfig);
-        setSummary(localSummary);
-        setLogs(localLogs);
-        setError(null);
+      } else {
+        loadLocalFallbackData();
       }
     } catch (err: any) {
       console.warn('Ativando fallback de dados locais integrados:', err);
-      const savedCompanyName = localStorage.getItem('paytek_company_name');
-      const savedPlan = localStorage.getItem('paytek_sub_plan') as any;
-      const savedStatus = localStorage.getItem('paytek_sub_status') as any;
-      setEmployees([...defaultEmployees]);
-      setCompany({
-        ...empresaAtual,
-        ...(savedCompanyName ? { nome: savedCompanyName } : {}),
-        ...(savedPlan ? { subscription_plan: savedPlan } : {}),
-        ...(savedStatus ? { subscription_status: savedStatus } : {})
-      });
-      setConfigFiscal({ ...configuracaoFiscal });
-      setLogs([...paymentLogs]);
-      setError(null);
+      loadLocalFallbackData();
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadData();
-    if (isFounderUser()) {
-      loadCompanies();
+    if (authenticated) {
+      loadData();
+      if (isFounderUser()) {
+        loadCompanies();
+      } else {
+        setAvailableCompanies([]);
+      }
     } else {
-      setAvailableCompanies([]);
+      setLoading(false);
     }
-  }, []);
+  }, [authenticated]);
 
   // Monitorar parâmetro 'plano' da URL para roteamento inteligente de novos cadastros
   useEffect(() => {
@@ -379,48 +490,123 @@ export default function App() {
       return;
     }
 
+    const cid = resolveActiveTenantId();
     try {
       const res = await fetch('/api/employees', {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(newEmp)
       });
-      if (!res.ok) throw new Error('Não foi possível adicionar o colaborador.');
-      await loadData();
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) throw new Error('Não foi possível adicionar o colaborador.');
+        await loadData();
+      } else {
+        const localNew: Employee = { ...newEmp, id: `emp-${Date.now()}` };
+        const nextList = [...employees, localNew];
+        setEmployees(nextList);
+        setSummary(computeLocalSummary(nextList));
+        saveTenantSnapshot(cid, { employees: nextList });
+      }
     } catch (err: any) {
       showError(err.message || 'Não foi possível adicionar o colaborador.');
     }
   };
 
   const handleUpdateEmployee = async (id: string, updatedFields: Partial<Employee>) => {
+    const cid = resolveActiveTenantId();
     try {
-      const res = await fetch(`/api/employees/${id}`, {
+      const res = await fetch(`/api/employees/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(updatedFields)
       });
-      if (!res.ok) throw new Error('Não foi possível atualizar o colaborador.');
-      await loadData();
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) throw new Error('Não foi possível atualizar o colaborador.');
+        await loadData();
+      } else {
+        const nextList = employees.map(e => (e.id === id ? { ...e, ...updatedFields } : e));
+        setEmployees(nextList);
+        setSummary(computeLocalSummary(nextList));
+        saveTenantSnapshot(cid, { employees: nextList });
+      }
     } catch (err: any) {
       showError(err.message || 'Não foi possível atualizar o colaborador.');
     }
   };
 
   const handleDeleteEmployee = async (id: string) => {
+    const cid = resolveActiveTenantId();
+    const targetEmp = employees.find(e => e.id === id);
+    addDeletedSeedId(id);
+
+    const updateLocalTenantAfterDelete = () => {
+      const nextList = employees.filter(e => e.id !== id);
+      const nextLogs = logs.filter(
+        l => l.employeeId !== id && (!targetEmp || l.employeeName !== targetEmp.nome)
+      );
+      const snap = readTenantSnapshot(cid) || {};
+      const nextContracts = Array.isArray(snap.contracts)
+        ? snap.contracts.filter((c: any) => !targetEmp || c.nome_funcionario !== targetEmp.nome)
+        : snap.contracts;
+      const nextDeleted = Array.from(new Set([...(Array.isArray(snap.deletedIds) ? snap.deletedIds : []), id]));
+
+      setEmployees(nextList);
+      setLogs(nextLogs);
+      setSummary(computeLocalSummary(nextList));
+      saveTenantSnapshot(cid, {
+        employees: nextList,
+        logs: nextLogs,
+        contracts: nextContracts,
+        deletedIds: nextDeleted
+      });
+    };
+
     try {
-      const res = await fetch(`/api/employees/${id}`, {
+      const res = await fetch(`/api/employees/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: getAuthHeaders()
       });
-      if (!res.ok) throw new Error('Não foi possível remover o colaborador.');
-      await loadData();
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson && res.ok) {
+        updateLocalTenantAfterDelete();
+        await loadData();
+      } else {
+        updateLocalTenantAfterDelete();
+      }
+      showSuccess('Colaborador e dados salariais associados eliminados.');
     } catch (err: any) {
-      showError(err.message || 'Não foi possível remover o colaborador.');
+      updateLocalTenantAfterDelete();
+      showSuccess('Colaborador eliminado da sessão atual.');
+    }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+    const cid = resolveActiveTenantId();
+    try {
+      const res = await fetch(`/api/logs/${encodeURIComponent(logId)}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      const nextLogs = logs.filter(l => l.id !== logId);
+      setLogs(nextLogs);
+      saveTenantSnapshot(cid, { logs: nextLogs });
+      if (isJson && res.ok) {
+        await loadData();
+      }
+      showSuccess('Registo de pagamento removido do histórico.');
+    } catch (err) {
+      const nextLogs = logs.filter(l => l.id !== logId);
+      setLogs(nextLogs);
+      saveTenantSnapshot(cid, { logs: nextLogs });
     }
   };
 
   // Corporate Settings Actions
   const handleSaveSettings = async (newConfig: ConfigFiscal, newCompany: CompanyData) => {
+    const cid = resolveActiveTenantId();
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -430,8 +616,15 @@ export default function App() {
           empresa: newCompany
         })
       });
-      if (!res.ok) throw new Error('Erro ao salvar as configurações.');
-      await loadData();
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) throw new Error('Erro ao salvar as configurações.');
+        await loadData();
+      } else {
+        setConfigFiscal(newConfig);
+        setCompany(newCompany);
+        saveTenantSnapshot(cid, { config: newConfig, company: newCompany });
+      }
     } catch (err: any) {
       showError(err.message || 'Erro ao salvar as configurações.');
     }
@@ -446,10 +639,12 @@ export default function App() {
     });
     if (confirmed) {
       try {
-        await fetch('/api/mvp/reset-total', { method: 'POST' }).catch(() => null);
+        await fetch('/api/mvp/reset-total', { method: 'POST', headers: getAuthHeaders() }).catch(() => null);
       } catch (err) {
         // Fallback local
       }
+      const cid = resolveActiveTenantId();
+      saveTenantSnapshot(cid, { employees: [], logs: [], contracts: [] });
       resetDbTotal();
       showSuccess("ERP Pronto! Base de dados e cálculos zerados com sucesso.");
       await loadData();
@@ -465,10 +660,12 @@ export default function App() {
     });
     if (confirmed) {
       try {
-        await fetch('/api/mvp/reset-costs', { method: 'POST' }).catch(() => null);
+        await fetch('/api/mvp/reset-costs', { method: 'POST', headers: getAuthHeaders() }).catch(() => null);
       } catch (err) {
         // Fallback local
       }
+      const cid = resolveActiveTenantId();
+      saveTenantSnapshot(cid, { logs: [] });
       zerarCalculosEResetFinanceiro();
       showSuccess("Cálculos e histórico financeiro zerados com sucesso!");
       await loadData();
@@ -484,7 +681,7 @@ export default function App() {
     });
     if (confirmed) {
       try {
-        const res = await fetch('/api/mvp/seed-demo', { method: 'POST' });
+        const res = await fetch('/api/mvp/seed-demo', { method: 'POST', headers: getAuthHeaders() });
         const data = await res.json();
         if (data.sucesso) {
           showSuccess("Dados de demonstração carregados com sucesso!");
@@ -774,6 +971,7 @@ export default function App() {
                       summary={summary}
                       logs={logs}
                       onReload={loadData}
+                      onDeleteLog={handleDeleteLog}
                       selectedPeriod={selectedPeriod}
                       onResetCosts={handleResetCosts}
                       userRole={userRole}
@@ -788,7 +986,7 @@ export default function App() {
                       <LockedFeatureOverlay 
                         featureName="CRM & Pipeline de Vendas" 
                         requiredPlan="Profissional (Silver)" 
-                        description="O CRM integrado permite gerir clientes potenciais, acompanhar oportunidades comerciais e emitir propostas oficiais em PDF padrão Primavera V10 com um clique."
+                        description="O CRM integrado permite gerir clientes potenciais, acompanhar oportunidades comerciais e emitir propostas oficiais em PDF A4 padrão ClickPay ERP com um clique."
                       />
                     ) : (
                       <CRMVendas
@@ -869,6 +1067,7 @@ export default function App() {
                         employees={employees}
                         company={company}
                         selectedPeriod={selectedPeriod}
+                        logs={logs}
                         onReload={loadData}
                       />
                     )

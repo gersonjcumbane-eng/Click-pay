@@ -21,6 +21,8 @@ import {
   Briefcase
 } from 'lucide-react';
 import { Employee, CompanyData } from '../types';
+import { getAuthHeaders } from '../lib/authSession';
+import { downloadOrFallbackPdf, generateAvisoPrevioPdfBlob } from '../lib/clientPdf';
 import { useToast, useConfirm } from '../context/ToastContext';
 
 interface Contract {
@@ -70,85 +72,141 @@ export default function ContractManagement({ company, employees, onReload }: Con
   const [novoSalario, setNovoSalario] = useState('20000');
   const [novoCargoComplexo, setNovoCargoComplexo] = useState(false);
 
+  const getTenantStorageKey = () => {
+    const cid = typeof window !== 'undefined' ? (localStorage.getItem('paytek_company_id') || 'cli_bronze') : 'cli_bronze';
+    return `clickpay_tenant_${cid}`;
+  };
+
+  const buildLocalContractAudit = (ct: Contract): Contract => {
+    if (ct.tipo_contrato === 'Indeterminado') {
+      return {
+        ...ct,
+        auditoria: {
+          statusRisco: 'VERDE',
+          mensagemLegal: 'Vínculo por Tempo Indeterminado em conformidade com a Lei nº 13/2023.'
+        }
+      };
+    }
+    if (ct.data_fim) {
+      const diffDays = Math.ceil((new Date(ct.data_fim).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (diffDays <= 30) {
+        return {
+          ...ct,
+          auditoria: {
+            statusRisco: 'VERMELHO',
+            mensagemLegal: `Atenção (Art. 41 Lei 13/2023): Faltam ${Math.max(0, diffDays)} dias para caducidade.`
+          }
+        };
+      }
+      if (diffDays <= 60) {
+        return {
+          ...ct,
+          auditoria: {
+            statusRisco: 'AMARELO',
+            mensagemLegal: `Prazo a aproximar-se (${diffDays} dias restantes até o termo).`
+          }
+        };
+      }
+    }
+    return {
+      ...ct,
+      auditoria: {
+        statusRisco: 'VERDE',
+        mensagemLegal: 'Contrato em vigor dentro dos prazos da Lei nº 13/2023.'
+      }
+    };
+  };
+
   const carregarContratos = async () => {
     setLoading(true);
     try {
-      // Simula o cabeçalho de autenticação do cliente logado
-      const usuarioSimulado = JSON.stringify({ funcao: "CLIENTE_EMPRESA", empresa_id: "emp_piloto_01" });
-      
       const resposta = await fetch('/api/clientes/listar-contratos', {
-        headers: { 'usuario-simulado': usuarioSimulado }
+        headers: getAuthHeaders()
       });
-      
-      if (!resposta.ok) {
-        throw new Error('Falha ao descarregar contratos.');
+      const isJson = resposta.ok && (resposta.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        const data = await resposta.json();
+        const list = Array.isArray(data) ? data : [];
+        setContratos(list);
+        setError(null);
+        return;
       }
-      const data = await resposta.json();
-      setContratos(data);
-      setError(null);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Erro ao carregar contratos laborais.');
+    } catch (err) {
+      console.warn('Fallback local para contratos:', err);
     } finally {
       setLoading(false);
+    }
+
+    // Fallback estático isolado por empresa
+    try {
+      const raw = localStorage.getItem(getTenantStorageKey());
+      const parsed = raw ? JSON.parse(raw) : null;
+      const storedContracts: Contract[] = Array.isArray(parsed?.contratos) ? parsed.contratos : [];
+      if (storedContracts.length > 0) {
+        setContratos(storedContracts.map(buildLocalContractAudit));
+      } else {
+        const companyId = localStorage.getItem('paytek_company_id') || 'cli_bronze';
+        const inferred: Contract[] = employees.map((e) =>
+          buildLocalContractAudit({
+            id: `ct_${e.id}`,
+            empresa_id: companyId,
+            nome_funcionario: e.nome,
+            cargo: e.cargo,
+            tipo_contrato: 'Indeterminado',
+            data_inicio: new Date().toISOString().split('T')[0],
+            salario_base: e.salario_base
+          })
+        );
+        setContratos(inferred);
+      }
+      setError(null);
+    } catch {
+      setContratos([]);
     }
   };
 
   useEffect(() => {
     carregarContratos();
-  }, [employees]); // Reload contracts when employees array changes
+  }, [employees]);
 
   const emitirAvisoPrevio = async (contrato: Contract) => {
     setDownloadingPdf(contrato.id);
     try {
-      // Data de hoje formatada em tempo real para o documento oficial
       const dataHoje = new Date();
       const meses = [
-        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
       ];
-      
+
       const dadosEmpresa = {
-        nome: company.nome || "Mercearia do Povo Lda",
-        nuit: company.nuit || "400555321",
-        endereco: company.endereco || "Maputo Cidade, Moçambique"
+        nome: company.nome || 'ClickPay Moçambique, Lda',
+        nuit: company.nuit || '400555321',
+        endereco: company.endereco || 'Maputo Cidade, Moçambique'
       };
 
       const dadosFuncionario = {
         nome: contrato.nome_funcionario,
         cargo: contrato.cargo,
-        inss_numero: employees.find(e => e.nome === contrato.nome_funcionario)?.inss_numero || "Pendente"
+        inss_numero: employees.find(e => e.nome === contrato.nome_funcionario)?.inss_numero || 'Pendente'
       };
 
       const dadosContrato = {
-        data_fim: contrato.data_fim || "Indeterminado",
+        data_fim: contrato.data_fim || 'Indeterminado',
         dia_atual: String(dataHoje.getDate()),
         mes_atual: meses[dataHoje.getMonth()],
         ano_atual: String(dataHoje.getFullYear())
       };
 
-      const res = await fetch('/api/contratos/emitir-aviso-previo', {
+      await downloadOrFallbackPdf({
+        url: '/api/contratos/emitir-aviso-previo',
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dadosEmpresa, dadosFuncionario, dadosContrato })
+        body: { dadosEmpresa, dadosFuncionario, dadosContrato },
+        filename: `aviso_previo_${dadosFuncionario.nome.replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () => generateAvisoPrevioPdfBlob(company, dadosFuncionario, dadosContrato)
       });
-
-      if (!res.ok) {
-        throw new Error('Falha ao emitir o PDF de Aviso Prévio.');
-      }
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `aviso_previo_${dadosFuncionario.nome.replace(/\s+/g, '_')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error(err);
-      showError(err.message || 'Erro ao comunicar com o servidor.');
+      showError(err.message || 'Erro ao gerar Aviso Prévio em PDF.');
     } finally {
       setDownloadingPdf(null);
     }
@@ -156,43 +214,53 @@ export default function ContractManagement({ company, employees, onReload }: Con
 
   const handleCriarContrato = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      const usuarioSimulado = JSON.stringify({ funcao: "CLIENTE_EMPRESA", empresa_id: "emp_piloto_01" });
-      const payload = {
-        nome_funcionario: novoFuncionario,
-        cargo: novoCargo,
-        tipo_contrato: novoTipo,
-        data_inicio: novoInicio,
-        data_fim: novoTipo === 'Prazo Certo' ? novoFim : undefined,
-        salario_base: Number(novoSalario),
-        cargo_complexo: novoCargoComplexo
-      };
+    const companyId = localStorage.getItem('paytek_company_id') || 'cli_bronze';
+    const payload = {
+      nome_funcionario: novoFuncionario,
+      cargo: novoCargo,
+      tipo_contrato: novoTipo,
+      data_inicio: novoInicio,
+      data_fim: novoTipo === 'Prazo Certo' ? novoFim : undefined,
+      salario_base: Number(novoSalario),
+      cargo_complexo: novoCargoComplexo
+    };
 
+    try {
       const res = await fetch('/api/clientes/criar-contrato', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'usuario-simulado': usuarioSimulado
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.erro || 'Erro ao criar contrato no servidor.');
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.erro || 'Erro ao criar contrato no servidor.');
+        }
+        await carregarContratos();
+        if (onReload) onReload();
+      } else {
+        // Fallback estático local
+        const tenantKey = getTenantStorageKey();
+        const raw = localStorage.getItem(tenantKey);
+        const snap = raw ? JSON.parse(raw) : { employees: [...employees], logs: [], contratos: [...contratos], vales: [] };
+        const novoCt = buildLocalContractAudit({
+          id: `ct_${Date.now()}`,
+          empresa_id: companyId,
+          ...payload
+        });
+        snap.contratos = [...(Array.isArray(snap.contratos) ? snap.contratos : []), novoCt];
+        localStorage.setItem(tenantKey, JSON.stringify(snap));
+        setContratos(snap.contratos);
       }
 
-      await carregarContratos();
-      if (onReload) onReload(); // Reload parents/employee list
-
       setShowAddModal(false);
-      // Reset formulário
       setNovoFuncionario('');
       setNovoCargo('');
       setNovoTipo('Prazo Certo');
       setNovoSalario('20000');
       setNovoCargoComplexo(false);
-
     } catch (err: any) {
       console.error(err);
       showError(err.message || 'Erro ao criar contrato.');
@@ -208,21 +276,39 @@ export default function ContractManagement({ company, employees, onReload }: Con
     });
     if (confirmed) {
       try {
-        const usuarioSimulado = JSON.stringify({ funcao: "CLIENTE_EMPRESA", empresa_id: "emp_piloto_01" });
         const res = await fetch(`/api/clientes/remover-contrato/${id}`, {
           method: 'DELETE',
-          headers: { 'usuario-simulado': usuarioSimulado }
+          headers: getAuthHeaders()
         });
-        if (res.ok) {
-          await carregarContratos();
-          if (onReload) onReload(); // Sync with parent database
-        } else {
-          const errData = await res.json();
-          showError(errData.erro || 'Erro ao remover contrato.');
+        const isJson = (res.headers.get('content-type') || '').includes('application/json');
+        if (isJson) {
+          if (res.ok) {
+            await carregarContratos();
+            if (onReload) onReload();
+          } else {
+            const errData = await res.json();
+            showError(errData.erro || 'Erro ao remover contrato.');
+          }
+          return;
         }
       } catch (err: any) {
-        showError(err.message || 'Erro de rede.');
+        console.warn('Removendo contrato localmente:', err);
       }
+
+      // Fallback estático local
+      const tenantKey = getTenantStorageKey();
+      const raw = localStorage.getItem(tenantKey);
+      const snap = raw ? JSON.parse(raw) : { employees: [...employees], logs: [], contratos: [...contratos], vales: [] };
+      const ctToDelete = contratos.find((c) => c.id === id);
+      snap.contratos = (Array.isArray(snap.contratos) ? snap.contratos : contratos).filter((c: Contract) => c.id !== id);
+      if (ctToDelete) {
+        snap.employees = (Array.isArray(snap.employees) ? snap.employees : employees).filter(
+          (e: Employee) => e.nome.toLowerCase() !== ctToDelete.nome_funcionario.toLowerCase()
+        );
+      }
+      localStorage.setItem(tenantKey, JSON.stringify(snap));
+      setContratos(snap.contratos.map(buildLocalContractAudit));
+      if (onReload) onReload();
     }
   };
 

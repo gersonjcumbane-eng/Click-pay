@@ -18,6 +18,7 @@ import {
   processOperatorWebhook
 } from './src/services/mobileMoneyService';
 import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from './src/lib/pricing';
+import { Employee } from './src/types';
 import { 
   employees, 
   configuracaoFiscal, 
@@ -488,36 +489,21 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // Base de dados simulada de cópias de segurança (Backup) na Nuvem
   const baseDadosBackups: any[] = [];
 
-  function triggerAutomaticBackup() {
+  function triggerAutomaticBackup(targetCompanyId?: string) {
     try {
-      const activeCompany = baseDadosClientes.find(c => c.nuit === empresaAtual.nuit);
+      const targetId = targetCompanyId || founderActiveCompanyId || 'cli_founders';
+      const activeCompany = baseDadosClientes.find(c => c.id === targetId);
       if (!activeCompany) return;
 
       const backupId = `bkp_auto_${Date.now()}`;
       const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
       const snapshot = {
-        empresa: {
-          nome: activeCompany.nome,
-          nuit: activeCompany.nuit,
-          endereco: activeCompany.endereco,
-          provincia: activeCompany.provincia,
-          distrito: activeCompany.distrito,
-          regime_iva: activeCompany.regime_iva,
-          nuel: activeCompany.nuel,
-          email: activeCompany.email,
-          telefone: activeCompany.telefone,
-          logo: activeCompany.logo,
-          subscription_status: activeCompany.subscription_status,
-          subscription_plan: activeCompany.subscription_plan,
-          next_billing_date: activeCompany.next_billing_date,
-          fee_base: activeCompany.fee_base,
-          fee_por_slip: activeCompany.fee_por_slip
-        },
-        employees: JSON.parse(JSON.stringify(employees)),
-        paymentLogs: JSON.parse(JSON.stringify(paymentLogs)),
-        contratos: JSON.parse(JSON.stringify(baseDadosContratosGerais)),
-        vales: JSON.parse(JSON.stringify(baseDadosVales))
+        empresa: buildCompanyDataView(activeCompany),
+        employees: JSON.parse(JSON.stringify(activeCompany.employees || [])),
+        paymentLogs: JSON.parse(JSON.stringify(activeCompany.paymentLogs || [])),
+        contratos: JSON.parse(JSON.stringify(activeCompany.contratos || [])),
+        vales: JSON.parse(JSON.stringify(activeCompany.vales || []))
       };
 
       const jsonString = JSON.stringify(snapshot);
@@ -529,8 +515,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         empresaNome: activeCompany.nome,
         timestamp,
         tipo: 'Automático (Sistema)',
-        quantidadeColaboradores: employees.length,
-        quantidadeLancamentos: paymentLogs.length,
+        quantidadeColaboradores: (activeCompany.employees || []).length,
+        quantidadeLancamentos: (activeCompany.paymentLogs || []).length,
         tamanhoKb: sizeKb,
         snapshot
       };
@@ -850,23 +836,44 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   ];
 
-  // Base de dados simulada com o saldo atual da empresa do cliente (Mercearia do Povo Lda)
-  let carteiraEmpresaFintech = {
-    empresa_id: "emp_mercearia_01",
-    saldo_disponivel_mz: 0.00 // 0.00 MT de saldo pré-pago inicial
-  };
-
-  // Base de dados simulada das contas bancárias corporativas reais cadastradas pelo próprio cliente (com conta padrão Millennium BIM)
-  let contasBancariasEmpresa: any[] = [
+  // Estado multi-tenant isolado por empresa (carteira, contas bancárias, histórico, auditoria e persistência)
+  const makeDefaultBankAccounts = () => ([
     {
       id: "cta_01",
       banco: "Millennium BIM",
       numero_conta: "0001-2222-3333",
       nib: "000100010002222333344",
-      saldo: 10000000.00, // 10 Million MT default balance
+      saldo: 10000000.00,
       senha: "1234"
     }
-  ];
+  ]);
+
+  const makeDefaultHistorico = () => (
+    ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"].map((mes, idx) => ({
+      data: `2026-${String(idx + 1).padStart(2, '0')}-28`,
+      mes,
+      ano: 2026,
+      liquido_pago: 0,
+      irps_retido: 0,
+      inss_retido: 0,
+      taxas_fintech: 0,
+      total_trabalhadores: 0
+    }))
+  );
+
+  let founderActiveCompanyId = 'cli_founders';
+  const deletedSeedEmployeeIds = new Set<string>();
+  const walletsByCompany: Record<string, number> = { cli_founders: 0 };
+  const bankAccountsByCompany: Record<string, any[]> = { cli_founders: makeDefaultBankAccounts() };
+  const historicoByCompany: Record<string, any[]> = { cli_founders: makeDefaultHistorico() };
+  const auditLogsByCompany: Record<string, any[]> = { cli_founders: [] };
+
+  let carteiraEmpresaFintech = {
+    empresa_id: "cli_founders",
+    saldo_disponivel_mz: 0.00
+  };
+
+  let contasBancariasEmpresa: any[] = bankAccountsByCompany.cli_founders;
 
   // Base de dados simulada com o histórico de operações mensais de um cliente
   let historicoOperacoesEmpresa: any[] = [
@@ -995,28 +1002,215 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // Base de dados simulada com os logs individuais detalhados para a Auditoria de Remunerações
   let logsPagamentosGlobais: any[] = [];
 
-  // Middleware de autorização sob demanda
+  const RUNTIME_STATE_PATH = path.join(tmpDir, 'clickpay-runtime-state.json');
+
+  function ensureTenantContainers(companyId: string) {
+    if (walletsByCompany[companyId] === undefined) walletsByCompany[companyId] = 0;
+    if (!Array.isArray(bankAccountsByCompany[companyId])) bankAccountsByCompany[companyId] = makeDefaultBankAccounts();
+    if (!Array.isArray(historicoByCompany[companyId])) historicoByCompany[companyId] = makeDefaultHistorico();
+    if (!Array.isArray(auditLogsByCompany[companyId])) auditLogsByCompany[companyId] = [];
+  }
+
+  function buildCompanyDataView(company: any) {
+    return {
+      nome: company.nome,
+      nuit: company.nuit,
+      endereco: company.endereco,
+      provincia: company.provincia,
+      distrito: company.distrito,
+      regime_iva: company.regime_iva,
+      nuel: company.nuel,
+      email: company.email,
+      telefone: company.telefone,
+      logo: company.logo,
+      subscription_status: company.subscription_status,
+      subscription_plan: company.subscription_plan,
+      next_billing_date: company.next_billing_date,
+      fee_base: company.fee_base,
+      fee_por_slip: company.fee_por_slip,
+      sector_negocio: company.sector_negocio,
+      tamanho_empresa: company.tamanho_empresa,
+      regime_fiscal_pme: company.regime_fiscal_pme
+    };
+  }
+
+  function syncCompanyGlobalsIfActive(companyId: string) {
+    if (companyId !== founderActiveCompanyId) return;
+    const active = baseDadosClientes.find(c => c.id === companyId);
+    if (!active) return;
+    Object.assign(empresaAtual, buildCompanyDataView(active));
+    employees.length = 0;
+    employees.push(...active.employees);
+    baseDadosContratosGerais.length = 0;
+    baseDadosContratosGerais.push(...active.contratos);
+    paymentLogs.length = 0;
+    paymentLogs.push(...active.paymentLogs);
+    baseDadosVales.length = 0;
+    baseDadosVales.push(...active.vales);
+    carteiraEmpresaFintech.empresa_id = companyId;
+    carteiraEmpresaFintech.saldo_disponivel_mz = walletsByCompany[companyId] ?? 0;
+    contasBancariasEmpresa = bankAccountsByCompany[companyId] || makeDefaultBankAccounts();
+    historicoOperacoesEmpresa = historicoByCompany[companyId] || makeDefaultHistorico();
+    logsPagamentosGlobais = auditLogsByCompany[companyId] || [];
+  }
+
+  function saveRuntimeState() {
+    try {
+      syncCompanyGlobalsIfActive(founderActiveCompanyId);
+      const state = {
+        founderActiveCompanyId,
+        deletedSeedEmployeeIds: Array.from(deletedSeedEmployeeIds),
+        clients: baseDadosClientes,
+        registeredUsers: clientesRegistadosPelosFounders,
+        walletsByCompany,
+        bankAccountsByCompany,
+        historicoByCompany,
+        auditLogsByCompany
+      };
+      fs.writeFileSync(RUNTIME_STATE_PATH, JSON.stringify(state), 'utf8');
+    } catch (err) {
+      console.warn('[RuntimeState Save Warning]:', err);
+    }
+  }
+
+  function loadRuntimeState() {
+    try {
+      if (!fs.existsSync(RUNTIME_STATE_PATH)) return;
+      const raw = fs.readFileSync(RUNTIME_STATE_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      if (Array.isArray(parsed.deletedSeedEmployeeIds)) {
+        deletedSeedEmployeeIds.clear();
+        parsed.deletedSeedEmployeeIds.forEach((id: string) => deletedSeedEmployeeIds.add(String(id)));
+      }
+      if (typeof parsed.founderActiveCompanyId === 'string' && parsed.founderActiveCompanyId) {
+        founderActiveCompanyId = parsed.founderActiveCompanyId;
+      }
+      if (Array.isArray(parsed.clients)) {
+        baseDadosClientes.length = 0;
+        baseDadosClientes.push(...parsed.clients);
+      }
+      if (Array.isArray(parsed.registeredUsers)) {
+        clientesRegistadosPelosFounders.length = 0;
+        clientesRegistadosPelosFounders.push(...parsed.registeredUsers);
+      }
+      if (parsed.walletsByCompany && typeof parsed.walletsByCompany === 'object') {
+        Object.assign(walletsByCompany, parsed.walletsByCompany);
+      }
+      if (parsed.bankAccountsByCompany && typeof parsed.bankAccountsByCompany === 'object') {
+        Object.assign(bankAccountsByCompany, parsed.bankAccountsByCompany);
+      }
+      if (parsed.historicoByCompany && typeof parsed.historicoByCompany === 'object') {
+        Object.assign(historicoByCompany, parsed.historicoByCompany);
+      }
+      if (parsed.auditLogsByCompany && typeof parsed.auditLogsByCompany === 'object') {
+        Object.assign(auditLogsByCompany, parsed.auditLogsByCompany);
+      }
+
+      // Enforce deleted seed employees stay removed on cli_founders
+      if (deletedSeedEmployeeIds.size > 0) {
+        const founders = baseDadosClientes.find(c => c.id === 'cli_founders');
+        if (founders) {
+          const removedNames = new Set(
+            founders.employees
+              .filter(e => deletedSeedEmployeeIds.has(e.id))
+              .map(e => e.nome.toLowerCase())
+          );
+          founders.employees = founders.employees.filter(e => !deletedSeedEmployeeIds.has(e.id));
+          founders.contratos = founders.contratos.filter(
+            ct => !removedNames.has(String(ct.nome_funcionario || '').toLowerCase())
+          );
+          founders.paymentLogs = founders.paymentLogs.filter(
+            l => !deletedSeedEmployeeIds.has(l.employeeId)
+          );
+        }
+      }
+
+      selecionarClienteEmpresa(founderActiveCompanyId);
+      ensureTenantContainers(founderActiveCompanyId);
+      syncCompanyGlobalsIfActive(founderActiveCompanyId);
+    } catch (err) {
+      console.warn('[RuntimeState Load Warning]:', err);
+    }
+  }
+
+  function normalizeSubscriptionPlan(plan?: string): 'Bronze' | 'Silver' | 'Gold' | 'Platinum' {
+    const p = String(plan || '').trim().toLowerCase();
+    if (p === 'growth' || p === 'silver') return 'Silver';
+    if (p === 'business' || p === 'gold') return 'Gold';
+    if (p === 'enterprise' || p === 'platinum') return 'Platinum';
+    return 'Bronze';
+  }
+
+  function resolveTenantContext(req: Request) {
+    const session = extractSessionFromRequest(req);
+    let targetCompanyId = founderActiveCompanyId || 'cli_founders';
+
+    if (session) {
+      if (session.role === 'SUPER_ADMIN_PAYROLL' || session.role === 'GESTOR_RH' || session.role === 'CONTABILISTA') {
+        targetCompanyId = founderActiveCompanyId || 'cli_founders';
+      } else if (session.empresa_id) {
+        targetCompanyId = session.empresa_id;
+      }
+    }
+
+    let company = baseDadosClientes.find(c => c.id === targetCompanyId);
+    if (!company) {
+      // Stateless token on cold start or unregistered ID: isolate cleanly with empty arrays
+      company = adicionarClienteEmpresa({
+        id: targetCompanyId,
+        nome: session?.email ? `Empresa (${session.email.split('@')[0]})` : 'Empresa ClickPay',
+        nuit: '400000000',
+        endereco: 'Maputo, Moçambique',
+        provincia: 'Maputo Cidade',
+        distrito: 'KaMpfumo',
+        regime_iva: 'Geral (16%)',
+        nuel: '',
+        email: session?.email || '',
+        telefone: '',
+        logo: '/clickpay-logo.png',
+        fee_base: 0,
+        fee_por_slip: 0,
+        subscription_status: 'ativo',
+        subscription_plan: 'Bronze',
+        next_billing_date: getDefaultNextBillingDate()
+      });
+    }
+
+    ensureTenantContainers(company.id);
+    if (company.id === founderActiveCompanyId) {
+      syncCompanyGlobalsIfActive(company.id);
+    }
+
+    return {
+      company,
+      companyId: company.id,
+      session,
+      bankAccounts: bankAccountsByCompany[company.id],
+      historico: historicoByCompany[company.id],
+      auditLogs: auditLogsByCompany[company.id]
+    };
+  }
+
+  // Middleware de autorização sob demanda (usa sessão HMAC primeiro)
   const verificarAcesso = (papeisPermitidos: string[]) => {
     return (req: any, res: any, next: any) => {
-      try {
-        const headerUsuario = req.headers['usuario-simulado'];
-        if (!headerUsuario) {
-          // Fallback amigável para testes locais ou chamadas internas do front-end do ERP
-          req.usuario = { funcao: "CLIENTE_EMPRESA", empresa_id: "emp_piloto_01" };
-          return next();
+      const session = extractSessionFromRequest(req);
+      if (session) {
+        const ctx = resolveTenantContext(req);
+        const allowed =
+          session.role === 'SUPER_ADMIN_PAYROLL' ||
+          papeisPermitidos.includes(session.role);
+        if (!allowed) {
+          return res.status(403).json({ erro: 'Acesso Proibido: Função não autorizada.' });
         }
-        
-        const usuarioObj = JSON.parse(headerUsuario as string);
-        if (papeisPermitidos.includes(usuarioObj.funcao)) {
-          req.usuario = usuarioObj;
-          next();
-        } else {
-          res.status(403).json({ erro: 'Acesso Proibido: Função não autorizada.' });
-        }
-      } catch (err) {
-        req.usuario = { funcao: "CLIENTE_EMPRESA", empresa_id: "emp_piloto_01" };
-        next();
+        req.usuario = { funcao: session.role, empresa_id: ctx.companyId, email: session.email };
+        return next();
       }
+      const ctx = resolveTenantContext(req);
+      req.usuario = { funcao: "CLIENTE_EMPRESA", empresa_id: ctx.companyId };
+      return next();
     };
   };
 
@@ -1092,7 +1286,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           syncUserToFirebase(emailNorm, passwordClean);
         }
 
+        founderActiveCompanyId = 'cli_founders';
         selecionarClienteEmpresa("cli_founders");
+        syncCompanyGlobalsIfActive("cli_founders");
+        const founderComp = baseDadosClientes.find(c => c.id === 'cli_founders');
 
         const sessionPayload = {
           sucesso: true,
@@ -1104,7 +1301,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             funcao: "SUPER_ADMIN_PAYROLL",
             empresa_id: "cli_founders",
             area_visualizacao: "Painel Executivo Global",
-            nome_empresa: empresaAtual.nome || "ClickPay Moçambique Lda",
+            nome_empresa: founderComp?.nome || empresaAtual.nome || "ClickPay Moçambique Lda",
             subscription_status: "ativo",
             subscription_plan: "Platinum"
           }
@@ -1146,7 +1343,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           syncUserToFirebase(emailNorm, systemUser.rawPassword || passwordClean);
         }
 
-        // Selecionar empresa correspondente ao perfil
         let targetCompanyId = "cli_founders";
         if (systemUser.role === 'CLIENTE_EMPRESA') {
           const matchedClient = baseDadosClientes.find(
@@ -1154,15 +1350,22 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           );
           if (matchedClient) {
             targetCompanyId = matchedClient.id;
-          } else if (systemUser.plan === 'Bronze') {
-            targetCompanyId = 'cli_bronze';
-          } else if (systemUser.plan === 'Silver') {
-            targetCompanyId = 'cli_silver';
-          } else if (systemUser.plan === 'Gold') {
-            targetCompanyId = 'cli_gold';
+          } else {
+            const regUser = clientesRegistadosPelosFounders.find(
+              u => String(u.email || '').toLowerCase().trim() === emailNorm
+            );
+            if (regUser?.empresa_id) {
+              targetCompanyId = regUser.empresa_id;
+            } else if (systemUser.plan === 'Bronze') {
+              targetCompanyId = 'cli_bronze';
+            } else if (systemUser.plan === 'Silver') {
+              targetCompanyId = 'cli_silver';
+            } else if (systemUser.plan === 'Gold') {
+              targetCompanyId = 'cli_gold';
+            }
           }
         }
-        selecionarClienteEmpresa(targetCompanyId);
+        const matchedTarget = baseDadosClientes.find(c => c.id === targetCompanyId);
         systemUser.lastLogin = 'Agora (Ativo)';
 
         const sessionPayload = {
@@ -1174,10 +1377,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             email: systemUser.email,
             funcao: systemUser.role,
             empresa_id: targetCompanyId,
-            nome_empresa: systemUser.companyName || empresaAtual.nome,
-            subscription_status: 'ativo',
-            subscription_plan: systemUser.plan || 'Gold',
-            next_billing_date: getDefaultNextBillingDate()
+            nome_empresa: matchedTarget?.nome || systemUser.companyName || empresaAtual.nome,
+            subscription_status: matchedTarget?.subscription_status || 'ativo',
+            subscription_plan: matchedTarget?.subscription_plan || systemUser.plan || 'Gold',
+            next_billing_date: matchedTarget?.next_billing_date || getDefaultNextBillingDate()
           }
         };
 
@@ -1200,7 +1403,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         clienteEncontrado.password === passwordRaw ||
         isFirebaseAuthed;
       if (isCorrectPassword) {
-        selecionarClienteEmpresa(clienteEncontrado.empresa_id);
         const matchedCompany = baseDadosClientes.find(c => c.id === clienteEncontrado.empresa_id);
         const sessionPayload = {
           sucesso: true,
@@ -1214,7 +1416,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             email: clienteEncontrado.email,
             funcao: clienteEncontrado.funcao || "CLIENTE_EMPRESA",
             empresa_id: clienteEncontrado.empresa_id,
-            nome_empresa: matchedCompany?.nome || empresaAtual.nome,
+            nome_empresa: matchedCompany?.nome || 'Empresa ClickPay',
             subscription_status: matchedCompany?.subscription_status || 'ativo',
             subscription_plan: matchedCompany?.subscription_plan || 'Bronze',
             next_billing_date: matchedCompany?.next_billing_date || getDefaultNextBillingDate()
@@ -1319,7 +1521,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
           syncUserToFirebase(emailNorm, clienteErp.password || passwordClean);
         }
-        selecionarClienteEmpresa(clienteErp.id);
         const resolvedRole = clienteErp.id === 'cli_founders' ? "SUPER_ADMIN_PAYROLL" : "CLIENTE_EMPRESA";
         const sessionPayload = {
           sucesso: true,
@@ -1385,11 +1586,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               (await verifyPassword(passwordClean, docPassword)) ||
               (await verifyPassword(passwordRaw, docPassword));
             if (passwordMatches) {
-              const planMapped =
-                docPlan === 'Starter' ? 'Bronze' :
-                docPlan === 'Growth' ? 'Silver' :
-                docPlan === 'Business' ? 'Gold' :
-                docPlan;
+              const planMapped = normalizeSubscriptionPlan(docPlan);
 
               let restored = baseDadosClientes.find(c => c.id === docId || String(c.email || '').toLowerCase().trim() === emailNorm);
               if (!restored) {
@@ -1407,13 +1604,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
                   logo: '/clickpay-logo.png',
                   password: docPassword || passwordClean,
                   subscription_status: docStatus as any,
-                  subscription_plan: planMapped as any,
+                  subscription_plan: planMapped,
                   next_billing_date: getDefaultNextBillingDate(),
                   fee_base: docFee,
                   fee_por_slip: getPlanExtraSlipFeeMzn(docPlan)
                 });
+                ensureTenantContainers(restored.id);
+                saveRuntimeState();
               }
-              selecionarClienteEmpresa(restored.id);
               const sessionPayload = {
                 sucesso: true,
                 mensagem: `Sessão restaurada com sucesso para ${companyName}`,
@@ -1440,21 +1638,44 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
     }
 
-    // 6. Fallback para contas autenticadas exclusivamente via Firebase Auth
+    // 6. Fallback para contas autenticadas exclusivamente via Firebase Auth (cria espaço isolado limpo, nunca cli_bronze!)
     if (isFirebaseAuthed) {
-      selecionarClienteEmpresa("cli_bronze");
+      let isolatedComp = baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm);
+      if (!isolatedComp) {
+        const isoId = `cli_fb_${crypto.createHash('md5').update(emailNorm).digest('hex').slice(0, 10)}`;
+        isolatedComp = adicionarClienteEmpresa({
+          id: isoId,
+          nome: emailNorm.split('@')[0].toUpperCase(),
+          nuit: '400000000',
+          endereco: 'Maputo, Moçambique',
+          provincia: 'Maputo Cidade',
+          distrito: 'KaMpfumo',
+          regime_iva: 'Geral (16%)',
+          nuel: '',
+          email: emailNorm,
+          telefone: '',
+          logo: '/clickpay-logo.png',
+          fee_base: getPlanFeeMzn('Starter'),
+          fee_por_slip: getPlanExtraSlipFeeMzn('Starter'),
+          subscription_status: 'ativo',
+          subscription_plan: 'Bronze',
+          next_billing_date: getDefaultNextBillingDate()
+        });
+        ensureTenantContainers(isolatedComp.id);
+        saveRuntimeState();
+      }
       const sessionPayload = {
         sucesso: true,
         mensagem: "Sessão autenticada via Firebase Auth!",
-        token: signSessionToken({ email: emailNorm, role: "CLIENTE_EMPRESA", empresa_id: "cli_bronze" }),
+        token: signSessionToken({ email: emailNorm, role: "CLIENTE_EMPRESA", empresa_id: isolatedComp.id }),
         usuario: {
           email: emailNorm,
           funcao: "CLIENTE_EMPRESA",
-          empresa_id: "cli_bronze",
-          nome_empresa: empresaAtual.nome,
-          subscription_status: "ativo",
-          subscription_plan: "Bronze",
-          next_billing_date: getDefaultNextBillingDate()
+          empresa_id: isolatedComp.id,
+          nome_empresa: isolatedComp.nome,
+          subscription_status: isolatedComp.subscription_status || "ativo",
+          subscription_plan: isolatedComp.subscription_plan || "Bronze",
+          next_billing_date: isolatedComp.next_billing_date || getDefaultNextBillingDate()
         }
       };
 
@@ -1733,7 +1954,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
       // 1. Fundador (Super Admin)
       if (isFounderEmail(emailNorm)) {
+        founderActiveCompanyId = 'cli_founders';
         selecionarClienteEmpresa("cli_founders");
+        syncCompanyGlobalsIfActive("cli_founders");
+        const founderComp = baseDadosClientes.find(c => c.id === 'cli_founders');
         const sessionPayload = {
           sucesso: true,
           mensagem: "Acesso de Fundador autenticado via Conta Google Verificada!",
@@ -1744,7 +1968,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             funcao: "SUPER_ADMIN_PAYROLL",
             empresa_id: "cli_founders",
             area_visualizacao: "Painel Executivo Global",
-            nome_empresa: empresaAtual.nome || "ClickPay Moçambique Lda",
+            nome_empresa: founderComp?.nome || empresaAtual.nome || "ClickPay Moçambique Lda",
             subscription_status: "ativo",
             subscription_plan: "Platinum"
           }
@@ -1763,8 +1987,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         if (sysUser.status === 'inativo') {
           return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
         }
-        const targetCompanyId = sysUser.role === 'CLIENTE_EMPRESA' ? 'cli_bronze' : 'cli_founders';
-        selecionarClienteEmpresa(targetCompanyId);
+        const matchedClient = sysUser.role === 'CLIENTE_EMPRESA'
+          ? baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm)
+          : null;
+        const targetCompanyId = matchedClient?.id || (sysUser.role === 'CLIENTE_EMPRESA' ? 'cli_bronze' : 'cli_founders');
         sysUser.lastLogin = 'Agora (Gmail)';
         const sessionPayload = {
           sucesso: true,
@@ -1775,10 +2001,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             email: emailNorm,
             funcao: sysUser.role,
             empresa_id: targetCompanyId,
-            nome_empresa: sysUser.companyName || empresaAtual.nome,
-            subscription_status: 'ativo',
-            subscription_plan: sysUser.plan || 'Gold',
-            next_billing_date: getDefaultNextBillingDate()
+            nome_empresa: matchedClient?.nome || sysUser.companyName || empresaAtual.nome,
+            subscription_status: matchedClient?.subscription_status || 'ativo',
+            subscription_plan: matchedClient?.subscription_plan || sysUser.plan || 'Gold',
+            next_billing_date: matchedClient?.next_billing_date || getDefaultNextBillingDate()
           }
         };
         notifyFounder('Login via Gmail', `Acesso autorizado para ${emailNorm} (${sysUser.role}).`, { userEmail: emailNorm, status: 'sucesso' });
@@ -1831,18 +2057,19 @@ export async function createApp(options?: { skipStatic?: boolean }) {
                 logo: '/clickpay-logo.png',
                 password: '',
                 subscription_status: (String(rawStatus).toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo') as any,
-                subscription_plan: rawPlan as any,
+                subscription_plan: normalizeSubscriptionPlan(rawPlan),
                 next_billing_date: getDefaultNextBillingDate(),
                 fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || f.fee_base?.integerValue || f.fee_base?.doubleValue || getPlanFeeMzn(rawPlan)),
                 fee_por_slip: getPlanExtraSlipFeeMzn(rawPlan)
               });
+              ensureTenantContainers(clienteErp.id);
+              saveRuntimeState();
             }
           }
         }
       }
 
       if (clienteErp) {
-        selecionarClienteEmpresa(clienteErp.id);
         const sessionPayload = {
           sucesso: true,
           mensagem: `Sessão iniciada via Gmail para ${clienteErp.nome}`,
@@ -2468,6 +2695,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     try {
       const selectedPlan = plano || 'Starter';
+      const mappedPlan = normalizeSubscriptionPlan(selectedPlan);
       const cycle = billingCycle === 'anual' ? 'anual' : 'mensal';
       const feeBase = Number(bodyFeeBase) || getPlanFeeMzn(selectedPlan, cycle);
       const feePorSlip = getPlanExtraSlipFeeMzn(selectedPlan);
@@ -2488,12 +2716,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           if (regimeIva) existingCompany.regime_iva = regimeIva;
           if (logo) existingCompany.logo = logo;
           if (contacto) existingCompany.telefone = contacto;
-          existingCompany.subscription_plan = selectedPlan;
+          existingCompany.subscription_plan = mappedPlan;
           existingCompany.fee_base = feeBase;
           existingCompany.fee_por_slip = feePorSlip;
           existingCompany.next_billing_date = nextBillingDate;
-
-          selecionarClienteEmpresa(existingCompany.id);
+          ensureTenantContainers(existingCompany.id);
+          saveRuntimeState();
 
           return res.status(200).json({
             sucesso: true,
@@ -2522,7 +2750,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
       const companyId = `cli_reg_${Date.now()}`;
 
-      // 1. Criar empresa na base de dados local do ERP
+      // 1. Criar empresa isolada (sem colaboradores ou contratos pré-populados)
       const novaEmpresa = adicionarClienteEmpresa({
         id: companyId,
         nome: cleanEmpresa,
@@ -2537,11 +2765,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         logo: logo || '/clickpay-logo.png',
         password: cleanPassword,
         subscription_status: 'ativo',
-        subscription_plan: selectedPlan,
+        subscription_plan: mappedPlan,
         next_billing_date: nextBillingDate,
         fee_base: feeBase,
         fee_por_slip: feePorSlip
       });
+      ensureTenantContainers(companyId);
 
       // 2. Registar utilizador local, na gestão de acessos e sincronizar no Firebase Auth
       clientesRegistadosPelosFounders.push({
@@ -2561,7 +2790,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         rawPassword: cleanPassword,
         role: 'CLIENTE_EMPRESA',
         roleLabel: `Cliente Empresa (${selectedPlan})`,
-        plan: selectedPlan,
+        plan: mappedPlan,
         companyName: cleanEmpresa,
         phone: contacto || '+258 84 000 0000',
         status: 'ativo',
@@ -2570,6 +2799,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         apiTokenPrefix: `cp_live_${companyId.substring(0, 10)}...`
       });
 
+      saveRuntimeState();
       await syncUserToFirebase(cleanEmail, cleanPassword);
 
       notifyFounder(
@@ -2577,9 +2807,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         `Empresa "${cleanEmpresa}" (NUIT: ${novaEmpresa.nuit}) registada com o e-mail ${cleanEmail} e sincronizada com o Firebase.`,
         { userEmail: cleanEmail, nuit: novaEmpresa.nuit, status: 'sucesso' }
       );
-
-      // 3. Selecionar a nova empresa no servidor
-      selecionarClienteEmpresa(companyId);
 
       return res.status(201).json({
         sucesso: true,
@@ -2594,7 +2821,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           nuit: novaEmpresa.nuit,
           nome_usuario: nomeCompletoUsuario,
           subscription_status: 'ativo',
-          subscription_plan: selectedPlan,
+          subscription_plan: mappedPlan,
           next_billing_date: novaEmpresa.next_billing_date
         }
       });
@@ -2610,12 +2837,11 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   app.get('/api/clients', requireFounder, (req: Request, res: Response) => {
     try {
-      // Calculate current stats on-the-fly for rich representation
       const listagem = baseDadosClientes.map(c => {
-        const isActive = c.nuit === empresaAtual.nuit;
-        const currentEmployees = isActive ? employees : c.employees;
+        const isActive = c.id === founderActiveCompanyId;
+        const currentEmployees = Array.isArray(c.employees) ? c.employees : [];
         const count = currentEmployees.length;
-        const payrollTotal = currentEmployees.reduce((sum, emp) => sum + emp.salario_base, 0);
+        const payrollTotal = currentEmployees.reduce((sum, emp) => sum + Number(emp.salario_base || 0), 0);
         const billingFee = c.fee_base + (c.fee_por_slip * count);
 
         return {
@@ -2632,6 +2858,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           logo: c.logo,
           fee_base: c.fee_base,
           fee_por_slip: c.fee_por_slip,
+          subscription_status: c.subscription_status,
+          subscription_plan: c.subscription_plan,
+          next_billing_date: c.next_billing_date,
           countEmployees: count,
           payrollGrossTotal: payrollTotal,
           billingFeeMzn: billingFee,
@@ -2651,22 +2880,28 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         return res.status(400).json({ error: 'ID do cliente é obrigatório.' });
       }
 
-      const success = selecionarClienteEmpresa(id);
+      const target = baseDadosClientes.find(c => c.id === id);
+      if (!target) {
+        return res.status(404).json({ error: 'Cliente não encontrado.' });
+      }
+
+      founderActiveCompanyId = target.id;
+      const success = selecionarClienteEmpresa(target.id);
       if (!success) {
         return res.status(404).json({ error: 'Cliente não encontrado.' });
       }
 
-      if (id === 'cli_bronze' || id === 'cli_silver' || id === 'cli_gold') {
-        carteiraEmpresaFintech.saldo_disponivel_mz = 0.00;
-      }
+      ensureTenantContainers(target.id);
+      syncCompanyGlobalsIfActive(target.id);
+      saveRuntimeState();
 
       res.json({
         success: true,
-        mensagem: `Contexto do ERP alterado com sucesso para a empresa: ${empresaAtual.nome}`,
-        empresaAtual,
+        mensagem: `Contexto do ERP alterado com sucesso para a empresa: ${target.nome}`,
+        empresaAtual: buildCompanyDataView(target),
         configuracaoFiscal,
-        employees,
-        baseDadosContratosGerais
+        employees: target.employees,
+        baseDadosContratosGerais: target.contratos
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Erro ao alternar cliente.' });
@@ -2680,6 +2915,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         return res.status(400).json({ error: 'Nome e NUIT são obrigatórios.' });
       }
 
+      const normalizedPlan = normalizeSubscriptionPlan(subscription_plan);
       const novoId = `cli_${Date.now()}`;
       const novoCliente = adicionarClienteEmpresa({
         id: novoId,
@@ -2693,14 +2929,16 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         email: email || '',
         telefone: telefone || '',
         logo: logo || '/clickpay-logo.png',
-        fee_base: Number(fee_base) || getPlanFeeMzn(subscription_plan),
-        fee_por_slip: Number(fee_por_slip) || getPlanExtraSlipFeeMzn(subscription_plan),
+        fee_base: Number(fee_base) || getPlanFeeMzn(normalizedPlan),
+        fee_por_slip: Number(fee_por_slip) || getPlanExtraSlipFeeMzn(normalizedPlan),
         password: password || crypto.randomBytes(8).toString('hex'),
         subscription_status: subscription_status || 'ativo',
-        subscription_plan: subscription_plan || 'Bronze',
+        subscription_plan: normalizedPlan,
         next_billing_date: next_billing_date || getDefaultNextBillingDate()
       });
 
+      ensureTenantContainers(novoCliente.id);
+      saveRuntimeState();
       enviarEmailAlertaAssinatura(novoCliente);
       const { password: _pwd, ...safeCliente } = novoCliente as any;
       res.status(201).json({ success: true, cliente: safeCliente });
@@ -2723,12 +2961,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
 
       if (status !== undefined) cliente.subscription_status = status;
-      if (plan !== undefined) cliente.subscription_plan = plan;
+      if (plan !== undefined) cliente.subscription_plan = normalizeSubscriptionPlan(plan);
       if (fee_base !== undefined) cliente.fee_base = Number(fee_base);
       if (fee_por_slip !== undefined) cliente.fee_por_slip = Number(fee_por_slip);
       if (next_billing_date !== undefined) cliente.next_billing_date = next_billing_date;
       if (password !== undefined && password !== '') cliente.password = password;
 
+      syncCompanyGlobalsIfActive(cliente.id);
+      saveRuntimeState();
       enviarEmailAlertaAssinatura(cliente);
       const { password: _pwd, ...safeCliente } = cliente as any;
       res.json({ success: true, mensagem: `Assinatura de ${cliente.nome} atualizada com sucesso!`, cliente: safeCliente });
@@ -2740,14 +2980,27 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   app.delete('/api/clients/:id', requireFounder, (req: Request, res: Response) => {
     try {
       const { id } = req.params;
+      if (id === 'cli_founders') {
+        return res.status(400).json({ error: 'A empresa fundadora principal não pode ser removida.' });
+      }
       const index = baseDadosClientes.findIndex(c => c.id === id);
       if (index === -1) {
         return res.status(404).json({ error: 'Cliente não encontrado.' });
       }
-      
+
       const removed = baseDadosClientes[index];
       baseDadosClientes.splice(index, 1);
-      
+      delete walletsByCompany[id];
+      delete bankAccountsByCompany[id];
+      delete historicoByCompany[id];
+      delete auditLogsByCompany[id];
+      if (founderActiveCompanyId === id) {
+        founderActiveCompanyId = 'cli_founders';
+        selecionarClienteEmpresa('cli_founders');
+        syncCompanyGlobalsIfActive('cli_founders');
+      }
+      saveRuntimeState();
+
       res.json({ success: true, mensagem: `Cliente ${removed.nome} removido com sucesso.` });
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao remover cliente.' });
@@ -2756,18 +3009,21 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   // --- API ENDPOINTS ---
 
-  // 1. Employee Management (CRUD)
+  // 1. Employee Management (CRUD) — Strictly tenant-isolated
   app.get('/api/employees', (req: Request, res: Response) => {
-    res.json(employees);
+    const ctx = resolveTenantContext(req);
+    res.json(ctx.company.employees);
   });
 
   app.post('/api/employees', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { nome, nuit, inss_numero, cargo, salario_base, numero_dependentes, carteira_movel } = req.body;
       if (!nome || !salario_base) {
         return res.status(400).json({ error: 'Nome e Salário Base são obrigatórios.' });
       }
-      const novo = addEmployee({
+      const novo: Employee = {
+        id: `emp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         nome,
         nuit: nuit || '',
         inss_numero: inss_numero || '',
@@ -2775,12 +3031,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         salario_base: Number(salario_base),
         numero_dependentes: Number(numero_dependentes) || 0,
         carteira_movel: carteira_movel || ''
-      });
+      };
+      ctx.company.employees.push(novo);
 
-      // Interconnection: Automatically provision a default indefinite contract
-      baseDadosContratosGerais.push({
-        id: `ct_${Date.now()}`,
-        empresa_id: "emp_piloto_01",
+      // Interconnection: Automatically provision a default indefinite contract for this tenant
+      ctx.company.contratos.push({
+        id: `ct_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        empresa_id: ctx.companyId,
         nome_funcionario: nome,
         cargo: cargo || 'Trabalhador',
         tipo_contrato: 'Indeterminado',
@@ -2789,10 +3046,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         cargo_complexo: false
       });
 
-      // Automated Cloud Backup Trigger
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
       triggerAutomaticBackup();
 
-      // Envia notificação por e-mail para a empresa sobre o novo colaborador cadastrado
       enviarEmailAlertaColaborador(novo).catch(err => {
         console.error('Erro ao enviar e-mail de cadastro de colaborador:', err);
       });
@@ -2805,6 +3062,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   app.post('/api/employees/upload-parse', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { base64, mimeType, fileName } = req.body;
       if (!base64 || !mimeType) {
         return res.status(400).json({ error: 'Os dados do ficheiro (base64) e o tipo MIME são obrigatórios.' });
@@ -2874,30 +3132,27 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         throw new Error('A resposta do Gemini não retornou um array de colaboradores válido.');
       }
 
-      // Add each parsed employee using our addEmployee backend utility
       const addedList = [];
       for (const emp of parsedEmployees) {
         if (!emp.nome || !emp.salario_base) continue;
-        
-        // Ensure NUIT has only digits and is 9 digits
+
         let cleanNuit = (emp.nuit || '').toString().replace(/\D/g, '');
         if (cleanNuit.length !== 9) {
           cleanNuit = '';
         }
 
-        // Clean mobile wallet
         let cleanWallet = (emp.carteira_movel || '').toString().replace(/\D/g, '');
         if (cleanWallet.length !== 9 || !['84', '85', '86', '87'].includes(cleanWallet.substring(0, 2))) {
           cleanWallet = '';
         }
 
-        // Clean INSS
         let cleanInss = (emp.inss_numero || '').toString().toUpperCase().replace(/\s/g, '');
         if (cleanInss && !cleanInss.startsWith('INSS-')) {
           cleanInss = `INSS-${cleanInss.replace(/\D/g, '')}`;
         }
 
-        const novo = addEmployee({
+        const novo: Employee = {
+          id: `emp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           nome: emp.nome,
           nuit: cleanNuit,
           inss_numero: cleanInss,
@@ -2905,12 +3160,12 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           salario_base: Number(emp.salario_base),
           numero_dependentes: Number(emp.numero_dependentes) || 0,
           carteira_movel: cleanWallet
-        });
+        };
+        ctx.company.employees.push(novo);
 
-        // Interconnection: Automatically provision a default contract
-        baseDadosContratosGerais.push({
+        ctx.company.contratos.push({
           id: `ct_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          empresa_id: "emp_piloto_01",
+          empresa_id: ctx.companyId,
           nome_funcionario: emp.nome,
           cargo: emp.cargo || 'Trabalhador',
           tipo_contrato: 'Indeterminado',
@@ -2922,7 +3177,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         addedList.push(novo);
       }
 
-      // Automated Cloud Backup Trigger
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
       triggerAutomaticBackup();
 
       res.status(200).json({ sucesso: true, colaboradores_adicionados: addedList });
@@ -2934,18 +3190,25 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   app.put('/api/employees/:id', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { id } = req.params;
-      const antigoFunc = employees.find(e => e.id === id);
-      const antigoNome = antigoFunc ? antigoFunc.nome : '';
-
-      const updated = updateEmployee(id, req.body);
-      if (!updated) {
+      const idx = ctx.company.employees.findIndex(e => e.id === id);
+      if (idx === -1) {
         return res.status(404).json({ error: 'Trabalhador não encontrado.' });
       }
 
-      // Interconnection: Keep corresponding contract details in sync
+      const antigoNome = ctx.company.employees[idx].nome;
+      const updated: Employee = {
+        ...ctx.company.employees[idx],
+        ...req.body,
+        id,
+        salario_base: req.body.salario_base !== undefined ? Number(req.body.salario_base) : ctx.company.employees[idx].salario_base,
+        numero_dependentes: req.body.numero_dependentes !== undefined ? Number(req.body.numero_dependentes) : ctx.company.employees[idx].numero_dependentes
+      };
+      ctx.company.employees[idx] = updated;
+
       if (antigoNome) {
-        baseDadosContratosGerais.forEach(ct => {
+        ctx.company.contratos.forEach(ct => {
           if (ct.nome_funcionario === antigoNome) {
             if (req.body.nome) ct.nome_funcionario = req.body.nome;
             if (req.body.cargo) ct.cargo = req.body.cargo;
@@ -2954,7 +3217,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         });
       }
 
-      // Automated Cloud Backup Trigger
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
       triggerAutomaticBackup();
 
       res.json(updated);
@@ -2965,27 +3229,41 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   app.delete('/api/employees/:id', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { id } = req.params;
-      const antigoFunc = employees.find(e => e.id === id);
-      const antigoNome = antigoFunc ? antigoFunc.nome : '';
-
-      const success = deleteEmployee(id);
-      if (!success) {
+      const targetEmp = ctx.company.employees.find(e => e.id === id);
+      if (!targetEmp) {
         return res.status(404).json({ error: 'Trabalhador não encontrado.' });
       }
 
-      // Interconnection: Clean up the associated contract
-      if (antigoNome) {
-        const ctIndex = baseDadosContratosGerais.findIndex(ct => ct.nome_funcionario === antigoNome);
-        if (ctIndex !== -1) {
-          baseDadosContratosGerais.splice(ctIndex, 1);
-        }
+      const targetNameLower = String(targetEmp.nome || '').trim().toLowerCase();
+      if (['emp-gerson', 'emp-miguel', 'emp-cleton'].includes(id) || ctx.companyId === 'cli_founders') {
+        deletedSeedEmployeeIds.add(id);
       }
 
-      // Automated Cloud Backup Trigger
+      ctx.company.employees = ctx.company.employees.filter(e => e.id !== id);
+      ctx.company.contratos = ctx.company.contratos.filter(
+        ct => String(ct.nome_funcionario || '').trim().toLowerCase() !== targetNameLower
+      );
+      ctx.company.paymentLogs = ctx.company.paymentLogs.filter(
+        l => l.employeeId !== id && String(l.employeeName || '').trim().toLowerCase() !== targetNameLower
+      );
+      ctx.company.vales = ctx.company.vales.filter(
+        v => v.funcionario_id !== id && String(v.nome || '').trim().toLowerCase() !== targetNameLower
+      );
+      auditLogsByCompany[ctx.companyId] = (auditLogsByCompany[ctx.companyId] || []).filter(
+        log => String(log.nome || log.funcionario_nome || '').trim().toLowerCase() !== targetNameLower
+      );
+
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
       triggerAutomaticBackup();
 
-      res.json({ success: true, message: 'Colaborador e contrato associado removidos com sucesso.' });
+      res.json({
+        success: true,
+        removedId: id,
+        message: 'Colaborador, salários, logs e contratos associados eliminados permanentemente.'
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao remover colaborador.' });
     }
@@ -2994,33 +3272,43 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // Endpoint to reset the database and clear all clients/employees
   app.post('/api/mvp/reset-total', (req: Request, res: Response) => {
     try {
-      resetDbTotal();
-      // Reset fintech prepaid balance to exactly 0.00 MT
-      carteiraEmpresaFintech.saldo_disponivel_mz = 0.00;
-      // Empty the registered clients
-      clientesRegistadosPelosFounders.length = 0;
-      // Reset period analysis metrics completely
-      historicoOperacoesEmpresa.length = 0;
-      // Reset audit logs completely
-      logsPagamentosGlobais.length = 0;
-      // Reset alert scheduler history logs
-      alertHistory.length = 0;
-      // Reset corporate bank account balances (re-seed default account with 10M MT to prevent CONTAS CORPORATIVAS AUSENTES)
-      contasBancariasEmpresa = [
-        {
-          id: "cta_01",
-          banco: "Millennium BIM",
-          numero_conta: "0001-2222-3333",
-          nib: "000100010002222333344",
-          saldo: 10000000.00,
-          senha: "1234"
-        }
-      ];
-      
-      res.json({ 
-        sucesso: true, 
+      const ctx = resolveTenantContext(req);
+      if (ctx.companyId === 'cli_founders' && (!ctx.session || ctx.session.role === 'SUPER_ADMIN_PAYROLL')) {
+        resetDbTotal();
+        deletedSeedEmployeeIds.clear();
+        ['emp-gerson', 'emp-miguel', 'emp-cleton'].forEach(id => deletedSeedEmployeeIds.add(id));
+        clientesRegistadosPelosFounders.length = 0;
+        alertHistory.length = 0;
+        baseDadosClientes.forEach(c => {
+          c.employees = [];
+          c.contratos = [];
+          c.paymentLogs = [];
+          c.vales = [];
+          walletsByCompany[c.id] = 0;
+          bankAccountsByCompany[c.id] = makeDefaultBankAccounts();
+          historicoByCompany[c.id] = makeDefaultHistorico();
+          auditLogsByCompany[c.id] = [];
+        });
+        founderActiveCompanyId = 'cli_founders';
+        syncCompanyGlobalsIfActive('cli_founders');
+      } else {
+        ctx.company.employees = [];
+        ctx.company.contratos = [];
+        ctx.company.paymentLogs = [];
+        ctx.company.vales = [];
+        walletsByCompany[ctx.companyId] = 0;
+        bankAccountsByCompany[ctx.companyId] = makeDefaultBankAccounts();
+        historicoByCompany[ctx.companyId] = makeDefaultHistorico();
+        auditLogsByCompany[ctx.companyId] = [];
+        syncCompanyGlobalsIfActive(ctx.companyId);
+      }
+
+      saveRuntimeState();
+
+      res.json({
+        sucesso: true,
         message: 'ERP Pronto! Sistema completamente zerado e limpo para novos registos.',
-        saldo_disponivel_mz: 0.00 
+        saldo_disponivel_mz: 0.00
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao zerar base de dados.' });
@@ -3030,36 +3318,25 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // Endpoint to reset costs and zero financial values while preserving registry of clients and employees
   app.post('/api/mvp/reset-costs', (req: Request, res: Response) => {
     try {
-      // 1. Reset consolidated monthly operations history for Jan-Dec 2026 to exactly 0
-      const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-      historicoOperacoesEmpresa.length = 0;
-      meses.forEach((mes, index) => {
-        const mesNum = String(index + 1).padStart(2, '0');
-        historicoOperacoesEmpresa.push({
-          data: `2026-${mesNum}-28`,
-          mes: mes,
-          ano: 2026,
-          liquido_pago: 0,
-          irps_retido: 0,
-          inss_retido: 0,
-          taxas_fintech: 0,
-          total_trabalhadores: 0
+      const ctx = resolveTenantContext(req);
+      historicoByCompany[ctx.companyId] = makeDefaultHistorico();
+      auditLogsByCompany[ctx.companyId] = [];
+      ctx.company.paymentLogs = [];
+      ctx.company.vales = [];
+      walletsByCompany[ctx.companyId] = 0;
+
+      if (ctx.companyId === 'cli_founders' && (!ctx.session || ctx.session.role === 'SUPER_ADMIN_PAYROLL')) {
+        baseDadosClientes.forEach(client => {
+          client.paymentLogs = [];
+          client.vales = [];
+          walletsByCompany[client.id] = 0;
+          historicoByCompany[client.id] = makeDefaultHistorico();
+          auditLogsByCompany[client.id] = [];
         });
-      });
+      }
 
-      // 2. Clear global payment and transaction logs
-      logsPagamentosGlobais.length = 0;
-      paymentLogs.length = 0;
-      baseDadosVales.length = 0;
-
-      // 3. Clear payment logs and vales for all registered clients in the database (preserving their basic company and employee lists)
-      baseDadosClientes.forEach(client => {
-        client.paymentLogs = [];
-        client.vales = [];
-      });
-
-      // 4. Reset fintech platform prepaid balance
-      carteiraEmpresaFintech.saldo_disponivel_mz = 0.00;
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
       res.json({
         sucesso: true,
@@ -3071,23 +3348,20 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  // Endpoint to seed the database with demo/test data
+  // Endpoint to seed the database with demo/test data (exclusively Founder demo reset)
   app.post('/api/mvp/seed-demo', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
+      if (ctx.companyId !== 'cli_founders') {
+        return res.status(403).json({ error: 'A reposição de dados de demonstração é restrita à empresa fundadora.' });
+      }
+      deletedSeedEmployeeIds.clear();
       seedDemoData();
-      // Also provide a starter balance of 100k for demonstration
-      carteiraEmpresaFintech.saldo_disponivel_mz = 100000.00;
-      // Re-seed default bank accounts to ensure payment capabilities
-      contasBancariasEmpresa = [
-        {
-          id: "cta_01",
-          banco: "Millennium BIM",
-          numero_conta: "0001-2222-3333",
-          nib: "000100010002222333344",
-          saldo: 10000000.00,
-          senha: "1234"
-        }
-      ];
+      walletsByCompany['cli_founders'] = 100000.00;
+      bankAccountsByCompany['cli_founders'] = makeDefaultBankAccounts();
+      syncCompanyGlobalsIfActive('cli_founders');
+      saveRuntimeState();
+
       res.json({
         sucesso: true,
         message: 'Dados de demonstração carregados com sucesso!',
@@ -3100,22 +3374,42 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   // 2. Fiscal and Company Configuration
   app.get('/api/config', (req: Request, res: Response) => {
+    const ctx = resolveTenantContext(req);
     res.json({
       configuracaoFiscal,
-      empresaAtual
+      empresaAtual: buildCompanyDataView(ctx.company)
     });
   });
 
   app.post('/api/config', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { config, empresa } = req.body;
       if (config) {
         updateConfiguracaoFiscal(config);
       }
-      if (empresa) {
-        updateEmpresa(empresa);
+      if (empresa && typeof empresa === 'object') {
+        Object.assign(ctx.company, {
+          nome: empresa.nome ?? ctx.company.nome,
+          nuit: empresa.nuit ?? ctx.company.nuit,
+          endereco: empresa.endereco ?? ctx.company.endereco,
+          provincia: empresa.provincia ?? ctx.company.provincia,
+          distrito: empresa.distrito ?? ctx.company.distrito,
+          regime_iva: empresa.regime_iva ?? ctx.company.regime_iva,
+          nuel: empresa.nuel ?? ctx.company.nuel,
+          email: empresa.email ?? ctx.company.email,
+          telefone: empresa.telefone ?? ctx.company.telefone,
+          logo: empresa.logo ?? ctx.company.logo
+        });
+        syncCompanyGlobalsIfActive(ctx.companyId);
       }
-      res.json({ success: true, message: 'Configuração gravada com sucesso.', configuracaoFiscal, empresaAtual });
+      saveRuntimeState();
+      res.json({
+        success: true,
+        message: 'Configuração gravada com sucesso.',
+        configuracaoFiscal,
+        empresaAtual: buildCompanyDataView(ctx.company)
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao salvar configurações.' });
     }
@@ -3125,9 +3419,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // Takes standard Array of { id: string, diasFaltas: number }
   app.post('/api/payroll/bulk-process-and-pay', async (req: Request, res: Response) => {
     try {
-      const { items, periodo } = req.body; // items: Array of { id, diasFaltas }
+      const ctx = resolveTenantContext(req);
+      const { items, periodo } = req.body;
       const activePeriod = periodo || getCurrentPeriod();
-      
+
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Nenhum funcionário fornecido para pagamento em lote.' });
       }
@@ -3136,29 +3431,42 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       let totalLíquidoPago = 0;
 
       for (const item of items) {
-        const emp = employees.find(e => e.id === item.id);
+        const emp = ctx.company.employees.find(e => e.id === item.id);
         if (!emp) continue;
 
         const calculo = calcularFolhaSalario(emp.salario_base, item.diasFaltas || 0, emp.numero_dependentes);
         calculo.periodo = activePeriod;
 
-        // Process PDF Slip
-        const nomeFicheiro = `recibo_${emp.id}_${activePeriod.replace(/\s+/g, '_')}.pdf`;
+        const nomeFicheiro = `recibo_${ctx.companyId}_${emp.id}_${activePeriod.replace(/\s+/g, '_')}.pdf`;
         const caminhoDestino = path.join(tmpDir, nomeFicheiro);
 
-        await criarReciboSalarioPDF(calculo, empresaAtual, emp, caminhoDestino);
+        await criarReciboSalarioPDF(calculo, buildCompanyDataView(ctx.company), emp, caminhoDestino);
 
-        // Add to Transaction Logs
-        const txId = `TX-${emp.carteira_movel.startsWith('86') ? 'EM' : 'MP'}-${Math.floor(10000 + Math.random() * 90000)}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`;
-        
-        const logged = addPaymentLog({
+        const txId = `TX-${(emp.carteira_movel || '').startsWith('86') ? 'EM' : 'MP'}-${Math.floor(10000 + Math.random() * 90000)}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`;
+        const logged = {
+          id: `tx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          timestamp: new Date().toISOString(),
           employeeId: emp.id,
           employeeName: emp.nome,
           carteira_movel: emp.carteira_movel,
           salarioLiquido: calculo.salarioLiquido,
-          status: 'Liquidado',
+          status: 'Liquidado' as const,
           periodo: activePeriod,
           txId
+        };
+        ctx.company.paymentLogs.unshift(logged);
+        ctx.auditLogs.push({
+          id_transacao: txId,
+          funcionario_id: emp.id,
+          nome: emp.nome,
+          cargo: emp.cargo,
+          periodo: activePeriod,
+          bruto: calculo.salarioBase,
+          liquido: calculo.salarioLiquido,
+          inss: calculo.inssTrabalhador + calculo.inssEmpresa,
+          irps: calculo.irpsConstatado,
+          data: new Date().toISOString(),
+          metodo: 'Fintech Lote'
         });
 
         totalLíquidoPago += calculo.salarioLiquido;
@@ -3171,7 +3479,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         });
       }
 
-      // Trigger automatic cloud backup since salaries list has changed
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
       triggerAutomaticBackup();
 
       res.json({
@@ -3188,6 +3497,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // NOVA ROTA: PROCESSAR, LIQUIDAR E PREPARAR DOWNLOAD COM CÁLCULO OFICIAL CORRIGIDO (LEI Nº 11/2025 E LEI Nº 13/2023)
   app.post('/api/payroll/process-and-pay', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { dadosEmpresa, dadosFuncionario, diasFaltas, periodo } = req.body;
       const activePeriod = periodo || getCurrentPeriod();
 
@@ -3195,47 +3505,31 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         return res.status(400).json({ erro: 'Informações de funcionário em falta.' });
       }
 
-      // 1. EXECUÇÃO DO MOTOR DE CÁULO FISCAL AUDITADO (LEI Nº 11/2025 E LEI Nº 13/2023)
-      // Esta função aplica as faltas primeiro, deduz o INSS e subtrai a dedução por dependentes no IRPS
       const salarioCalculado: any = await processarSalarioOficial(
-        Number(dadosFuncionario.salario_base), 
-        Number(diasFaltas) || 0, 
+        Number(dadosFuncionario.salario_base),
+        Number(diasFaltas) || 0,
         Number(dadosFuncionario.numero_dependentes)
       );
 
-      // 1.1 Verificação e Abatimento automático de Vales/Adiantamentos
       const funcionarioId = dadosFuncionario.id || 'temp';
-      const valesDoMes = baseDadosVales.filter(v => v.funcionario_id === funcionarioId && v.status === "APROVADO_E_TRANSFERIDO");
+      const valesDoMes = ctx.company.vales.filter(v => v.funcionario_id === funcionarioId && v.status === "APROVADO_E_TRANSFERIDO");
       const totalDescontoVales = valesDoMes.reduce((soma, v) => soma + v.valor, 0);
 
       if (totalDescontoVales > 0) {
         salarioCalculado.descontoVales = totalDescontoVales;
         salarioCalculado.totalDescontos += totalDescontoVales;
         salarioCalculado.salarioLiquido = Math.max(0, salarioCalculado.salarioLiquido - totalDescontoVales);
-
-        // Atualizar o status dos vales para descontado
         valesDoMes.forEach(v => {
           v.status = "DESCONTADO_FOLHA";
         });
       }
 
-      // 2. SIMULAÇÃO FINTECH DE LIQUIDAÇÃO FINANCEIRA
-      console.log(`[FINTECH LOG] Disparando lote de pagamento para conta: ${dadosFuncionario.carteira_movel}`);
-      const liquidacaoBancariaSucesso = true; 
-
-      if (!liquidacaoBancariaSucesso) {
-        return res.status(402).json({ erro: 'Falha na comunicação com o gateway financeiro local.' });
-      }
-
-      // 3. ESTRUTURAÇÃO DO NOME E DIRETÓRIO DO FICHEIRO PDF
       const periodoFormatado = activePeriod.replace(/\s+/g, '_');
-      const nomeFicheiro = `recibo_${dadosFuncionario.inss_numero || 'beneficiario'}_${periodoFormatado}.pdf`;
+      const nomeFicheiro = `recibo_${ctx.companyId}_${dadosFuncionario.id || dadosFuncionario.inss_numero || 'beneficiario'}_${periodoFormatado}.pdf`;
       const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      // Anexar o período de processamento para exibição no layout do recibo
       salarioCalculado.periodo = activePeriod;
 
-      // 4. CHAMA O MOTOR GERADOR DO PDFKIT COM OS VALORES MATEMÁTICOS CORRIGIDOS
       const fullEmployee: any = {
         id: dadosFuncionario.id || 'temp',
         nome: dadosFuncionario.nome,
@@ -3244,14 +3538,16 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         cargo: dadosFuncionario.cargo || 'Trabalhador',
         salario_base: Number(dadosFuncionario.salario_base),
         numero_dependentes: Number(dadosFuncionario.numero_dependentes),
-        carteira_movel: dadosFuncionario.carteira_movel
+        carteira_movel: dadosFuncionario.carteira_movel || ''
       };
 
-      await criarReciboSalarioPDF(salarioCalculado, dadosEmpresa || empresaAtual, fullEmployee, caminhoDestinoCompleto);
+      const companySnapshot = buildCompanyDataView(ctx.company);
+      await criarReciboSalarioPDF(salarioCalculado, companySnapshot || dadosEmpresa, fullEmployee, caminhoDestinoCompleto);
 
-      // Register payment log
-      const txId = `TX-${dadosFuncionario.carteira_movel.startsWith('86') ? 'EM' : 'MP'}-${Math.floor(10000 + Math.random() * 90000)}X`;
-      addPaymentLog({
+      const txId = `TX-${String(fullEmployee.carteira_movel || '').startsWith('86') ? 'EM' : 'MP'}-${Math.floor(10000 + Math.random() * 90000)}X`;
+      ctx.company.paymentLogs.unshift({
+        id: `tx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        timestamp: new Date().toISOString(),
         employeeId: fullEmployee.id,
         employeeName: fullEmployee.nome,
         carteira_movel: fullEmployee.carteira_movel,
@@ -3260,18 +3556,30 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         periodo: activePeriod,
         txId
       });
+      ctx.auditLogs.push({
+        id_transacao: txId,
+        funcionario_id: fullEmployee.id,
+        nome: fullEmployee.nome,
+        cargo: fullEmployee.cargo,
+        periodo: activePeriod,
+        bruto: salarioCalculado.salarioBase,
+        liquido: salarioCalculado.salarioLiquido,
+        inss: salarioCalculado.inssTrabalhador + salarioCalculado.inssEmpresa,
+        irps: salarioCalculado.irpsConstatado,
+        data: new Date().toISOString(),
+        metodo: 'Recibo Individual'
+      });
 
-      // Trigger automatic cloud backup since salaries list has changed
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
       triggerAutomaticBackup();
 
-      // Retorna a confirmação para o Front-end e o link seguro para download imediato
       return res.json({
         sucesso: true,
         mensagem: `Salário processado e transferido com sucesso para ${dadosFuncionario.nome}!`,
         detalhesSalario: salarioCalculado,
-        linkFicheiro: `/download/${nomeFicheiro}` // Rota pública que serve o arquivo
+        linkFicheiro: `/download/${nomeFicheiro}`
       });
-
     } catch (error: any) {
       console.error('Erro crítico no processamento de download:', error);
       res.status(500).json({ erro: error.message || 'Erro interno ao processar folha de salário e preparar arquivo.' });
@@ -3313,28 +3621,23 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // ROTA: GERAR E FAZER DOWNLOAD DO EXTRATO FINTECH EM PDF
   app.get('/api/fintech/extrato-pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const nomeFicheiro = `extrato_fintech_${Date.now()}.pdf`;
       const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      // Chamar a função geradora de PDF
       await criarExtratoFintechPDF(
-        empresaAtual,
-        paymentLogs,
-        carteiraEmpresaFintech.saldo_disponivel_mz,
+        buildCompanyDataView(ctx.company),
+        ctx.company.paymentLogs,
+        walletsByCompany[ctx.companyId] ?? 0,
         caminhoDestinoCompleto
       );
 
-      // Servir o arquivo PDF como download direto
       res.download(caminhoDestinoCompleto, nomeFicheiro, (erro) => {
         if (erro) {
           console.error('Erro durante a transmissão do extrato:', erro);
         }
-        // Apagar o ficheiro temporário após o download
-        fs.unlink(caminhoDestinoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar ficheiro temporário de extrato:', err);
-        });
+        fs.unlink(caminhoDestinoCompleto, () => {});
       });
-
     } catch (error: any) {
       console.error('Erro ao emitir PDF de extrato:', error);
       res.status(500).json({ erro: error.message || 'Erro interno ao gerar o documento PDF.' });
@@ -3344,27 +3647,26 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // ROTA: GERAR E FAZER DOWNLOAD DO PDF DE AUDITORIA INTERNA
   app.get('/api/auditoria/pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { periodo } = req.query;
 
       if (!periodo) {
         return res.status(400).json({ erro: 'Por favor, especifique o período para a auditoria.' });
       }
 
-      // Filtrar logs de pagamentos dinâmicos gravados na carteira para o período pesquisado
       const periodoQuery = String(periodo).toLowerCase().trim();
-      const logsPagamentos = logsPagamentosGlobais.filter(
+      const logsPagamentos = ctx.auditLogs.filter(
         log => log.periodo && log.periodo.toLowerCase().trim() === periodoQuery
       );
 
-      // Totalizadores automáticos para o ecrã do cliente
       let somatorioLiquidoEnviado = 0;
       let somatorioINSSAcumulado = 0;
       let somatorioIRPSAcumulado = 0;
 
       logsPagamentos.forEach(log => {
-        somatorioLiquidoEnviado += log.liquido;
-        somatorioINSSAcumulado += log.inss;
-        somatorioIRPSAcumulado += log.irps;
+        somatorioLiquidoEnviado += Number(log.liquido || 0);
+        somatorioINSSAcumulado += Number(log.inss || 0);
+        somatorioIRPSAcumulado += Number(log.irps || 0);
       });
 
       const dadosAuditoria = {
@@ -3381,68 +3683,51 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const nomeFicheiro = `relatorio_auditoria_${String(periodo).replace(/\s+/g, '_')}_${Date.now()}.pdf`;
       const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      // Chamar a função geradora de PDF
-      await criarRelatorioAuditoriaPDF(empresaAtual, dadosAuditoria, caminhoDestinoCompleto);
+      await criarRelatorioAuditoriaPDF(buildCompanyDataView(ctx.company), dadosAuditoria, caminhoDestinoCompleto);
 
-      // Servir o arquivo PDF como download direto
       res.download(caminhoDestinoCompleto, nomeFicheiro, (erro) => {
         if (erro) {
           console.error('Erro durante a transmissão do relatório de auditoria:', erro);
         }
-        // Apagar o ficheiro temporário após o download
-        fs.unlink(caminhoDestinoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar ficheiro temporário de auditoria:', err);
-        });
+        fs.unlink(caminhoDestinoCompleto, () => {});
       });
-
     } catch (error: any) {
       console.error('Erro ao emitir PDF de auditoria:', error);
       res.status(500).json({ erro: error.message || 'Erro interno ao gerar o documento PDF.' });
     }
   });
 
-  // ROTA PÚBLICA EXCLUSIVA PARA SERVIR O FICHEIRO APÓS O PROCESSAMENTO COM EXCLUSÃO AUTOMÁTICA
-  app.get('/download/:nome', (req: Request, res: Response) => {
-    const nomeFicheiroSolicitado = req.params.nome;
+  // ROTA PÚBLICA PARA SERVIR RECIBOS PDF (sem exclusão prematura para permitir múltiplos downloads)
+  app.get('/download/:nome', async (req: Request, res: Response) => {
+    const nomeFicheiroSolicitado = path.basename(String(req.params.nome || ''));
     const caminhoFicheiroFisico = path.join(tmpDir, nomeFicheiroSolicitado);
 
-    // Validação de segurança: Impede downloads maliciosos fora da pasta 'tmp'
-    if (path.dirname(caminhoFicheiroFisico) !== tmpDir) {
+    if (path.dirname(caminhoFicheiroFisico) !== tmpDir || !nomeFicheiroSolicitado) {
       return res.status(403).send('Acesso não autorizado.');
     }
 
-    // Verifica se o ficheiro PDF realmente foi gerado e existe em disco
     if (fs.existsSync(caminhoFicheiroFisico)) {
-      // Envia o ficheiro para o navegador forçando a caixa de download
-      return res.download(caminhoFicheiroFisico, nomeFicheiroSolicitado, (erro) => {
-        if (erro) {
-          console.error('Erro durante a transmissão do download:', erro);
-        } else {
-          // APAGAR O FICHEIRO APÓS O DOWNLOAD (Limpeza e proteção de dados confidenciais)
-          fs.unlink(caminhoFicheiroFisico, (err) => {
-            if (err) console.error('Erro ao eliminar arquivo temporário de payroll:', err);
-          });
-        }
-      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeFicheiroSolicitado}"`);
+      return res.sendFile(caminhoFicheiroFisico);
     }
 
-    res.status(404).send('O recibo de vencimento solicitado expirou ou não foi encontrado no servidor.');
+    res.status(404).send('O recibo de vencimento solicitado não foi encontrado no servidor.');
   });
 
-  // 4. Financial Statistics Resumo Dashboard (Computed dynamically based on all current workers)
+  // 4. Financial Statistics Resumo Dashboard (Computed dynamically per tenant)
   app.get('/api/dashboard/resumo-financeiro', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const periodo = (req.query.periodo as string) || getCurrentPeriod();
 
-      // We calculate totals dynamically based on all employees currently saved in database
       let totalSalariosBrutos = 0;
       let totalDescontosFaltas = 0;
       let totalInssTrabalhadores = 0;
       let totalIrpsRetido = 0;
       let totalInssEmpresa = 0;
 
-      employees.forEach(emp => {
-        // Let's assume average 0.2 faults for general summary if not specified
+      ctx.company.employees.forEach(emp => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
         totalSalariosBrutos += calc.salarioBase;
         totalDescontosFaltas += calc.descontoFaltas;
@@ -3451,14 +3736,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         totalInssEmpresa += calc.inssEmpresa;
       });
 
-      // KPI Computations:
-      // 1. Custo Real da Empresa (Salaris + INSS 4% Patronal)
       const custoTotalParaEmpresa = (totalSalariosBrutos - totalDescontosFaltas) + totalInssEmpresa;
-
-      // 2. Volume Liquido Pago aos funcionários
       const totalDinheiroLiquidoDisparado = (totalSalariosBrutos - totalDescontosFaltas) - (totalInssTrabalhadores + totalIrpsRetido);
-
-      // 3. Retenções estatais totais
       const totalPagarAoINSS = totalInssTrabalhadores + totalInssEmpresa;
       const totalPagarAsFinancas = totalIrpsRetido;
 
@@ -3477,7 +3756,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             Number(totalPagarAsFinancas.toFixed(2))
           ]
         },
-        historicoOperacoes: historicoOperacoesEmpresa
+        historicoOperacoes: ctx.historico
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao extrair estatísticas do painel financeiro.' });
@@ -3487,30 +3766,28 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // API: CONSULTAR HISTÓRICO DE SALÁRIOS PAGOS (AUDITORIA INTERNA)
   const getAuditoriaRemuneracoes = async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { periodo } = req.query; // Ex: ?periodo=Junho 2026
 
       if (!periodo) {
         return res.status(400).json({ erro: 'Por favor, especifique o período para a auditoria.' });
       }
 
-      // Filtrar logs de pagamentos dinâmicos gravados na carteira para o período pesquisado
       const periodoQuery = String(periodo).toLowerCase().trim();
-      const logsPagamentos = logsPagamentosGlobais.filter(
+      const logsPagamentos = ctx.auditLogs.filter(
         log => log.periodo && log.periodo.toLowerCase().trim() === periodoQuery
       );
 
-      // Totalizadores automáticos para o ecrã do cliente
       let somatorioLiquidoEnviado = 0;
       let somatorioINSSAcumulado = 0;
       let somatorioIRPSAcumulado = 0;
 
       logsPagamentos.forEach(log => {
-        somatorioLiquidoEnviado += log.liquido;
-        somatorioINSSAcumulado += log.inss;
-        somatorioIRPSAcumulado += log.irps;
+        somatorioLiquidoEnviado += Number(log.liquido || 0);
+        somatorioINSSAcumulado += Number(log.inss || 0);
+        somatorioIRPSAcumulado += Number(log.irps || 0);
       });
 
-      // Retorna o relatório financeiro consolidado e transparente para o utilizador
       return res.json({
         periodoPesquisado: periodo,
         auditoriaGeral: {
@@ -3521,7 +3798,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         },
         detalhesPorTrabalhador: logsPagamentos
       });
-
     } catch (error) {
       console.error('Erro ao gerar relatório de auditoria:', error);
       res.status(500).json({ erro: 'Erro interno ao extrair histórico de remunerações.' });
@@ -3597,6 +3873,7 @@ Fórmula da hora normal: (Salário Base * 12 meses) / (52 semanas * Horas Semana
   // API: GERADOR DE RELATÓRIO DE CONFORMIDADE FISCAL COM GEMINI IA
   app.post('/api/compliance/relatorio-ia', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { periodo, company, totalIvaLiquidado, totalIvaDedutivel, totalVendasComIVA, totalComprasComIVA, comprasSemNuit, vendasSemNuit } = req.body;
 
       const mes = periodo || 'Atual';
@@ -3604,9 +3881,9 @@ Fórmula da hora normal: (Salário Base * 12 meses) / (52 semanas * Horas Semana
       const compras = getCompras(mes);
       const vendas = getVendas(mes);
 
-      const nomeEmpresa = company?.nome || company?.nome_empresa || empresaAtual.nome || 'Empresa';
-      const nuitEmpresa = company?.nuit || empresaAtual.nuit || '';
-      const sectorEmpresa = company?.sector_negocio || company?.ramo_actividade || 'Comércio & Serviços';
+      const nomeEmpresa = company?.nome || company?.nome_empresa || ctx.company.nome || 'Empresa';
+      const nuitEmpresa = company?.nuit || ctx.company.nuit || '';
+      const sectorEmpresa = company?.sector_negocio || company?.ramo_actividade || ctx.company.sector_negocio || 'Comércio & Serviços';
 
       const promptSystem = `Você é um Auditor Fiscal e Perito Contabilista Sênior especializado no PGC-NIRF de Moçambique e no Regulamento do IVA / IRPS / IRPC da Autoridade Tributária (AT) de Moçambique.
 Você deve analisar os dados financeiros e fiscais da empresa fornecidos e gerar um Relatório Oficial de Conformidade Fiscal completo, profissional, rigoroso e construtivo em formato Markdown.
@@ -3704,17 +3981,15 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5. SISSMO (INSS Portal) CSV Layout Export
   app.get('/api/payroll/exportar-sissmo', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const activePeriod = (req.query.periodo as string) || getCurrentPeriod().replace(/\s+/g, '_');
-      
-      // We generate CSV from the actual list of registered employees
+
       let conteudoLayout = "N_INSS;NUIT_FUNCIONARIO;NOME_TRABALHADOR;SALARIO_BRUTO;DIAS_FALTAS\n";
 
-      employees.forEach(func => {
-        // Compute base salary subtracting any defaults (e.g., 0 faults)
+      ctx.company.employees.forEach(func => {
         const calc = calcularFolhaSalario(func.salario_base, 0, func.numero_dependentes);
         const salarioTributavelINSS = Number((calc.salarioBase - calc.descontoFaltas).toFixed(2));
-        
-        conteudoLayout += `${func.inss_numero.replace('INSS-', '')};${func.nuit};${func.nome.toUpperCase()};${salarioTributavelINSS};${calc.diasFaltas}\n`;
+        conteudoLayout += `${(func.inss_numero || '').replace('INSS-', '')};${func.nuit || ''};${func.nome.toUpperCase()};${salarioTributavelINSS};${calc.diasFaltas}\n`;
       });
 
       const nomeArquivoSissmo = `sissmo_folha_${activePeriod}.csv`;
@@ -3729,9 +4004,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       stream.pipe(res);
 
       stream.on('end', () => {
-        fs.unlink(caminhoArquivo, (err) => {
-          if (err) console.error('Erro ao deletar arquivo temporário do SISSMO:', err);
-        });
+        fs.unlink(caminhoArquivo, () => {});
       });
     } catch (error: any) {
       console.error('Erro ao gerar arquivo do SISSMO:', error);
@@ -3742,9 +4015,10 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5.1 Exportação de Mapa de Salários em PDF
   app.get('/api/exportar/mapa-pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
-      
-      const listaCalculos = employees.map(emp => {
+
+      const listaCalculos = ctx.company.employees.map(emp => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
         return {
           nomeTrabalhador: emp.nome,
@@ -3762,7 +4036,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const nomeFicheiro = `mapa_salarios_${activePeriod.replace(/\s+/g, '_')}_${Date.now()}.pdf`;
       const caminhoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      await criarMapaSalariosPDF(empresaAtual, listaCalculos, activePeriod, caminhoCompleto);
+      await criarMapaSalariosPDF(buildCompanyDataView(ctx.company), listaCalculos, activePeriod, caminhoCompleto);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=${nomeFicheiro}`);
@@ -3770,9 +4044,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const stream = fs.createReadStream(caminhoCompleto);
       stream.pipe(res);
       stream.on('end', () => {
-        fs.unlink(caminhoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar PDF temporário de mapa de salários:', err);
-        });
+        fs.unlink(caminhoCompleto, () => {});
       });
     } catch (err: any) {
       console.error('Erro ao emitir PDF de mapa de salários:', err);
@@ -3783,16 +4055,17 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5.1.1 Exportação de Guia de Recolhimento INSS em PDF (SISSMO Moçambique)
   app.get('/api/exportar/guia-inss-pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
       const jurosMora = Number(req.query.juros) || 0;
       const multas = Number(req.query.multas) || 0;
 
-      let totalTrabalhadores = employees.length;
+      const totalTrabalhadores = ctx.company.employees.length;
       let totalRemuneracoes = 0;
       let contribuicaoTrabalhadores = 0;
       let contribuicaoPatronal = 0;
 
-      employees.forEach(emp => {
+      ctx.company.employees.forEach(emp => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
         const salarioTributavel = Number((calc.salarioBase - calc.descontoFaltas).toFixed(2));
         totalRemuneracoes += salarioTributavel;
@@ -3800,18 +4073,16 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
         contribuicaoPatronal += Number(calc.inssEmpresa.toFixed(2));
       });
 
-      // Evitar dízimas flutuantes
       totalRemuneracoes = Number(totalRemuneracoes.toFixed(2));
       contribuicaoTrabalhadores = Number(contribuicaoTrabalhadores.toFixed(2));
       contribuicaoPatronal = Number(contribuicaoPatronal.toFixed(2));
       const totalContribuicoes = Number((contribuicaoTrabalhadores + contribuicaoPatronal).toFixed(2));
       const totalPagar = Number((totalContribuicoes + jurosMora + multas).toFixed(2));
 
-      // Determinação da data limite com base no mês do período
       const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
       let mesSeguinte = "mês seguinte";
       let anoSeguinte = "2026";
-      
+
       const parts = activePeriod.trim().split(' ');
       if (parts.length >= 2) {
         const mesAtual = parts[0];
@@ -3828,8 +4099,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       }
       const dataLimite = `10 de ${mesSeguinte} de ${anoSeguinte}`;
 
-      // Geração determinística de referência SISSMO para o período/empresa
-      const hashNuit = (empresaAtual.nuit || '402302399').replace(/[^\d]/g, '');
+      const hashNuit = (ctx.company.nuit || '402302399').replace(/[^\d]/g, '');
       const hashPeriodo = activePeriod.replace(/[^\d]/g, '') || '2026';
       const hashRandom = Math.floor(1000 + Math.random() * 9000).toString();
       const referenciaPagamento = `90244 ${hashNuit.substring(0,4)} ${hashPeriodo.substring(0,4)} ${hashRandom}`;
@@ -3838,7 +4108,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const caminhoCompleto = path.join(tmpDir, nomeFicheiro);
 
       await criarGuiaRecolhimentoInssPDF(
-        empresaAtual,
+        buildCompanyDataView(ctx.company),
         {
           periodo: activePeriod,
           totalTrabalhadores,
@@ -3861,9 +4131,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const stream = fs.createReadStream(caminhoCompleto);
       stream.pipe(res);
       stream.on('end', () => {
-        fs.unlink(caminhoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar PDF temporário de guia de INSS:', err);
-        });
+        fs.unlink(caminhoCompleto, () => {});
       });
     } catch (err: any) {
       console.error('Erro ao emitir PDF de guia INSS:', err);
@@ -3874,12 +4142,13 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
   // 5.1.2 Exportação de Guia de Recolhimento IRPS M/19 em PDF (DGI Moçambique)
   app.get('/api/exportar/guia-irps-pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
       const jurosCompensatorios = Number(req.query.juros) || 0;
 
       let valorTrabalhoDependente = 0;
 
-      employees.forEach(emp => {
+      ctx.company.employees.forEach(emp => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
         valorTrabalhoDependente += Number(calc.irpsConstatado.toFixed(2));
       });
@@ -3887,11 +4156,10 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       valorTrabalhoDependente = Number(valorTrabalhoDependente.toFixed(2));
       const totalPagar = Number((valorTrabalhoDependente + jurosCompensatorios).toFixed(2));
 
-      // Determinação da data limite com base no mês do período (dia 20 do mês seguinte)
       const meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
       let mesSeguinte = "mês seguinte";
       let anoSeguinte = "2026";
-      
+
       const parts = activePeriod.trim().split(' ');
       if (parts.length >= 2) {
         const mesAtual = parts[0];
@@ -3908,8 +4176,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       }
       const dataLimite = `20 de ${mesSeguinte} de ${anoSeguinte}`;
 
-      // Geração determinística de referência para o período/empresa
-      const hashNuit = (empresaAtual.nuit || '402302399').replace(/[^\d]/g, '');
+      const hashNuit = (ctx.company.nuit || '402302399').replace(/[^\d]/g, '');
       const hashPeriodo = activePeriod.replace(/[^\d]/g, '') || '2026';
       const hashRandom = Math.floor(1000 + Math.random() * 9000).toString();
       const referenciaPagamento = `80133 ${hashNuit.substring(0,4)} ${hashPeriodo.substring(0,4)} ${hashRandom}`;
@@ -3918,7 +4185,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const caminhoCompleto = path.join(tmpDir, nomeFicheiro);
 
       await criarGuiaIrpsPDF(
-        empresaAtual,
+        buildCompanyDataView(ctx.company),
         {
           periodo: activePeriod,
           valorTrabalhoDependente,
@@ -3936,9 +4203,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
       const stream = fs.createReadStream(caminhoCompleto);
       stream.pipe(res);
       stream.on('end', () => {
-        fs.unlink(caminhoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar PDF temporário de guia de IRPS:', err);
-        });
+        fs.unlink(caminhoCompleto, () => {});
       });
     } catch (err: any) {
       console.error('Erro ao emitir PDF de guia IRPS:', err);
@@ -4573,6 +4838,7 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
 
   app.get('/api/relatorios/exportar-pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const periodo = (req.query.periodo as string) || 'Geral';
       const tipo = (req.query.tipo as string) || 'custos_despesas';
 
@@ -4592,7 +4858,7 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
       if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
       const filePath = path.join(tempDir, `relatorio_${tipo}_${Date.now()}.pdf`);
-      await criarRelatorioAgrupadoERPPDF(empresaAtual, tipo, periodo, dados, filePath);
+      await criarRelatorioAgrupadoERPPDF(buildCompanyDataView(ctx.company), tipo, periodo, dados, filePath);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="relatorio_${tipo}_${periodo.replace(/\s+/g, '_')}.pdf"`);
@@ -4666,15 +4932,14 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
   // 5.2 Exportação de Mapa de Salários em Excel (CSV formatado)
   app.get('/api/exportar/mapa-excel', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const activePeriod = (req.query.periodo as string) || getCurrentPeriod();
-      
-      // UTF-8 BOM for Portuguese Excel
+
       let csvContent = "\uFEFF";
       csvContent += "Nome do Trabalhador;Cargo / Função;Salário Base (MZN);Desconto Faltas (MZN);INSS Trabalhador (3%) (MZN);IRPS Retido (MZN);Desconto Vales (MZN);INSS Patronal (4%) (MZN);Salário Líquido (MZN)\n";
 
-      employees.forEach(emp => {
+      ctx.company.employees.forEach(emp => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
-        
         const row = [
           emp.nome.toUpperCase(),
           emp.cargo,
@@ -4686,7 +4951,6 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
           calc.inssEmpresa.toFixed(2),
           calc.salarioLiquido.toFixed(2)
         ];
-        
         csvContent += row.join(';') + '\n';
       });
 
@@ -4701,9 +4965,7 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
       const stream = fs.createReadStream(caminhoCompleto);
       stream.pipe(res);
       stream.on('end', () => {
-        fs.unlink(caminhoCompleto, (err) => {
-          if (err) console.error('Erro ao deletar arquivo temporário de mapa de salários:', err);
-        });
+        fs.unlink(caminhoCompleto, () => {});
       });
     } catch (err: any) {
       console.error('Erro ao emitir Excel de mapa de salários:', err);
@@ -4714,10 +4976,11 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
   // 5.3 Exportação de Histórico de Operações em PDF
   app.get('/api/exportar/historico-pdf', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const nomeFicheiro = `relatorio_historico_financeiro_${Date.now()}.pdf`;
       const caminhoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      await criarRelatorioHistoricoPDF(empresaAtual, historicoOperacoesEmpresa, caminhoCompleto);
+      await criarRelatorioHistoricoPDF(buildCompanyDataView(ctx.company), ctx.historico, caminhoCompleto);
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=${nomeFicheiro}`);
@@ -4725,9 +4988,7 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
       const stream = fs.createReadStream(caminhoCompleto);
       stream.pipe(res);
       stream.on('end', () => {
-        fs.unlink(caminhoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar PDF temporário de histórico financeiro:', err);
-        });
+        fs.unlink(caminhoCompleto, () => {});
       });
     } catch (err: any) {
       console.error('Erro ao emitir PDF de histórico financeiro:', err);
@@ -4738,11 +4999,11 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
   // 5.4 Exportação de Histórico de Operações em Excel (CSV formatado)
   app.get('/api/exportar/historico-excel', (req: Request, res: Response) => {
     try {
-      // UTF-8 BOM for Portuguese Excel
+      const ctx = resolveTenantContext(req);
       let csvContent = "\uFEFF";
       csvContent += "Mês / Ano;Trabalhadores Ativos;Líquido Pago (MZN);IRPS Retido (MZN);INSS Retido (3%+4%) (MZN);Taxas Fintech (MZN)\n";
 
-      historicoOperacoesEmpresa.forEach(op => {
+      ctx.historico.forEach(op => {
         const row = [
           `${op.mes} / ${op.ano || 2026}`,
           op.total_trabalhadores || 0,
@@ -4994,12 +5255,19 @@ Host: https://clickpay.co.mz
 
   // API FINTECH: CONSULTAR SALDO DA CARTEIRA DA EMPRESA
   app.get('/api/fintech/carteira', (req: Request, res: Response) => {
-    res.json(carteiraEmpresaFintech);
+    const ctx = resolveTenantContext(req);
+    res.json({
+      empresa_id: ctx.companyId,
+      saldo_disponivel_mz: Number((walletsByCompany[ctx.companyId] ?? 0).toFixed(2)),
+      moeda: 'MZN',
+      ultima_atualizacao: new Date().toISOString()
+    });
   });
 
   // API FINTECH: CONSULTAR CONTAS BANCÁRIAS DA EMPRESA (OCULTA SENHA PARA SEGURANÇA)
   app.get('/api/fintech/contas-bancarias', (req: Request, res: Response) => {
-    const safeAccounts = contasBancariasEmpresa.map(c => ({
+    const ctx = resolveTenantContext(req);
+    const safeAccounts = ctx.bankAccounts.map((c: any) => ({
       banco: c.banco,
       numero_conta: c.numero_conta,
       saldo: Number(c.saldo),
@@ -5011,6 +5279,7 @@ Host: https://clickpay.co.mz
   // API FINTECH: CADASTRAR NOVA CONTA BANCÁRIA DA EMPRESA (PESSOAL / REAL)
   app.post('/api/fintech/contas-bancarias', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { banco, numero_conta, saldo, senha } = req.body;
       if (!banco || !numero_conta || !senha) {
         return res.status(400).json({ erro: 'Preencha o Nome do Banco, Número de Conta e defina uma Senha de Acesso.' });
@@ -5021,21 +5290,24 @@ Host: https://clickpay.co.mz
         return res.status(400).json({ erro: 'O Saldo inicial informado é inválido.' });
       }
 
-      const existe = contasBancariasEmpresa.some(c => c.numero_conta === numero_conta);
+      const existe = ctx.bankAccounts.some((c: any) => c.numero_conta === numero_conta);
       if (existe) {
         return res.status(400).json({ erro: 'Já existe uma conta bancária cadastrada com este número.' });
       }
 
-      contasBancariasEmpresa.push({
+      ctx.bankAccounts.push({
+        id: `cta_${Date.now()}`,
         banco,
         numero_conta,
+        nib: '',
         saldo: saldoNum,
         senha: String(senha).trim()
       });
 
-      console.log(`[FINTECH] Nova conta real cadastrada pelo cliente: ${banco} (${numero_conta}) com saldo ${saldoNum} MT`);
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
-      const safeAccounts = contasBancariasEmpresa.map(c => ({
+      const safeAccounts = ctx.bankAccounts.map((c: any) => ({
         banco: c.banco,
         numero_conta: c.numero_conta,
         saldo: Number(c.saldo),
@@ -5055,15 +5327,18 @@ Host: https://clickpay.co.mz
   // API FINTECH: APAGAR/REMOVER CONTA BANCÁRIA DA EMPRESA
   app.delete('/api/fintech/contas-bancarias/:numero_conta', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { numero_conta } = req.params;
-      const index = contasBancariasEmpresa.findIndex(c => c.numero_conta === numero_conta);
+      const index = ctx.bankAccounts.findIndex((c: any) => c.numero_conta === numero_conta);
       if (index === -1) {
         return res.status(404).json({ erro: 'Conta bancária não encontrada.' });
       }
 
-      contasBancariasEmpresa.splice(index, 1);
+      ctx.bankAccounts.splice(index, 1);
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
-      const safeAccounts = contasBancariasEmpresa.map(c => ({
+      const safeAccounts = ctx.bankAccounts.map((c: any) => ({
         banco: c.banco,
         numero_conta: c.numero_conta,
         saldo: Number(c.saldo),
@@ -5083,6 +5358,7 @@ Host: https://clickpay.co.mz
   // API FINTECH: CARREGAR SALDO NA CARTEIRA DA EMPRESA (COM SENHA DE SEGURANÇA)
   app.post('/api/fintech/recarregar', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { valor, banco, senha } = req.body;
       const valorNum = Number(valor);
       if (isNaN(valorNum) || valorNum <= 0) {
@@ -5090,31 +5366,31 @@ Host: https://clickpay.co.mz
       }
 
       if (banco) {
-        const conta = contasBancariasEmpresa.find(c => 
-          c.numero_conta === banco || 
+        const conta = ctx.bankAccounts.find((c: any) =>
+          c.numero_conta === banco ||
           c.banco.toLowerCase() === banco.toLowerCase()
         );
         if (!conta) {
-          return res.status(444).json({ erro: `Conta bancária especificada não foi encontrada.` });
+          return res.status(404).json({ erro: `Conta bancária especificada não foi encontrada.` });
         }
 
-        // Validar a senha cadastrada
         if (conta.senha && String(senha).trim() !== conta.senha) {
           return res.status(403).json({ erro: 'Acesso Recusado: Senha/PIN de segurança incorreto para esta conta bancária corporativa.' });
         }
 
         if (conta.saldo < valorNum) {
-          return res.status(400).json({ 
-            erro: `Saldo insuficiente na conta do ${conta.banco}. Saldo disponível na conta bancária: ${conta.saldo.toLocaleString('pt-MZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MT.` 
+          return res.status(400).json({
+            erro: `Saldo insuficiente na conta do ${conta.banco}. Saldo disponível na conta bancária: ${conta.saldo.toLocaleString('pt-MZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MT.`
           });
         }
         conta.saldo -= valorNum;
       }
 
-      carteiraEmpresaFintech.saldo_disponivel_mz += valorNum;
-      console.log(`[FINTECH] Recarga efetuada com sucesso de ${valorNum} MT do banco ${banco || 'Desconhecido'}. Novo saldo: ${carteiraEmpresaFintech.saldo_disponivel_mz} MT`);
-      
-      const safeAccounts = contasBancariasEmpresa.map(c => ({
+      walletsByCompany[ctx.companyId] = (walletsByCompany[ctx.companyId] ?? 0) + valorNum;
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
+
+      const safeAccounts = ctx.bankAccounts.map((c: any) => ({
         banco: c.banco,
         numero_conta: c.numero_conta,
         saldo: Number(c.saldo),
@@ -5124,7 +5400,7 @@ Host: https://clickpay.co.mz
       return res.json({
         sucesso: true,
         mensagem: 'Carteira recarregada com sucesso!',
-        saldo_disponivel_mz: Number(carteiraEmpresaFintech.saldo_disponivel_mz.toFixed(2)),
+        saldo_disponivel_mz: Number((walletsByCompany[ctx.companyId] ?? 0).toFixed(2)),
         contas_bancarias: safeAccounts
       });
     } catch (e) {
@@ -5135,14 +5411,14 @@ Host: https://clickpay.co.mz
   // API FINTECH: PROCESSAR PAGAMENTO COM DÉBITO DIRETO NO BANCO DA EMPRESA
   app.post('/api/fintech/liquidar-via-carteira', async (req: Request, res: Response) => {
     try {
-      const { empresa_id, listaTrabalhadores, banco_origem } = req.body;
-      const taxaPorTrabalhador = 35.00; // A sua comissão fintech por funcionário de 35.00 MT para viabilidade financeira
+      const ctx = resolveTenantContext(req);
+      const { listaTrabalhadores, banco_origem } = req.body;
+      const taxaPorTrabalhador = 35.00;
 
       if (!listaTrabalhadores || listaTrabalhadores.length === 0) {
         return res.status(400).json({ erro: 'Lista de transferência em lote vazia.' });
       }
 
-      // 1. Calcular o custo total da operação (Salários Líquidos + Taxas da Startup)
       let totalSalariosLiquidos = 0;
       listaTrabalhadores.forEach((t: any) => {
         totalSalariosLiquidos += Number(t.salarioLiquido) || 0;
@@ -5151,8 +5427,7 @@ Host: https://clickpay.co.mz
       const totalTaxasPlataforma = listaTrabalhadores.length * taxaPorTrabalhador;
       const custoTotalOperacao = totalSalariosLiquidos + totalTaxasPlataforma;
 
-      // 2. VALIDAÇÃO BANCÁRIA DIRETA (Sem saldo pré-pago necessário)
-      const contaBanco = contasBancariasEmpresa.find(c => c.numero_conta === banco_origem) || contasBancariasEmpresa[0];
+      const contaBanco = ctx.bankAccounts.find((c: any) => c.numero_conta === banco_origem) || ctx.bankAccounts[0];
       if (contaBanco) {
         if (contaBanco.saldo < custoTotalOperacao) {
           return res.status(400).json({
@@ -5161,11 +5436,9 @@ Host: https://clickpay.co.mz
             detalhes: `A conta bancária corporativa do ${contaBanco.banco} possui saldo de apenas ${contaBanco.saldo.toLocaleString('pt-MZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MT, insuficiente para cobrir o débito total de ${custoTotalOperacao.toLocaleString('pt-MZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MT.`
           });
         }
-        // Débito direto na conta bancária do cliente
         contaBanco.saldo -= custoTotalOperacao;
       }
 
-      // Disparo da API B2C para as operadoras (M-Pesa / e-Mola / mKesh) via mobileMoneyService
       const detalheTransacoes = await Promise.all(
         listaTrabalhadores.map(async (t: any) => {
           const phone = t.telefone || t.carteira_movel || '841234567';
@@ -5187,9 +5460,7 @@ Host: https://clickpay.co.mz
           };
         })
       );
-      console.log(`[FINTECH] Lote liquidado (${detalheTransacoes.length} transferências). Débito de ${custoTotalOperacao} MT efetuado diretamente na conta bancária.`);
 
-      // 4. Gravar operação no histórico para que apareça de forma 100% dinâmica na Análise de Períodos
       try {
         const activePeriod = req.body.periodo || getCurrentPeriod();
         const parts = activePeriod.split(' ');
@@ -5199,24 +5470,23 @@ Host: https://clickpay.co.mz
         let totalIRPS = 0;
         let totalINSS = 0;
         listaTrabalhadores.forEach((t: any) => {
-          const emp = employees.find(e => e.id === t.id);
+          const emp = ctx.company.employees.find(e => e.id === t.id);
           if (emp) {
             const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
             totalIRPS += calc.irpsConstatado;
-            totalINSS += (calc.inssTrabalhador + calc.inssEmpresa); // Total INSS (3% + 4%)
+            totalINSS += (calc.inssTrabalhador + calc.inssEmpresa);
           }
         });
 
-        // Find if we already have this month in historicoOperacoesEmpresa
-        const existingIdx = historicoOperacoesEmpresa.findIndex(op => op.mes.toLowerCase() === mesNome.toLowerCase() && op.ano === anoNum);
+        const existingIdx = ctx.historico.findIndex((op: any) => op.mes.toLowerCase() === mesNome.toLowerCase() && op.ano === anoNum);
         if (existingIdx !== -1) {
-          historicoOperacoesEmpresa[existingIdx].liquido_pago += totalSalariosLiquidos;
-          historicoOperacoesEmpresa[existingIdx].irps_retido += totalIRPS;
-          historicoOperacoesEmpresa[existingIdx].inss_retido += totalINSS;
-          historicoOperacoesEmpresa[existingIdx].taxas_fintech += totalTaxasPlataforma;
-          historicoOperacoesEmpresa[existingIdx].total_trabalhadores = Math.max(historicoOperacoesEmpresa[existingIdx].total_trabalhadores, listaTrabalhadores.length);
+          ctx.historico[existingIdx].liquido_pago += totalSalariosLiquidos;
+          ctx.historico[existingIdx].irps_retido += totalIRPS;
+          ctx.historico[existingIdx].inss_retido += totalINSS;
+          ctx.historico[existingIdx].taxas_fintech += totalTaxasPlataforma;
+          ctx.historico[existingIdx].total_trabalhadores = Math.max(ctx.historico[existingIdx].total_trabalhadores, listaTrabalhadores.length);
         } else {
-          historicoOperacoesEmpresa.push({
+          ctx.historico.push({
             data: new Date().toISOString().split('T')[0],
             mes: mesNome,
             ano: anoNum,
@@ -5228,9 +5498,8 @@ Host: https://clickpay.co.mz
           });
         }
 
-        // Adicionar registros detalhados para a Auditoria Interna de Remunerações
         listaTrabalhadores.forEach((t: any) => {
-          const emp = employees.find(e => e.id === t.id);
+          const emp = ctx.company.employees.find(e => e.id === t.id);
           let itemINSS = 0;
           let itemIRPS = 0;
           if (emp) {
@@ -5238,8 +5507,9 @@ Host: https://clickpay.co.mz
             itemINSS = calc.inssTrabalhador + calc.inssEmpresa;
             itemIRPS = calc.irpsConstatado;
           }
-          logsPagamentosGlobais.push({
-            id_transacao: `TX-${Math.floor(10000 + Math.random() * 90000)}`,
+          const txRef = `TX-${Math.floor(10000 + Math.random() * 90000)}`;
+          ctx.auditLogs.push({
+            id_transacao: txRef,
             data: new Date().toISOString().split('T')[0],
             funcionario: t.nome || emp?.nome || 'Trabalhador',
             carteira: t.telefone || t.carteira_movel || emp?.carteira_movel || '841234567',
@@ -5249,10 +5519,24 @@ Host: https://clickpay.co.mz
             status: "LIQUIDADO",
             periodo: activePeriod
           });
+          ctx.company.paymentLogs.unshift({
+            id: `tx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            timestamp: new Date().toISOString(),
+            employeeId: emp?.id || t.id || 'temp',
+            employeeName: t.nome || emp?.nome || 'Trabalhador',
+            carteira_movel: t.telefone || t.carteira_movel || emp?.carteira_movel || '',
+            salarioLiquido: Number(t.salarioLiquido) || 0,
+            status: 'Liquidado',
+            periodo: activePeriod,
+            txId: txRef
+          });
         });
       } catch (histErr) {
-        console.error("Erro ao registrar no historicoOperacoesEmpresa:", histErr);
+        console.error("Erro ao registrar no histórico do tenant:", histErr);
       }
+
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
       return res.json({
         sucesso: true,
@@ -5260,11 +5544,10 @@ Host: https://clickpay.co.mz
         resumoCarteira: {
           custoSalariosFuncionarios: totalSalariosLiquidos,
           taxasDescontadasPlataforma: totalTaxasPlataforma,
-          saldoRemanescenteNaPlataforma: Number(carteiraEmpresaFintech.saldo_disponivel_mz.toFixed(2))
+          saldoRemanescenteNaPlataforma: Number((walletsByCompany[ctx.companyId] ?? 0).toFixed(2))
         },
         detalheTransacoes
       });
-
     } catch (error) {
       console.error(error);
       res.status(500).json({ erro: 'Erro interno ao processar débito em saldo.' });
@@ -5274,7 +5557,8 @@ Host: https://clickpay.co.mz
   // API FINTECH: AGENTE PILOTO AUTOMÁTICO COMPLETO (AUTO-PILOT)
   app.post('/api/fintech/autopilot/executar', async (req: Request, res: Response) => {
     try {
-      const { periodo, bancoOrigem, autoRecharge } = req.body;
+      const ctx = resolveTenantContext(req);
+      const { periodo, bancoOrigem } = req.body;
       const activePeriod = periodo || getCurrentPeriod();
       const parts = activePeriod.split(' ');
       const mesNome = parts[0] || 'Julho';
@@ -5283,25 +5567,23 @@ Host: https://clickpay.co.mz
       const logsAuditoria: string[] = [];
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 🔍 Iniciando análise do Piloto Automático para o período: ${activePeriod}.`);
 
-      if (employees.length === 0) {
+      if (ctx.company.employees.length === 0) {
         return res.status(400).json({ erro: 'Nenhum funcionário cadastrado para o processamento automático.' });
       }
 
-      logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 👥 Localizados ${employees.length} colaboradores ativos para processamento.`);
+      logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 👥 Localizados ${ctx.company.employees.length} colaboradores ativos para processamento.`);
 
-      // 1. Calcular salários líquidos, reter taxas, e abater vales pendentes
       let totalSalariosLiquidos = 0;
       let totalIRPS = 0;
       let totalINSS = 0;
       const trabalhadoresAPagar: any[] = [];
 
-      employees.forEach((emp: any) => {
+      ctx.company.employees.forEach((emp: any) => {
         const calc = calcularFolhaSalario(emp.salario_base, 0, emp.numero_dependentes);
         const itemINSS = calc.inssTrabalhador + calc.inssEmpresa;
         const itemIRPS = calc.irpsConstatado;
 
-        // Verificar vales aprovados pendentes de desconto
-        const valesDoMes = baseDadosVales.filter(v => v.funcionario_id === emp.id && v.status === "APROVADO_E_TRANSFERIDO");
+        const valesDoMes = ctx.company.vales.filter(v => v.funcionario_id === emp.id && v.status === "APROVADO_E_TRANSFERIDO");
         const totalDescontoVales = valesDoMes.reduce((soma, v) => soma + v.valor, 0);
 
         const liquidoSemVales = emp.salario_base - calc.inssTrabalhador - calc.irpsConstatado;
@@ -5326,18 +5608,15 @@ Host: https://clickpay.co.mz
       });
 
       const taxaPorTrabalhador = 35.00;
-      const totalTaxasPlataforma = employees.length * taxaPorTrabalhador;
+      const totalTaxasPlataforma = ctx.company.employees.length * taxaPorTrabalhador;
       const custoTotalOperacao = totalSalariosLiquidos + totalTaxasPlataforma;
 
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 📊 Resumo financeiro calculado: Salários Líquidos = ${totalSalariosLiquidos.toLocaleString('pt-MZ')} MT | Custos de Envio = ${totalTaxasPlataforma.toLocaleString('pt-MZ')} MT | Débito Total Necessário = ${custoTotalOperacao.toLocaleString('pt-MZ')} MT.`);
 
-      // 2. Débito bancário direto (Sem saldo pré-pago necessário)
-      let autoRechargeValue = 0;
-      let contaBancoNome = "Nenhum";
-
-      let contaBanco = contasBancariasEmpresa.find(c => c.numero_conta === bancoOrigem);
-      if (!contaBanco && contasBancariasEmpresa.length > 0) {
-        contaBanco = contasBancariasEmpresa[0];
+      const autoRechargeValue = 0;
+      let contaBanco = ctx.bankAccounts.find((c: any) => c.numero_conta === bancoOrigem);
+      if (!contaBanco && ctx.bankAccounts.length > 0) {
+        contaBanco = ctx.bankAccounts[0];
       }
 
       if (!contaBanco) {
@@ -5356,22 +5635,20 @@ Host: https://clickpay.co.mz
         });
       }
 
-      // Realizar o débito direto
       contaBanco.saldo -= custoTotalOperacao;
-      contaBancoNome = `${contaBanco.banco} (${contaBanco.numero_conta})`;
-      
+      const contaBancoNome = `${contaBanco.banco} (${contaBanco.numero_conta})`;
+
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 🏦 [DÉBITO BANCÁRIO DIRETO] Processado com sucesso da conta ${contaBancoNome} de forma 100% autónoma.`);
 
-      // 4. Gravar operação no histórico operacional
-      const existingIdx = historicoOperacoesEmpresa.findIndex(op => op.mes.toLowerCase() === mesNome.toLowerCase() && op.ano === anoNum);
+      const existingIdx = ctx.historico.findIndex((op: any) => op.mes.toLowerCase() === mesNome.toLowerCase() && op.ano === anoNum);
       if (existingIdx !== -1) {
-        historicoOperacoesEmpresa[existingIdx].liquido_pago += totalSalariosLiquidos;
-        historicoOperacoesEmpresa[existingIdx].irps_retido += totalIRPS;
-        historicoOperacoesEmpresa[existingIdx].inss_retido += totalINSS;
-        historicoOperacoesEmpresa[existingIdx].taxas_fintech += totalTaxasPlataforma;
-        historicoOperacoesEmpresa[existingIdx].total_trabalhadores = Math.max(historicoOperacoesEmpresa[existingIdx].total_trabalhadores, employees.length);
+        ctx.historico[existingIdx].liquido_pago += totalSalariosLiquidos;
+        ctx.historico[existingIdx].irps_retido += totalIRPS;
+        ctx.historico[existingIdx].inss_retido += totalINSS;
+        ctx.historico[existingIdx].taxas_fintech += totalTaxasPlataforma;
+        ctx.historico[existingIdx].total_trabalhadores = Math.max(ctx.historico[existingIdx].total_trabalhadores, ctx.company.employees.length);
       } else {
-        historicoOperacoesEmpresa.push({
+        ctx.historico.push({
           data: new Date().toISOString().split('T')[0],
           mes: mesNome,
           ano: anoNum,
@@ -5379,14 +5656,13 @@ Host: https://clickpay.co.mz
           irps_retido: totalIRPS,
           inss_retido: totalINSS,
           taxas_fintech: totalTaxasPlataforma,
-          total_trabalhadores: employees.length
+          total_trabalhadores: ctx.company.employees.length
         });
       }
 
-      // 5. Marcar os vales descontados como descontados e disparar transações B2C nas operadoras móveis
       for (const trab of trabalhadoresAPagar) {
         const { emp, liquidoFinal, valesDoMes, inss, irps } = trab;
-        
+
         valesDoMes.forEach((v: any) => {
           v.status = "DESCONTADO_FOLHA";
         });
@@ -5398,8 +5674,9 @@ Host: https://clickpay.co.mz
           reference: `AUTO-${activePeriod.replace(/\s+/g, '')}`
         });
 
-        logsPagamentosGlobais.push({
-          id_transacao: b2cTx.operatorTransactionId || b2cTx.id,
+        const txId = b2cTx.operatorTransactionId || b2cTx.id;
+        ctx.auditLogs.push({
+          id_transacao: txId,
           data: new Date().toISOString().split('T')[0],
           funcionario: emp.nome,
           carteira: emp.carteira_movel || '841234567',
@@ -5409,15 +5686,29 @@ Host: https://clickpay.co.mz
           status: b2cTx.status === 'FALHOU' ? 'FALHOU' : 'LIQUIDADO',
           periodo: activePeriod
         });
+        ctx.company.paymentLogs.unshift({
+          id: `tx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          timestamp: new Date().toISOString(),
+          employeeId: emp.id,
+          employeeName: emp.nome,
+          carteira_movel: emp.carteira_movel || '',
+          salarioLiquido: liquidoFinal,
+          status: b2cTx.status === 'FALHOU' ? 'Erro' : 'Liquidado',
+          periodo: activePeriod,
+          txId
+        });
 
         const modeTag = b2cTx.simulated ? 'SIMULAÇÃO' : b2cTx.mode;
-        logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 🚀 [${b2cTx.operator} · ${modeTag}] Transferência B2C de ${liquidoFinal.toLocaleString('pt-MZ')} MT para ${emp.carteira_movel} (${emp.nome}) — Ref: ${b2cTx.operatorTransactionId || b2cTx.id}.`);
+        logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 🚀 [${b2cTx.operator} · ${modeTag}] Transferência B2C de ${liquidoFinal.toLocaleString('pt-MZ')} MT para ${emp.carteira_movel} (${emp.nome}) — Ref: ${txId}.`);
       }
+
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] 📄 [PDF COMPILATION] Todos os recibos salariais em PDF correspondentes foram gerados de forma autónoma no repositório de arquivos.`);
       logsAuditoria.push(`[${new Date().toLocaleTimeString('pt-MZ')}] ✅ [COMPLETE] Ciclo de liquidação em piloto automático concluído com sucesso total para o período de ${activePeriod}.`);
 
-      const safeAccounts = contasBancariasEmpresa.map(c => ({
+      const safeAccounts = ctx.bankAccounts.map((c: any) => ({
         banco: c.banco,
         numero_conta: c.numero_conta,
         saldo: Number(c.saldo),
@@ -5432,11 +5723,10 @@ Host: https://clickpay.co.mz
         totalPago: totalSalariosLiquidos,
         taxas: totalTaxasPlataforma,
         custoTotalOperacao,
-        novoSaldoCarteira: Number(carteiraEmpresaFintech.saldo_disponivel_mz.toFixed(2)),
+        novoSaldoCarteira: Number((walletsByCompany[ctx.companyId] ?? 0).toFixed(2)),
         contasBancarias: safeAccounts,
         logsAuditoria
       });
-
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ erro: error.message || 'Erro interno ao processar o Piloto Automático.' });
@@ -5620,78 +5910,59 @@ Host: https://clickpay.co.mz
   // =========================================================================
   app.get('/api/regulatorio/exportar-sissmo', async (req: Request, res: Response) => {
     try {
-      // Usar colaboradores reais do ERP se existirem, caso contrário usar dados simulados recomendados
-      let payrollMes: any[] = [];
-      if (employees && employees.length > 0) {
-        payrollMes = employees.map(emp => {
-          // Remover qualquer prefixo 'INSS-' ou similar para limpar o número do INSS
-          const cleanInss = (emp.inss_numero || '77654321').replace(/[^\d]/g, '');
-          return {
-            numero_inss: cleanInss || '77654321',
-            nuit: emp.nuit || '100234567',
-            nome: emp.nome,
-            bruto: emp.salario_base,
-            faltas: 0 // Assume 0 por defeito na exportação rápida geral
-          };
-        });
-      } else {
-        payrollMes = [
-          { numero_inss: "77654321", nuit: "100234567", nome: "Arnaldo Mangue", bruto: 30000.00, faltas: 0 },
-          { numero_inss: "88943210", nuit: "100987654", nome: "Maria Chirindza", bruto: 15000.00, faltas: 1 }
-        ];
-      }
+      const ctx = resolveTenantContext(req);
+      const payrollMes = (ctx.company.employees || []).map(emp => {
+        const cleanInss = (emp.inss_numero || '').replace(/[^\d]/g, '');
+        return {
+          numero_inss: cleanInss || 'Pendente',
+          nuit: emp.nuit || '',
+          nome: emp.nome,
+          bruto: emp.salario_base,
+          faltas: 0
+        };
+      });
 
-      // Cabeçalho oficial do arquivo delimitado por ponto e vírgula exigido pelo portal SISSMO
       let conteudoCSV = "N_INSS;NUIT_FUNCIONARIO;NOME_TRABALHADOR;REMUNERACAO_SUJEITA_INSS;DIAS_FALTAS\n";
 
       payrollMes.forEach(func => {
-        // Calcula o bruto real remanescente sujeito ao INSS
         const descontoFaltas = (func.bruto / 30) * func.faltas;
         const brutoSujeitoINSS = (func.bruto - descontoFaltas).toFixed(2);
-
-        // Monta a linha do layout
         conteudoCSV += `${func.numero_inss};${func.nuit};${func.nome.toUpperCase()};${brutoSujeitoINSS};${func.faltas}\n`;
       });
 
-      const nomeFicheiro = `sissmo_payroll_tech_mz.csv`;
+      const nomeFicheiro = `sissmo_${ctx.companyId}.csv`;
       const caminhoTemporario = path.join(tmpDir, nomeFicheiro);
 
-      // Grava o arquivo físico no disco do servidor
       fs.writeFileSync(caminhoTemporario, conteudoCSV, 'utf-8');
 
-      // Configura o cabeçalho HTTP para download forçado do CSV no navegador do cliente
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename=${nomeFicheiro}`);
 
       const streamLeitura = fs.createReadStream(caminhoTemporario);
       streamLeitura.pipe(res);
 
-      // Apaga o arquivo do servidor imediatamente após o download para proteção de dados
       streamLeitura.on('end', () => {
-        fs.unlink(caminhoTemporario, (err) => {
-          if (err) console.error('Erro ao limpar arquivo temporário SISSMO:', err);
-        });
+        fs.unlink(caminhoTemporario, () => {});
       });
-
     } catch (error) {
       res.status(500).json({ erro: 'Erro ao gerar layout de exportação para o SISSMO.' });
     }
   });
 
   // =========================================================================
-  // 3. GESTÃO DE ADIANTAMENTOS E VALES AUTOMATIZADOS (INTEGRAÇÃO COMPLETA)
+  // 3. GESTÃO DE ADIANTAMENTOS E VALES AUTOMATIZADOS (TENANT-ISOLATED)
   // =========================================================================
 
-  // Rota A: Lançar e aprovar um vale a meio do mês (Dispara dinheiro real)
+  // Rota A: Lançar e aprovar um vale a meio do mês
   app.post('/api/vales/solicitar', async (req: Request, res: Response) => {
     try {
-      const { funcionario_id, nome, valor_solicitado, telefone_carteira } = req.body;
+      const ctx = resolveTenantContext(req);
+      const { funcionario_id, nome, valor_solicitado } = req.body;
 
       if (!funcionario_id || !valor_solicitado) {
         return res.status(400).json({ erro: 'Dados em falta para solicitar o vale.' });
       }
 
-      // Regra de Negócio: Regista o adiantamento para ser descontado na folha automaticamente
       const novoVale: any = {
         vale_id: `VALE-${Math.floor(1000 + Math.random() * 9000)}`,
         funcionario_id,
@@ -5701,10 +5972,9 @@ Host: https://clickpay.co.mz
         data_lancamento: new Date().toISOString().split('T')[0]
       };
 
-      baseDadosVales.push(novoVale);
-
-      // Simulação Fintech: Dinheiro cai imediatamente na carteira móvel do colaborador
-      console.log(`[FINTECH] Vale adiantado via API para ${telefone_carteira || '84XXXXXXX'} no valor de ${valor_solicitado} MT`);
+      ctx.company.vales.push(novoVale);
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
       res.json({
         sucesso: true,
@@ -5712,7 +5982,6 @@ Host: https://clickpay.co.mz
         dadosVale: novoVale,
         notaRetencao: "Este valor foi agendado e será descontado de forma automática no recibo de vencimento do final do mês."
       });
-
     } catch (error) {
       res.status(500).json({ erro: 'Erro ao processar adiantamento de vale.' });
     }
@@ -5720,10 +5989,10 @@ Host: https://clickpay.co.mz
 
   // Rota B: Rota Interna de Auditoria do Payroll (Verifica se existem vales para abater na folha)
   app.get('/api/vales/verificar-descontos/:func_id', (req: Request, res: Response) => {
+    const ctx = resolveTenantContext(req);
     const funcionarioId = req.params.func_id;
-    
-    // Procura todos os vales aprovados e ainda não processados daquele funcionário
-    const valesDoMes = baseDadosVales.filter(v => v.funcionario_id === funcionarioId && v.status === "APROVADO_E_TRANSFERIDO");
+
+    const valesDoMes = ctx.company.vales.filter(v => v.funcionario_id === funcionarioId && v.status === "APROVADO_E_TRANSFERIDO");
     const totalDescontoVales = valesDoMes.reduce((soma, v) => soma + v.valor, 0);
 
     res.json({
@@ -5734,22 +6003,24 @@ Host: https://clickpay.co.mz
     });
   });
 
-  // Rota C: Listar todos os vales registados no sistema
+  // Rota C: Listar todos os vales registados no sistema do tenant
   app.get('/api/vales/listar', (req: Request, res: Response) => {
-    res.json(baseDadosVales);
+    const ctx = resolveTenantContext(req);
+    res.json(ctx.company.vales);
   });
 
   // ROTA: GERAR E FAZER DOWNLOAD DO COMPROVATIVO DE VALE INDIVIDUAL EM PDF
   app.get('/api/vales/pdf-comprovativo/:vale_id', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { vale_id } = req.params;
-      const vale = baseDadosVales.find(v => v.vale_id === vale_id);
+      const vale = ctx.company.vales.find(v => v.vale_id === vale_id);
 
       if (!vale) {
         return res.status(404).json({ erro: 'Adiantamento/Vale não localizado.' });
       }
 
-      const emp = employees.find(e => e.id === vale.funcionario_id);
+      const emp = ctx.company.employees.find(e => e.id === vale.funcionario_id);
 
       const dadosVale = {
         vale_id: vale.vale_id,
@@ -5764,20 +6035,14 @@ Host: https://clickpay.co.mz
       const nomeFicheiro = `comprovativo_vale_${vale_id}_${Date.now()}.pdf`;
       const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      // Chamar a função geradora de PDF
-      await criarReciboValePDF(empresaAtual, dadosVale, caminhoDestinoCompleto);
+      await criarReciboValePDF(buildCompanyDataView(ctx.company), dadosVale, caminhoDestinoCompleto);
 
-      // Servir o arquivo PDF como download direto
       res.download(caminhoDestinoCompleto, nomeFicheiro, (erro) => {
         if (erro) {
           console.error('Erro durante a transmissão do comprovativo de vale:', erro);
         }
-        // Apagar o ficheiro temporário após o download
-        fs.unlink(caminhoDestinoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar ficheiro temporário de vale:', err);
-        });
+        fs.unlink(caminhoDestinoCompleto, () => {});
       });
-
     } catch (error: any) {
       console.error('Erro ao emitir PDF de comprovativo de vale:', error);
       res.status(500).json({ erro: error.message || 'Erro interno ao gerar o documento PDF.' });
@@ -5787,23 +6052,18 @@ Host: https://clickpay.co.mz
   // ROTA: GERAR E FAZER DOWNLOAD DO RELATÓRIO DE VALES CONSOLIDADO EM PDF
   app.get('/api/vales/pdf-relatorio', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const nomeFicheiro = `relatorio_consolidado_vales_${Date.now()}.pdf`;
       const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
 
-      // Chamar a função geradora de PDF
-      await criarRelatorioValesPDF(empresaAtual, baseDadosVales, caminhoDestinoCompleto);
+      await criarRelatorioValesPDF(buildCompanyDataView(ctx.company), ctx.company.vales, caminhoDestinoCompleto);
 
-      // Servir o arquivo PDF como download direto
       res.download(caminhoDestinoCompleto, nomeFicheiro, (erro) => {
         if (erro) {
           console.error('Erro durante a transmissão do relatório consolidado de vales:', erro);
         }
-        // Apagar o ficheiro temporário após o download
-        fs.unlink(caminhoDestinoCompleto, (err) => {
-          if (err) console.error('Erro ao limpar ficheiro temporário de relatório de vales:', err);
-        });
+        fs.unlink(caminhoDestinoCompleto, () => {});
       });
-
     } catch (error: any) {
       console.error('Erro ao emitir PDF de relatório consolidado de vales:', error);
       res.status(500).json({ erro: error.message || 'Erro interno ao gerar o documento PDF.' });
@@ -5811,18 +6071,17 @@ Host: https://clickpay.co.mz
   });
 
   // =========================================================================
-  // 4. ATUALIZAR PERFIL FISCAL DA EMPRESA
+  // 4. ATUALIZAR PERFIL FISCAL DA EMPRESA (TENANT-ISOLATED)
   // =========================================================================
   app.post('/api/empresa/atualizar-perfil', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { nome, pais, provincia, distrito, regime_iva, sector_negocio, tamanho_empresa, regime_fiscal_pme, nuel, nuit, email, telefone, logo } = req.body;
 
-      // Validação mínima obrigatória
       if (!nome) {
         return res.status(400).json({ erro: 'O nome da empresa é obrigatório.' });
       }
 
-      // Antivírus para upload de logótipo em base64 data URI
       if (typeof logo === 'string' && logo.startsWith('data:')) {
         const match = logo.match(/^data:([^;]+);base64,(.+)$/s);
         if (!match) {
@@ -5843,7 +6102,6 @@ Host: https://clickpay.co.mz
         }
       }
 
-      // Objeto estruturado com as regras fiscais moçambicanas para persistência
       const dadosEmpresaAtualizados = {
         nome: nome,
         nome_comercial: nome,
@@ -5867,25 +6125,35 @@ Host: https://clickpay.co.mz
         email,
         telefone,
         endereco: `${provincia || ''}${provincia && distrito ? ', ' : ''}${distrito || ''}`,
-        logo: logo || "",
+        logo: logo || ctx.company.logo || "",
         ultima_atualizacao: new Date().toISOString()
       };
 
-      updateEmpresa(dadosEmpresaAtualizados);
-
-      // Trigger automatic cloud backup since company configuration changed
-      triggerAutomaticBackup();
-
-      // Log operacional para auditoria interna da sua startup
-      console.log(`[PERFIL EMPRESA] Dados atualizados para: ${nome} | NUIT: ${nuit}`);
-
-      // Retorna o sucesso para o front-end congelar as informações com segurança
-      return res.json({
-        sucesso: true,
-        mensagem: "Configurações fiscais da empresa updated.",
-        dados: dadosEmpresaAtualizados
+      Object.assign(ctx.company, {
+        nome: dadosEmpresaAtualizados.nome,
+        nuit: dadosEmpresaAtualizados.nuit ?? ctx.company.nuit,
+        nuel: dadosEmpresaAtualizados.nuel ?? ctx.company.nuel,
+        provincia: dadosEmpresaAtualizados.provincia ?? ctx.company.provincia,
+        distrito: dadosEmpresaAtualizados.distrito ?? ctx.company.distrito,
+        regime_iva: dadosEmpresaAtualizados.regime_iva ?? ctx.company.regime_iva,
+        sector_negocio: dadosEmpresaAtualizados.sector_negocio,
+        tamanho_empresa: dadosEmpresaAtualizados.tamanho_empresa,
+        regime_fiscal_pme: dadosEmpresaAtualizados.regime_fiscal_pme,
+        email: dadosEmpresaAtualizados.email ?? ctx.company.email,
+        telefone: dadosEmpresaAtualizados.telefone ?? ctx.company.telefone,
+        endereco: dadosEmpresaAtualizados.endereco || ctx.company.endereco,
+        logo: dadosEmpresaAtualizados.logo
       });
 
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
+      triggerAutomaticBackup();
+
+      return res.json({
+        sucesso: true,
+        mensagem: "Configurações fiscais da empresa actualizadas.",
+        dados: buildCompanyDataView(ctx.company)
+      });
     } catch (error) {
       console.error('Erro ao atualizar perfil da empresa:', error);
       res.status(500).json({ erro: 'Erro interno ao processar cadastro fiscal.' });
@@ -5895,13 +6163,13 @@ Host: https://clickpay.co.mz
   // ROTA: EXTRAIR MÉTRICAS MENSAIS E TRIMESTRAIS DO DASHBOARD
   app.get('/api/dashboard/historico-periodos', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { mes_selecionado, trimestre_selecionado } = req.query;
       const mesStr = String(mes_selecionado || 'Julho');
       const triStr = String(trimestre_selecionado || 'Q3');
 
-      // 1. FILTRO MENSAL EXCLUSIVO (Aparece a informação auditada de todos os módulos para aquele mês)
-      const dadosDoMes = historicoOperacoesEmpresa.find(op => op.mes.toLowerCase() === mesStr.toLowerCase());
-      
+      const dadosDoMes = ctx.historico.find((op: any) => op.mes.toLowerCase() === mesStr.toLowerCase());
+
       const vendasMes = getVendas(mesStr);
       const comprasMes = getCompras(mesStr);
       const caixaMes = getCaixa(mesStr);
@@ -5918,28 +6186,27 @@ Host: https://clickpay.co.mz
       const totalEntradasCaixaMes = caixaMes.filter(c => c.tipo === 'Entrada').reduce((acc, c) => acc + c.valor, 0);
       const totalSaidasCaixaMes = caixaMes.filter(c => c.tipo === 'Saida').reduce((acc, c) => acc + c.valor, 0);
 
-      // 2. FILTRO TRIMESTRAL (Calcula o acumulado dos 3 meses correspondentes para todos os módulos)
       let mesesDoTrimestre: string[] = [];
       if (triStr === "Q1") mesesDoTrimestre = ["Janeiro", "Fevereiro", "Março"];
       else if (triStr === "Q2") mesesDoTrimestre = ["Abril", "Maio", "Junho"];
       else if (triStr === "Q3") mesesDoTrimestre = ["Julho", "Agosto", "Setembro"];
       else if (triStr === "Q4") mesesDoTrimestre = ["Outubro", "Novembro", "Dezembro"];
 
-      const dadosTrimestre = historicoOperacoesEmpresa.filter(op => mesesDoTrimestre.includes(op.mes));
+      const dadosTrimestre = ctx.historico.filter((op: any) => mesesDoTrimestre.includes(op.mes));
 
-      let resumoTrimestre = { 
-        liquido: 0, 
-        irps: 0, 
-        inss: 0, 
-        taxas: 0, 
-        vendas: 0, 
-        compras: 0, 
-        ivaVendas: 0, 
+      const resumoTrimestre = {
+        liquido: 0,
+        irps: 0,
+        inss: 0,
+        taxas: 0,
+        vendas: 0,
+        compras: 0,
+        ivaVendas: 0,
         ivaCompras: 0,
-        operacoes: dadosTrimestre.length 
+        operacoes: dadosTrimestre.length
       };
 
-      dadosTrimestre.forEach(m => {
+      dadosTrimestre.forEach((m: any) => {
         resumoTrimestre.liquido += m.liquido_pago;
         resumoTrimestre.irps += m.irps_retido;
         resumoTrimestre.inss += m.inss_retido;
@@ -5955,41 +6222,32 @@ Host: https://clickpay.co.mz
         resumoTrimestre.ivaCompras += cM.reduce((a, c) => a + (c.valor_iva || 0), 0);
       });
 
-      // Contratos Módulo 5
-      const contratosAuditados = baseDadosContratosGerais.map(ct => auditarContratoLei132023(ct));
+      const contratosAuditados = ctx.company.contratos.map(ct => auditarContratoLei132023(ct));
       const contratosCriticosCount = contratosAuditados.filter(c => c.statusRisco === "VERMELHO").length;
+      const numEmps = ctx.company.employees.length;
 
       return res.json({
         sucesso: true,
         filtroMensal: {
           mes: mesStr,
-          // Módulo 3: Salários & RH
-          liquidoPago: dadosDoMes ? dadosDoMes.liquido_pago : (employees.length * 28500),
-          irpsRetido: dadosDoMes ? dadosDoMes.irps_retido : (employees.length * 3200),
-          inssTotal: dadosDoMes ? dadosDoMes.inss_retido : (employees.length * 2450),
-          custoTaxasPlataforma: dadosDoMes ? dadosDoMes.taxas_fintech : 250,
-          funcionariosPagos: dadosDoMes ? dadosDoMes.total_trabalhadores : employees.length,
-
-          // Módulo 1: Facturação & Vendas
+          liquidoPago: dadosDoMes ? dadosDoMes.liquido_pago : 0,
+          irpsRetido: dadosDoMes ? dadosDoMes.irps_retido : 0,
+          inssTotal: dadosDoMes ? dadosDoMes.inss_retido : 0,
+          custoTaxasPlataforma: dadosDoMes ? dadosDoMes.taxas_fintech : 0,
+          funcionariosPagos: dadosDoMes ? dadosDoMes.total_trabalhadores : numEmps,
           totalVendas: totalVendasMes,
           totalVendasBase: totalVendasBaseMes,
           ivaVendas: totalIvaVendasMes,
           numFacturasVendas: vendasMes.length,
-
-          // Módulo 2: Compras & Stocks
           totalCompras: totalComprasMes,
           totalComprasBase: totalComprasBaseMes,
           ivaCompras: totalIvaComprasMes,
           numFacturasCompras: comprasMes.length,
-
-          // Módulo 4: Tesouraria & Contabilidade
           entradasCaixa: totalEntradasCaixaMes,
           saidasCaixa: totalSaidasCaixaMes,
           saldoCaixa: totalEntradasCaixaMes - totalSaidasCaixaMes,
           impostoIvaAPagar: apuramentoIVAMes.saldoIVA > 0 ? apuramentoIVAMes.saldoIVA : 0,
           creditoIva: apuramentoIVAMes.saldoIVA < 0 ? Math.abs(apuramentoIVAMes.saldoIVA) : 0,
-
-          // Módulo 5: Alertas Fiscais & IA
           totalContratos: contratosAuditados.length,
           contratosCriticos: contratosCriticosCount,
           conformidadeStatus: "100% Conforme - Regulamento da AT & Lei 13/2023"
@@ -6004,10 +6262,9 @@ Host: https://clickpay.co.mz
           totalIvaVendasTrimestre: resumoTrimestre.ivaVendas,
           totalComprasTrimestre: resumoTrimestre.compras,
           totalIvaComprasTrimestre: resumoTrimestre.ivaCompras,
-          mesesProcessados: dadosTrimestre.map(m => m.mes)
+          mesesProcessados: dadosTrimestre.map((m: any) => m.mes)
         }
       });
-
     } catch (e) {
       console.error("Erro no historico-periodos:", e);
       res.status(500).json({ erro: 'Erro ao gerar histórico de períodos.' });
@@ -6017,24 +6274,14 @@ Host: https://clickpay.co.mz
   // ROTA: LISTAR CONTRATOS AUDITADOS PELA LEI Nº 13/2023
   app.get('/api/clientes/listar-contratos', verificarAcesso(['CLIENTE_EMPRESA']), (req: any, res: Response) => {
     try {
-      const empresaIdDoCliente = req.usuario.empresa_id;
-
-      // 1. Filtrar apenas os contratos pertencentes à empresa que iniciou sessão
-      const contratosDaEmpresa = baseDadosContratosGerais.filter(ct => ct.empresa_id === empresaIdDoCliente);
-
-      // 2. Mapear os contratos aplicando o motor de auditoria da Lei 13/2023 criado anteriormente
-      const contratosAuditados = contratosDaEmpresa.map(contrato => {
-        // Executa a função matemática/temporal de auditoria que desenvolvemos
-        const resultadoAuditoria = auditarContratoLei132023(contrato);
-        
-        return {
-          ...contrato,
-          auditoria: resultadoAuditoria // Injeta as mensagens legais automáticas
-        };
-      });
+      const ctx = resolveTenantContext(req);
+      const contratosAuditados = ctx.company.contratos.map(contrato => ({
+        ...contrato,
+        empresa_id: ctx.companyId,
+        auditoria: auditarContratoLei132023(contrato)
+      }));
 
       return res.json(contratosAuditados);
-
     } catch (e) {
       res.status(500).json({ erro: 'Erro ao listar contratos laborais.' });
     }
@@ -6043,14 +6290,15 @@ Host: https://clickpay.co.mz
   // ROTA: CRIAR CONTRATO LABORAL E SINCRONIZAR COM COLABORADOR
   app.post('/api/clientes/criar-contrato', verificarAcesso(['CLIENTE_EMPRESA']), (req: any, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { nome_funcionario, cargo, tipo_contrato, data_inicio, data_fim, salario_base, cargo_complexo } = req.body;
       if (!nome_funcionario || !salario_base || !tipo_contrato) {
         return res.status(400).json({ erro: 'Nome, Salário Base e Tipo de Contrato são obrigatórios.' });
       }
 
       const novoCt: any = {
-        id: `ct_${Date.now()}`,
-        empresa_id: req.usuario.empresa_id || "emp_piloto_01",
+        id: `ct_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        empresa_id: ctx.companyId,
         nome_funcionario,
         cargo: cargo || 'Trabalhador',
         tipo_contrato,
@@ -6060,12 +6308,12 @@ Host: https://clickpay.co.mz
         cargo_complexo: !!cargo_complexo
       };
 
-      baseDadosContratosGerais.push(novoCt);
+      ctx.company.contratos.push(novoCt);
 
-      // Interconnection: If employee doesn't exist, automatically add them to the employee directory
-      const funcionarioExiste = employees.some(e => e.nome.toLowerCase() === nome_funcionario.toLowerCase());
+      const funcionarioExiste = ctx.company.employees.some(e => e.nome.toLowerCase() === nome_funcionario.toLowerCase());
       if (!funcionarioExiste) {
-        addEmployee({
+        ctx.company.employees.push({
+          id: `emp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           nome: nome_funcionario,
           nuit: '',
           inss_numero: '',
@@ -6075,6 +6323,9 @@ Host: https://clickpay.co.mz
           carteira_movel: ''
         });
       }
+
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
 
       return res.status(201).json(novoCt);
     } catch (e) {
@@ -6086,22 +6337,36 @@ Host: https://clickpay.co.mz
   // ROTA: REMOVER CONTRATO LABORAL
   app.delete('/api/clientes/remover-contrato/:id', verificarAcesso(['CLIENTE_EMPRESA']), (req: any, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { id } = req.params;
-      const index = baseDadosContratosGerais.findIndex(ct => ct.id === id);
-      if (index === -1) {
+      const ct = ctx.company.contratos.find(c => c.id === id);
+      if (!ct) {
         return res.status(404).json({ erro: 'Contrato não encontrado.' });
       }
-      
-      const ct = baseDadosContratosGerais[index];
-      baseDadosContratosGerais.splice(index, 1);
 
-      // Interconnection: Delete associated employee to keep directories in perfect sync
-      const empIndex = employees.findIndex(e => e.nome.toLowerCase() === ct.nome_funcionario.toLowerCase());
-      if (empIndex !== -1) {
-        employees.splice(empIndex, 1);
+      const targetNameLower = String(ct.nome_funcionario || '').trim().toLowerCase();
+      ctx.company.contratos = ctx.company.contratos.filter(
+        c => c.id !== id && String(c.nome_funcionario || '').trim().toLowerCase() !== targetNameLower
+      );
+
+      const empMatch = ctx.company.employees.find(e => String(e.nome || '').trim().toLowerCase() === targetNameLower);
+      if (empMatch) {
+        if (['emp-gerson', 'emp-miguel', 'emp-cleton'].includes(empMatch.id) || ctx.companyId === 'cli_founders') {
+          deletedSeedEmployeeIds.add(empMatch.id);
+        }
+        ctx.company.employees = ctx.company.employees.filter(e => e.id !== empMatch.id);
+        ctx.company.paymentLogs = ctx.company.paymentLogs.filter(
+          l => l.employeeId !== empMatch.id && String(l.employeeName || '').trim().toLowerCase() !== targetNameLower
+        );
+        ctx.company.vales = ctx.company.vales.filter(
+          v => v.funcionario_id !== empMatch.id && String(v.nome || '').trim().toLowerCase() !== targetNameLower
+        );
       }
 
-      return res.json({ sucesso: true, mensagem: 'Contrato e Colaborador removidos com sucesso em total sincronia.' });
+      syncCompanyGlobalsIfActive(ctx.companyId);
+      saveRuntimeState();
+
+      return res.json({ sucesso: true, mensagem: 'Contrato e Colaborador removidos permanentemente em total sincronia.' });
     } catch (e) {
       console.error(e);
       res.status(500).json({ erro: 'Erro ao remover contrato laboral.' });
@@ -6850,12 +7115,13 @@ Host: https://clickpay.co.mz
 
   app.post('/api/alerts/trigger-manual', (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { dataSimulada } = req.body;
       const dataRef = dataSimulada ? new Date(dataSimulada) : new Date();
       const novasNotificacoes: any[] = [];
 
-      // 1. Verificar prazos de contratos e períodos de experiência
-      baseDadosContratosGerais.forEach(contrato => {
+      // 1. Verificar prazos de contratos e períodos de experiência do tenant activo
+      ctx.company.contratos.forEach(contrato => {
         const inicio = new Date(contrato.data_inicio);
         
         // Calcular limite de experiência em dias
@@ -7154,18 +7420,34 @@ Host: https://clickpay.co.mz
     }
   });
 
-  // GET simple transaction logs
+  // GET / DELETE transaction logs (strictly tenant-isolated)
   app.get('/api/logs', (req: Request, res: Response) => {
-    res.json(paymentLogs);
+    const ctx = resolveTenantContext(req);
+    res.json(ctx.company.paymentLogs || []);
+  });
+
+  app.delete('/api/logs/:id', (req: Request, res: Response) => {
+    const ctx = resolveTenantContext(req);
+    const { id } = req.params;
+    const before = ctx.company.paymentLogs.length;
+    ctx.company.paymentLogs = ctx.company.paymentLogs.filter(l => l.id !== id && l.txId !== id);
+    if (ctx.company.paymentLogs.length === before) {
+      return res.status(404).json({ error: 'Registo de pagamento não encontrado.' });
+    }
+    auditLogsByCompany[ctx.companyId] = (auditLogsByCompany[ctx.companyId] || []).filter(
+      a => a.id_transacao !== id
+    );
+    syncCompanyGlobalsIfActive(ctx.companyId);
+    saveRuntimeState();
+    res.json({ success: true, removedId: id });
   });
 
   // --- API BACKUP ENDPOINTS (EXCLUSIVO SUPER ADMIN) ---
   // 1. Get cloud backups history
   app.get('/api/backup/history', requireSuperAdmin, (req: Request, res: Response) => {
     try {
-      const activeCompany = baseDadosClientes.find(c => c.nuit === empresaAtual.nuit);
-      const companyId = activeCompany ? activeCompany.id : 'cli_bronze';
-      const backups = baseDadosBackups.filter(b => b.empresaId === companyId);
+      const ctx = resolveTenantContext(req);
+      const backups = baseDadosBackups.filter(b => b.empresaId === ctx.companyId);
       res.json(backups);
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao carregar histórico de cópias de segurança.' });
@@ -7175,37 +7457,19 @@ Host: https://clickpay.co.mz
   // 2. Trigger manual or automated cloud backup
   app.post('/api/backup/trigger', requireSuperAdmin, (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { tipo } = req.body;
-      const activeCompany = baseDadosClientes.find(c => c.nuit === empresaAtual.nuit);
-      if (!activeCompany) {
-        return res.status(404).json({ error: 'Nenhuma empresa activa para efectuar cópia de segurança.' });
-      }
+      const activeCompany = ctx.company;
 
       const backupId = `bkp_${Date.now()}`;
       const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
       const snapshot = {
-        empresa: {
-          nome: activeCompany.nome,
-          nuit: activeCompany.nuit,
-          endereco: activeCompany.endereco,
-          provincia: activeCompany.provincia,
-          distrito: activeCompany.distrito,
-          regime_iva: activeCompany.regime_iva,
-          nuel: activeCompany.nuel,
-          email: activeCompany.email,
-          telefone: activeCompany.telefone,
-          logo: activeCompany.logo,
-          subscription_status: activeCompany.subscription_status,
-          subscription_plan: activeCompany.subscription_plan,
-          next_billing_date: activeCompany.next_billing_date,
-          fee_base: activeCompany.fee_base,
-          fee_por_slip: activeCompany.fee_por_slip
-        },
-        employees: JSON.parse(JSON.stringify(employees)),
-        paymentLogs: JSON.parse(JSON.stringify(paymentLogs)),
-        contratos: JSON.parse(JSON.stringify(baseDadosContratosGerais)),
-        vales: JSON.parse(JSON.stringify(baseDadosVales))
+        empresa: buildCompanyDataView(activeCompany),
+        employees: JSON.parse(JSON.stringify(activeCompany.employees || [])),
+        paymentLogs: JSON.parse(JSON.stringify(activeCompany.paymentLogs || [])),
+        contratos: JSON.parse(JSON.stringify(activeCompany.contratos || [])),
+        vales: JSON.parse(JSON.stringify(activeCompany.vales || []))
       };
 
       const jsonString = JSON.stringify(snapshot);
@@ -7217,8 +7481,8 @@ Host: https://clickpay.co.mz
         empresaNome: activeCompany.nome,
         timestamp,
         tipo: tipo || 'Manual (Utilizador)',
-        quantidadeColaboradores: employees.length,
-        quantidadeLancamentos: paymentLogs.length,
+        quantidadeColaboradores: (activeCompany.employees || []).length,
+        quantidadeLancamentos: (activeCompany.paymentLogs || []).length,
         tamanhoKb: sizeKb,
         snapshot
       };
@@ -7243,18 +7507,7 @@ Host: https://clickpay.co.mz
       if (!downloadData) {
         const activeCompany = baseDadosClientes.find(c => c.id === backup.empresaId);
         downloadData = {
-          empresa: activeCompany ? {
-            nome: activeCompany.nome,
-            nuit: activeCompany.nuit,
-            endereco: activeCompany.endereco,
-            provincia: activeCompany.provincia,
-            distrito: activeCompany.distrito,
-            regime_iva: activeCompany.regime_iva,
-            nuel: activeCompany.nuel,
-            email: activeCompany.email,
-            telefone: activeCompany.telefone,
-            logo: activeCompany.logo
-          } : null,
+          empresa: activeCompany ? buildCompanyDataView(activeCompany) : null,
           employees: activeCompany ? activeCompany.employees : [],
           paymentLogs: activeCompany ? activeCompany.paymentLogs : [],
           contratos: activeCompany ? activeCompany.contratos : [],
@@ -7262,7 +7515,7 @@ Host: https://clickpay.co.mz
         };
       }
 
-      res.setHeader('Content-disposition', `attachment; filename=backup_paytek_${backup.empresaId}_${backup.id}.json`);
+      res.setHeader('Content-disposition', `attachment; filename=backup_clickpay_${backup.empresaId}_${backup.id}.json`);
       res.setHeader('Content-type', 'application/json');
       res.send(JSON.stringify(downloadData, null, 2));
     } catch (err: any) {
@@ -7289,59 +7542,31 @@ Host: https://clickpay.co.mz
 
       const snap = backup.snapshot;
 
-      // Update company fields
-      targetCompany.nome = snap.empresa.nome;
-      targetCompany.nuit = snap.empresa.nuit;
-      targetCompany.endereco = snap.empresa.endereco;
-      targetCompany.provincia = snap.empresa.provincia;
-      targetCompany.distrito = snap.empresa.distrito;
-      targetCompany.regime_iva = snap.empresa.regime_iva;
-      targetCompany.nuel = snap.empresa.nuel;
-      targetCompany.email = snap.empresa.email;
-      targetCompany.telefone = snap.empresa.telefone;
-      targetCompany.logo = snap.empresa.logo;
-      targetCompany.subscription_status = snap.empresa.subscription_status;
-      targetCompany.subscription_plan = snap.empresa.subscription_plan;
-      targetCompany.next_billing_date = snap.empresa.next_billing_date;
-      targetCompany.fee_base = snap.empresa.fee_base;
-      targetCompany.fee_por_slip = snap.empresa.fee_por_slip;
+      Object.assign(targetCompany, {
+        nome: snap.empresa.nome,
+        nuit: snap.empresa.nuit,
+        endereco: snap.empresa.endereco,
+        provincia: snap.empresa.provincia,
+        distrito: snap.empresa.distrito,
+        regime_iva: snap.empresa.regime_iva,
+        nuel: snap.empresa.nuel,
+        email: snap.empresa.email,
+        telefone: snap.empresa.telefone,
+        logo: snap.empresa.logo,
+        subscription_status: snap.empresa.subscription_status,
+        subscription_plan: snap.empresa.subscription_plan,
+        next_billing_date: snap.empresa.next_billing_date,
+        fee_base: snap.empresa.fee_base,
+        fee_por_slip: snap.empresa.fee_por_slip
+      });
 
-      // Re-map the lists
       targetCompany.employees = JSON.parse(JSON.stringify(snap.employees));
       targetCompany.contratos = JSON.parse(JSON.stringify(snap.contratos));
       targetCompany.paymentLogs = JSON.parse(JSON.stringify(snap.paymentLogs));
       targetCompany.vales = JSON.parse(JSON.stringify(snap.vales));
 
-      // If it is the currently active company, refresh in-place as well!
-      if (empresaAtual.nuit === targetCompany.nuit) {
-        empresaAtual.nome = snap.empresa.nome;
-        empresaAtual.nuit = snap.empresa.nuit;
-        empresaAtual.endereco = snap.empresa.endereco;
-        empresaAtual.provincia = snap.empresa.provincia;
-        empresaAtual.distrito = snap.empresa.distrito;
-        empresaAtual.regime_iva = snap.empresa.regime_iva;
-        empresaAtual.nuel = snap.empresa.nuel;
-        empresaAtual.email = snap.empresa.email;
-        empresaAtual.telefone = snap.empresa.telefone;
-        empresaAtual.logo = snap.empresa.logo;
-        empresaAtual.subscription_status = snap.empresa.subscription_status;
-        empresaAtual.subscription_plan = snap.empresa.subscription_plan;
-        empresaAtual.next_billing_date = snap.empresa.next_billing_date;
-        empresaAtual.fee_base = snap.empresa.fee_base;
-        empresaAtual.fee_por_slip = snap.empresa.fee_por_slip;
-
-        employees.length = 0;
-        employees.push(...targetCompany.employees);
-
-        baseDadosContratosGerais.length = 0;
-        baseDadosContratosGerais.push(...targetCompany.contratos);
-
-        paymentLogs.length = 0;
-        paymentLogs.push(...targetCompany.paymentLogs);
-
-        baseDadosVales.length = 0;
-        baseDadosVales.push(...targetCompany.vales);
-      }
+      syncCompanyGlobalsIfActive(targetCompany.id);
+      saveRuntimeState();
 
       res.json({
         success: true,
@@ -7386,10 +7611,12 @@ Host: https://clickpay.co.mz
     }
   }
 
-  // Pre-seed mock data on server startup so the portfolio has preloaded details
+  // Pre-seed mock data on server startup then restore persisted runtime state
   try {
     seedDemoData();
-    console.log('[SERVER] Pre-seeded demo portfolio with default companies and employees successfully.');
+    ensureTenantContainers(founderActiveCompanyId);
+    loadRuntimeState();
+    console.log('[SERVER] Pre-seeded demo portfolio and restored runtime tenant state successfully.');
 
     // Sincronizar as contas padrões com o Firebase Auth em segundo plano
     if (!isServerless && firebaseConfig && firebaseConfig.apiKey) {

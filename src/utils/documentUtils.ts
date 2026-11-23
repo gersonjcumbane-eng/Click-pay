@@ -117,8 +117,8 @@ export function numeroParaExtenso(num: number): string {
   return resultado;
 }
 
-export const PRIMAVERA_COMPUTER_NOTE =
-  'Processado por computador · Formato A4 (PRIMAVERA ERP V10)';
+export const CLICKPAY_COMPUTER_NOTE =
+  'Processado por computador · Formato A4 (CLICKPAY ERP ENTERPRISE)';
 
 /**
  * Gera um hash curto determinístico para controlo interno do documento.

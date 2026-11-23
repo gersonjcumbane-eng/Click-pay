@@ -174,6 +174,79 @@ export async function syncSupportTicketToFirestore(ticketData: {
   }
 }
 
+const LOCAL_ACCOUNTS_KEY = 'clickpay_local_accounts';
+
+interface LocalVaultAccount {
+  id: string;
+  email: string;
+  companyName: string;
+  nuit: string;
+  passwordHash: string;
+  plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+  status: 'ativo' | 'suspenso';
+  updatedAt: string;
+}
+
+function normalizeFirebasePlan(p?: string): 'Bronze' | 'Silver' | 'Gold' | 'Platinum' {
+  if (!p) return 'Bronze';
+  if (p === 'Starter' || p === 'Bronze') return 'Bronze';
+  if (p === 'Growth' || p === 'Silver' || p === 'Profissional') return 'Silver';
+  if (p === 'Business' || p === 'Gold' || p === 'Empresarial' || p === 'Vitalicio') return 'Gold';
+  if (p === 'Platinum') return 'Platinum';
+  return 'Bronze';
+}
+
+async function saveAccountToLocalVault(params: {
+  id: string;
+  email: string;
+  companyName: string;
+  nuit: string;
+  password: string;
+  plan: string;
+}): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
+  try {
+    const emailNorm = String(params.email || '').toLowerCase().trim();
+    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    const list: LocalVaultAccount[] = raw ? JSON.parse(raw) : [];
+    const safeList = Array.isArray(list) ? list : [];
+    const hashed = await hashPassword(String(params.password || ''));
+    const entry: LocalVaultAccount = {
+      id: params.id,
+      email: emailNorm,
+      companyName: params.companyName,
+      nuit: params.nuit,
+      passwordHash: hashed,
+      plan: normalizeFirebasePlan(params.plan),
+      status: 'ativo',
+      updatedAt: new Date().toISOString()
+    };
+    const idx = safeList.findIndex((a) => a.email === emailNorm || a.id === params.id);
+    if (idx >= 0) {
+      safeList[idx] = { ...safeList[idx], ...entry };
+    } else {
+      safeList.push(entry);
+    }
+    localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(safeList));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getAccountFromLocalVault(email: string): LocalVaultAccount | null {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+  try {
+    const emailNorm = String(email || '').toLowerCase().trim();
+    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    const list: LocalVaultAccount[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) return null;
+    return list.find((a) => String(a.email || '').toLowerCase().trim() === emailNorm) || null;
+  } catch {
+    return null;
+  }
+}
+
 // Registar e sincronizar conta recém-criada em todas as coleções Firebase da ClickPay
 export async function syncRegisteredAccountToFirestore(params: {
   clientId: string;
@@ -186,6 +259,7 @@ export async function syncRegisteredAccountToFirestore(params: {
   telefone?: string;
   endereco?: string;
   provincia?: string;
+  isUpdate?: boolean;
 }) {
   const now = new Date().toISOString();
   const safeId = String(params.clientId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
@@ -195,25 +269,45 @@ export async function syncRegisteredAccountToFirestore(params: {
   const syncedCollections: string[] = [];
   const errors: string[] = [];
 
+  // 0. Persistir imediatamente no cofre local para garantir login em modo estático/offline
+  const savedVault = await saveAccountToLocalVault({
+    id: safeId,
+    email: params.email,
+    companyName: params.nomeEmpresa,
+    nuit: params.nuit,
+    password: params.password,
+    plan: plano
+  });
+  if (savedVault) {
+    syncedCollections.push('local_vault');
+  }
+
+  // Se for apenas atualização da Etapa 3 sem sessão Firebase Auth ativa, evitar reescrita que dispara erro de permissão de atualização
+  if (params.isUpdate && !auth.currentUser) {
+    return { syncedCollections, errors };
+  }
+
   // 1. Tentar criar utilizador no Firebase Auth (se o provedor Email/Password estiver ativo)
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, params.email, params.password);
-    if (cred?.user?.uid) {
-      syncedCollections.push('firebase_auth');
-      await setDoc(doc(db, 'users', cred.user.uid), {
-        uid: cred.user.uid,
-        email: String(params.email).substring(0, 256),
-        role: 'CLIENTE_EMPRESA',
-        companyId: safeId,
-        createdAt: now,
-        status: 'ativo'
-      }, { merge: true });
-      syncedCollections.push('users');
-    }
-  } catch (authErr: any) {
-    // Se Email/Password estiver desativado no console Firebase, continua normalmente para gravar no Firestore
-    if (authErr?.code !== 'auth/operation-not-allowed' && authErr?.code !== 'auth/email-already-in-use') {
-      console.warn('Firebase Auth signup info:', authErr?.code || authErr?.message);
+  if (!params.isUpdate) {
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, params.email, params.password);
+      if (cred?.user?.uid) {
+        syncedCollections.push('firebase_auth');
+        await setDoc(doc(db, 'users', cred.user.uid), {
+          uid: cred.user.uid,
+          email: String(params.email).substring(0, 256),
+          role: 'CLIENTE_EMPRESA',
+          companyId: safeId,
+          createdAt: now,
+          status: 'ativo'
+        }, { merge: true });
+        syncedCollections.push('users');
+      }
+    } catch (authErr: any) {
+      // Se Email/Password estiver desativado no console Firebase, continua normalmente para gravar no Firestore
+      if (authErr?.code !== 'auth/operation-not-allowed' && authErr?.code !== 'auth/email-already-in-use') {
+        console.warn('Firebase Auth signup info:', authErr?.code || authErr?.message);
+      }
     }
   }
 
@@ -274,37 +368,39 @@ export async function syncRegisteredAccountToFirestore(params: {
     errors.push(`companies: ${err?.message || String(err)}`);
   }
 
-  // 5. Gravar pedido/registo de credenciais no Firestore
-  const reqRes = await syncCredentialRequestToFirestore({
-    id: reqId,
-    nomeEmpresa: params.nomeEmpresa,
-    nomeResponsavel: params.nomeEmpresa,
-    email: params.email,
-    telefone: params.telefone || '+258 84 000 0000',
-    nuit: params.nuit,
-    planoEscolhido: plano,
-    precoMensal: feeBase,
-    status: 'APROVADO',
-    dataSolicitacao: now
-  });
-  if (reqRes.ok) syncedCollections.push('erp_credential_requests');
-  else if (reqRes.error) errors.push(`erp_credential_requests: ${reqRes.error}`);
-
-  try {
-    await setDoc(doc(db, 'credential_requests', reqId), {
+  // 5. Gravar pedido/registo de credenciais no Firestore apenas na criação inicial
+  if (!params.isUpdate) {
+    const reqRes = await syncCredentialRequestToFirestore({
       id: reqId,
-      empresa: String(params.nomeEmpresa).substring(0, 256),
-      responsavel: String(params.nomeEmpresa).substring(0, 256),
-      nuit: String(params.nuit).substring(0, 32),
-      email: String(params.email).substring(0, 256),
-      telefone: String(params.telefone || '+258 84 000 0000').substring(0, 64),
-      plano,
-      status: 'REGISTADO_ONLINE',
-      createdAt: now
-    }, { merge: true });
-    syncedCollections.push('credential_requests');
-  } catch (err: any) {
-    errors.push(`credential_requests: ${err?.message || String(err)}`);
+      nomeEmpresa: params.nomeEmpresa,
+      nomeResponsavel: params.nomeEmpresa,
+      email: params.email,
+      telefone: params.telefone || '+258 84 000 0000',
+      nuit: params.nuit,
+      planoEscolhido: plano,
+      precoMensal: feeBase,
+      status: 'APROVADO',
+      dataSolicitacao: now
+    });
+    if (reqRes.ok) syncedCollections.push('erp_credential_requests');
+    else if (reqRes.error) errors.push(`erp_credential_requests: ${reqRes.error}`);
+
+    try {
+      await setDoc(doc(db, 'credential_requests', reqId), {
+        id: reqId,
+        empresa: String(params.nomeEmpresa).substring(0, 256),
+        responsavel: String(params.nomeEmpresa).substring(0, 256),
+        nuit: String(params.nuit).substring(0, 32),
+        email: String(params.email).substring(0, 256),
+        telefone: String(params.telefone || '+258 84 000 0000').substring(0, 64),
+        plano,
+        status: 'REGISTADO_ONLINE',
+        createdAt: now
+      }, { merge: true });
+      syncedCollections.push('credential_requests');
+    } catch (err: any) {
+      errors.push(`credential_requests: ${err?.message || String(err)}`);
+    }
   }
 
   return { syncedCollections, errors };
@@ -396,6 +492,27 @@ export async function authenticateClientInFirebase(
         status: 'ativo'
       }
     };
+  }
+
+  // Verificar também no cofre local (para contas recém-registadas no navegador)
+  const localVaultAcc = getAccountFromLocalVault(emailNorm);
+  if (localVaultAcc) {
+    const matchesLocal =
+      (await verifyPassword(passTrim, localVaultAcc.passwordHash)) ||
+      (await verifyPassword(passRaw, localVaultAcc.passwordHash));
+    if (matchesLocal) {
+      return {
+        ok: true,
+        client: {
+          id: localVaultAcc.id,
+          email: localVaultAcc.email,
+          companyName: localVaultAcc.companyName,
+          plan: localVaultAcc.plan,
+          status: localVaultAcc.status,
+          nuit: localVaultAcc.nuit
+        }
+      };
+    }
   }
 
   return { ok: false };
@@ -649,11 +766,36 @@ export async function lookupClientByEmailInCloud(email: string): Promise<{
         }
       };
     }
+    const localVaultAcc = getAccountFromLocalVault(emailNorm);
+    if (localVaultAcc) {
+      return {
+        found: true,
+        client: {
+          id: localVaultAcc.id,
+          email: localVaultAcc.email,
+          companyName: localVaultAcc.companyName,
+          plan: localVaultAcc.plan,
+          status: localVaultAcc.status
+        }
+      };
+    }
+
     return { found: false };
   } catch (error) {
-    if (error instanceof Error && error.message.toLowerCase().includes('permission')) {
-      handleFirestoreError(error, OperationType.GET, 'saas_clients');
+    const localVaultAcc = getAccountFromLocalVault(emailNorm);
+    if (localVaultAcc) {
+      return {
+        found: true,
+        client: {
+          id: localVaultAcc.id,
+          email: localVaultAcc.email,
+          companyName: localVaultAcc.companyName,
+          plan: localVaultAcc.plan,
+          status: localVaultAcc.status
+        }
+      };
     }
+    console.warn('Cloud client lookup skipped:', error instanceof Error ? error.message : String(error));
     return { found: false };
   }
 }

@@ -38,7 +38,7 @@ b, strong {
   background: #94a3b8;
 }
 
-/* Primavera ERP V10 — Folha A4 & Isolamento de Impressão */
+/* ClickPay ERP Enterprise — Folha A4 & Isolamento de Impressão */
 @page {
   size: A4 portrait;
   margin: 10mm 12mm;

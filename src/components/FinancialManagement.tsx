@@ -32,8 +32,36 @@ import { CompraItem, VendaItem, LivroCaixaItem, ApuramentoIVA, CompanyData } fro
 import { useToast, useConfirm } from '../context/ToastContext';
 import { ComplianceAssist } from './ComplianceAssist';
 import { PLANO_CONTAS_PGC_MOZAMBIQUE, getPlanoContasComSaldos, PgcContaComSaldo, validarEClassificarLancamentoPGC } from '../pgc_mozambique';
-import { employees } from '../db_tax';
+import {
+  employees,
+  getCompras,
+  getVendas,
+  getCaixa,
+  getApuramentoIVA,
+  addCompra,
+  addVenda,
+  addCaixaItem,
+  deleteCompra,
+  deleteVenda,
+  deleteCaixaItem,
+  getRelatorioCustosEDespesas,
+  getRelatorioVendasAgrupadas,
+  getRelatorioComprasAgrupadas,
+  getRelatorioClientes,
+  getRelatorioFornecedores,
+  getBalanceteVerificacao,
+  getDiarioCaixa,
+  getFluxoCaixa,
+  getBalancoPatrimonial,
+  getDemonstracaoResultados
+} from '../db_tax';
 import A4DocumentModal, { DocumentItem } from './A4DocumentModal';
+import { getAuthHeaders } from '../lib/authSession';
+import {
+  downloadOrFallbackPdf,
+  downloadOrFallbackCsv,
+  generateRelatorioErpPdfBlob
+} from '../lib/clientPdf';
 
 interface FinancialManagementProps {
   company: CompanyData;
@@ -77,18 +105,124 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const [comprasSearch, setComprasSearch] = useState<string>('');
   const [comprasStatusFilter, setComprasStatusFilter] = useState<string>('todos');
 
+  const buildLocalReportData = (tipo: string, periodo: string) => {
+    if (tipo === 'custos_despesas') return getRelatorioCustosEDespesas(periodo);
+    if (tipo === 'vendas') return getRelatorioVendasAgrupadas(periodo);
+    if (tipo === 'compras') return getRelatorioComprasAgrupadas(periodo);
+    if (tipo === 'clientes') return getRelatorioClientes(periodo);
+    if (tipo === 'fornecedores') return getRelatorioFornecedores(periodo);
+    if (tipo === 'balancete') return getBalanceteVerificacao(periodo);
+    if (tipo === 'diario_caixa') return getDiarioCaixa(periodo);
+    if (tipo === 'fluxo_caixa') return getFluxoCaixa(periodo);
+    if (tipo === 'balanco') return getBalancoPatrimonial(periodo);
+    return getDemonstracaoResultados(periodo);
+  };
+
   const loadErpReport = async (tipo: string, periodo: string) => {
     setReportLoading(true);
     try {
-      const res = await fetch(`/api/relatorios/erp-agrupados?tipo=${tipo}&periodo=${encodeURIComponent(periodo)}`);
-      if (res.ok) {
+      const res = await fetch(`/api/relatorios/erp-agrupados?tipo=${tipo}&periodo=${encodeURIComponent(periodo)}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setReportData(data);
+      } else {
+        setReportData(buildLocalReportData(tipo, periodo));
       }
     } catch (err) {
       console.error('Erro ao carregar relatório ERP:', err);
+      setReportData(buildLocalReportData(tipo, periodo));
     } finally {
       setReportLoading(false);
+    }
+  };
+
+  const buildReportRowsForPdf = (tipo: string, data: any): Array<{ col1: string; col2: string; col3: string }> => {
+    if (!data) return [];
+    if (tipo === 'custos_despesas') {
+      return (data.categorias || []).map((c: any) => ({
+        col1: c.categoria || 'Categoria',
+        col2: `${c.qtd || 0} reg.`,
+        col3: `${Number(c.total || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`
+      }));
+    }
+    if (tipo === 'vendas' || tipo === 'clientes') {
+      return (data.clientes || []).map((c: any) => ({
+        col1: `${c.cliente || 'Cliente'} (${c.nuit || 'N/A'})`,
+        col2: `${c.qtd || 0} ft.`,
+        col3: `${Number(c.total || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`
+      }));
+    }
+    if (tipo === 'compras' || tipo === 'fornecedores') {
+      return (data.fornecedores || []).map((f: any) => ({
+        col1: `${f.fornecedor || 'Fornecedor'} (${f.nuit || 'N/A'})`,
+        col2: `${f.qtd || 0} ft.`,
+        col3: `${Number(f.total || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`
+      }));
+    }
+    if (tipo === 'balancete') {
+      return (data.contas || []).map((c: any) => ({
+        col1: `${c.codigo} - ${c.nome}`,
+        col2: `D:${Number(c.debito || 0).toFixed(0)} / C:${Number(c.credito || 0).toFixed(0)}`,
+        col3: `${Number((c.saldo_devedor || 0) - (c.saldo_credor || 0)).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`
+      }));
+    }
+    if (tipo === 'diario_caixa') {
+      return (data.movimentos || []).map((m: any) => ({
+        col1: `${m.data || ''} - ${m.descricao || ''}`,
+        col2: m.tipo || 'Movimento',
+        col3: `${Number(m.valor || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT`
+      }));
+    }
+    if (tipo === 'fluxo_caixa') {
+      return [
+        { col1: '(+) Entradas de Caixa Totais', col2: 'Fluxo Entradas', col3: `${Number(data.entradas?.totalEntradas || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT` },
+        { col1: '(-) Saídas de Caixa Totais', col2: 'Fluxo Saídas', col3: `${Number(data.saidas?.totalSaidas || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT` },
+        { col1: 'Fluxo Líquido Operacional', col2: 'Saldo Caixa', col3: `${Number(data.fluxoLiquidoOperacional || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT` }
+      ];
+    }
+    return [
+      { col1: 'Total Activo', col2: 'Posição Patrimonial', col3: `${Number(data.activo?.totalActivo || data.vendasLiquidas || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT` },
+      { col1: 'Total Passivo + Capital Próprio', col2: 'Equilíbrio PGC', col3: `${Number(data.totalPassivoEPatrimonio || data.resultadoLiquido || 0).toLocaleString('pt-MZ', { minimumFractionDigits: 2 })} MT` }
+    ];
+  };
+
+  const handleExportReportPdf = async () => {
+    try {
+      const currentData = reportData || buildLocalReportData(activeReportType, selectedPeriod);
+      await downloadOrFallbackPdf({
+        url: `/api/relatorios/exportar-pdf?tipo=${activeReportType}&periodo=${encodeURIComponent(selectedPeriod)}`,
+        filename: `relatorio_${activeReportType}_${selectedPeriod.replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () =>
+          generateRelatorioErpPdfBlob(company, activeReportType, selectedPeriod, {
+            title: `Relatório Contabilístico: ${activeReportType}`,
+            rows: buildReportRowsForPdf(activeReportType, currentData)
+          })
+      });
+      showSuccess('Relatório contabilístico PDF descarregado com sucesso!');
+    } catch (err) {
+      console.error(err);
+      showError('Erro ao gerar o relatório PDF.');
+    }
+  };
+
+  const handleExportReportCsv = async () => {
+    try {
+      const currentData = reportData || buildLocalReportData(activeReportType, selectedPeriod);
+      const rows = buildReportRowsForPdf(activeReportType, currentData);
+      const csvFallback =
+        'Descricao;Referencia;Valor\n' +
+        rows.map(r => `"${r.col1}";"${r.col2}";"${r.col3}"`).join('\n');
+      await downloadOrFallbackCsv({
+        url: `/api/relatorios/exportar-excel?tipo=${activeReportType}&periodo=${encodeURIComponent(selectedPeriod)}`,
+        filename: `relatorio_${activeReportType}_${selectedPeriod.replace(/\s+/g, '_')}.csv`,
+        generateFallback: () => csvFallback
+      });
+      showSuccess('Relatório CSV / Excel descarregado com sucesso!');
+    } catch (err) {
+      console.error(err);
+      showError('Erro ao exportar Excel / CSV.');
     }
   };
 
@@ -267,20 +401,32 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const loadFinancialData = async () => {
     setLoading(true);
     try {
+      const headers = getAuthHeaders();
       const [compRes, vendRes, cxRes, ivaRes] = await Promise.all([
-        fetch(`/api/compras?periodo=${encodeURIComponent(selectedPeriod)}`),
-        fetch(`/api/vendas?periodo=${encodeURIComponent(selectedPeriod)}`),
-        fetch(`/api/caixa?periodo=${encodeURIComponent(selectedPeriod)}`),
-        fetch(`/api/financeiro/apuramento-iva?periodo=${encodeURIComponent(selectedPeriod)}`)
+        fetch(`/api/compras?periodo=${encodeURIComponent(selectedPeriod)}`, { headers }).catch(() => null),
+        fetch(`/api/vendas?periodo=${encodeURIComponent(selectedPeriod)}`, { headers }).catch(() => null),
+        fetch(`/api/caixa?periodo=${encodeURIComponent(selectedPeriod)}`, { headers }).catch(() => null),
+        fetch(`/api/financeiro/apuramento-iva?periodo=${encodeURIComponent(selectedPeriod)}`, { headers }).catch(() => null)
       ]);
 
-      const isJson = (r: Response) => r.ok && (r.headers.get('content-type') || '').includes('application/json');
-      if (isJson(compRes)) setCompras(await compRes.json());
-      if (isJson(vendRes)) setVendas(await vendRes.json());
-      if (isJson(cxRes)) setCaixa(await cxRes.json());
-      if (isJson(ivaRes)) setApuramentoIva(await ivaRes.json());
+      const isJson = (r: Response | null) => Boolean(r && r.ok && (r.headers.get('content-type') || '').includes('application/json'));
+      if (isJson(compRes) && isJson(vendRes) && isJson(cxRes) && isJson(ivaRes)) {
+        setCompras(await compRes!.json());
+        setVendas(await vendRes!.json());
+        setCaixa(await cxRes!.json());
+        setApuramentoIva(await ivaRes!.json());
+      } else {
+        setCompras(getCompras(selectedPeriod));
+        setVendas(getVendas(selectedPeriod));
+        setCaixa(getCaixa(selectedPeriod));
+        setApuramentoIva(getApuramentoIVA(selectedPeriod));
+      }
     } catch (err) {
       console.error('Erro ao carregar dados financeiros:', err);
+      setCompras(getCompras(selectedPeriod));
+      setVendas(getVendas(selectedPeriod));
+      setCaixa(getCaixa(selectedPeriod));
+      setApuramentoIva(getApuramentoIVA(selectedPeriod));
     } finally {
       setLoading(false);
     }
@@ -302,15 +448,25 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
 
       const res = await fetch('/api/compras', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           ...formCompra,
           periodo: selectedPeriod
         })
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Não foi possível guardar a compra.');
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Não foi possível guardar a compra.');
+        }
+      } else {
+        addCompra({
+          ...formCompra,
+          valor_iva: Number(((formCompra.valor_base * formCompra.taxa_iva) / 100).toFixed(2)),
+          total_com_iva: Number((formCompra.valor_base * (1 + formCompra.taxa_iva / 100)).toFixed(2)),
+          periodo: selectedPeriod
+        } as any);
       }
       setShowAddCompraModal(false);
       setFormCompra({
@@ -344,15 +500,25 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
 
       const res = await fetch('/api/vendas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           ...formVenda,
           periodo: selectedPeriod
         })
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Não foi possível guardar a venda.');
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || 'Não foi possível guardar a venda.');
+        }
+      } else {
+        addVenda({
+          ...formVenda,
+          valor_iva: Number(((formVenda.valor_base * formVenda.taxa_iva) / 100).toFixed(2)),
+          total_com_iva: Number((formVenda.valor_base * (1 + formVenda.taxa_iva / 100)).toFixed(2)),
+          periodo: selectedPeriod
+        } as any);
       }
       setShowAddVendaModal(false);
       setFormVenda({
@@ -380,13 +546,18 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
     try {
       const res = await fetch('/api/caixa', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           ...formCaixa,
           periodo: selectedPeriod
         })
       });
-      if (!res.ok) throw new Error('Não foi possível guardar movimento de caixa.');
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (isJson) {
+        if (!res.ok) throw new Error('Não foi possível guardar movimento de caixa.');
+      } else {
+        addCaixaItem({ ...formCaixa, periodo: selectedPeriod } as any);
+      }
       setShowAddCaixaModal(false);
       setFormCaixa({
         data: new Date().toISOString().split('T')[0],
@@ -413,8 +584,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
     });
     if (!confirmed) return;
     try {
-      const res = await fetch(`/api/compras/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      const res = await fetch(`/api/compras/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (!isJson) deleteCompra(id);
+      if (res.ok || !isJson) {
         showSuccess('Registo de compra removido.');
         await loadFinancialData();
       }
@@ -432,8 +605,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
     });
     if (!confirmed) return;
     try {
-      const res = await fetch(`/api/vendas/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      const res = await fetch(`/api/vendas/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (!isJson) deleteVenda(id);
+      if (res.ok || !isJson) {
         showSuccess('Registo de venda removido.');
         await loadFinancialData();
       }
@@ -451,8 +626,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
     });
     if (!confirmed) return;
     try {
-      const res = await fetch(`/api/caixa/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      const res = await fetch(`/api/caixa/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const isJson = (res.headers.get('content-type') || '').includes('application/json');
+      if (!isJson) deleteCaixaItem(id);
+      if (res.ok || !isJson) {
         showSuccess('Movimento de caixa removido.');
         await loadFinancialData();
       }
@@ -1323,25 +1500,23 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <a
-                    href={`/api/relatorios/exportar-pdf?tipo=${activeReportType}&periodo=${encodeURIComponent(selectedPeriod)}`}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={handleExportReportPdf}
                     className="px-4 py-2 bg-blue-900 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm cursor-pointer"
                   >
                     <Download size={14} />
                     Exportar PDF
-                  </a>
+                  </button>
 
-                  <a
-                    href={`/api/relatorios/exportar-excel?tipo=${activeReportType}&periodo=${encodeURIComponent(selectedPeriod)}`}
-                    target="_blank"
-                    rel="noreferrer"
+                  <button
+                    type="button"
+                    onClick={handleExportReportCsv}
                     className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm cursor-pointer"
                   >
                     <FileText size={14} />
                     Exportar Excel / CSV
-                  </a>
+                  </button>
                 </div>
               </div>
 

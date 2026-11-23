@@ -22,7 +22,8 @@ import {
   TrendingUp,
   Wallet,
   X,
-  Printer
+  Printer,
+  Trash2
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -47,6 +48,16 @@ import {
   getAvailablePeriods,
   calcularFolhaSalario
 } from '../db_tax';
+import { getAuthHeaders } from '../lib/authSession';
+import {
+  downloadOrFallbackPdf,
+  downloadOrFallbackCsv,
+  generatePayslipPdfBlob,
+  generateMapaSalariosPdfBlob,
+  generateMapaSalariosCsvContent,
+  generateHistoricoFinanceiroPdfBlob,
+  generateAvisoPrevioPdfBlob
+} from '../lib/clientPdf';
 import { useToast } from '../context/ToastContext';
 import PayslipA4Modal, { PayslipA4Data } from './PayslipA4Modal';
 
@@ -58,6 +69,7 @@ interface DashboardProps {
   onReload: () => void;
   selectedPeriod: string;
   onResetCosts?: () => void;
+  onDeleteLog?: (id: string) => Promise<void>;
   userRole?: string | null;
   onNavigateTab?: (tab: string, subTab?: string) => void;
 }
@@ -76,6 +88,7 @@ export default function Dashboard({
   logs,
   onReload,
   selectedPeriod,
+  onDeleteLog,
   userRole,
   onNavigateTab
 }: DashboardProps) {
@@ -97,7 +110,7 @@ export default function Dashboard({
   >(null);
   const [selectedPayslipA4, setSelectedPayslipA4] = useState<PayslipA4Data | null>(null);
 
-  const handleOpenLogPayslipA4 = (log: PaymentLog) => {
+  const buildPayslipA4Payload = (log: PaymentLog): PayslipA4Data => {
     const matchedEmp =
       employees.find((e) => e.id === log.employeeId) ||
       employees.find((e) => e.nome.toLowerCase() === log.employeeName.toLowerCase());
@@ -107,7 +120,7 @@ export default function Dashboard({
     const shortId = (log.employeeId || log.id || '001').replace(/[^A-Z0-9]/gi, '').slice(-4).toUpperCase() || '001';
     const pdfUrl = `/download/recibo_${log.employeeId}_${log.periodo.replace(/\s+/g, '_')}.pdf`;
 
-    setSelectedPayslipA4({
+    return {
       numeroRecibo: `RV-${log.periodo.replace(/\s+/g, '').slice(0, 6).toUpperCase()}/${shortId}`,
       periodo: log.periodo,
       dataEmissao: log.timestamp ? new Date(log.timestamp).toLocaleDateString('pt-PT') : new Date().toLocaleDateString('pt-PT'),
@@ -143,7 +156,24 @@ export default function Dashboard({
         salarioLiquido: log.salarioLiquido
       },
       pdfDownloadUrl: pdfUrl
-    });
+    };
+  };
+
+  const handleOpenLogPayslipA4 = (log: PaymentLog) => {
+    setSelectedPayslipA4(buildPayslipA4Payload(log));
+  };
+
+  const handleDownloadLogPayslipPdf = async (log: PaymentLog) => {
+    try {
+      const payload = buildPayslipA4Payload(log);
+      await downloadOrFallbackPdf({
+        url: payload.pdfDownloadUrl || `/download/recibo_${log.employeeId}_${log.periodo.replace(/\s+/g, '_')}.pdf`,
+        filename: `recibo_${log.employeeName.replace(/\s+/g, '_')}_${log.periodo.replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () => generatePayslipPdfBlob(payload)
+      });
+    } catch (err: any) {
+      showError(err.message || 'Erro ao descarregar recibo em PDF.');
+    }
   };
 
   const greeting = (() => {
@@ -314,16 +344,12 @@ export default function Dashboard({
 
   const carregarContratos = async () => {
     try {
-      const usuarioSimulado = JSON.stringify({
-        funcao: 'CLIENTE_EMPRESA',
-        empresa_id: localStorage.getItem('paytek_company_id') || 'emp_piloto_01'
-      });
       const res = await fetch('/api/clientes/listar-contratos', {
-        headers: { 'usuario-simulado': usuarioSimulado }
+        headers: getAuthHeaders()
       });
       if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
-        setContratos(data);
+        setContratos(Array.isArray(data) ? data : []);
       }
     } catch {
       // Silencioso caso offline/estático
@@ -345,7 +371,9 @@ export default function Dashboard({
   const carregarCarteira = async () => {
     setLoadingCarteira(true);
     try {
-      const res = await fetch('/api/fintech/carteira');
+      const res = await fetch('/api/fintech/carteira', {
+        headers: getAuthHeaders()
+      });
       if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const data = await res.json();
         setSaldoCarteira(data.saldo_disponivel_mz || 0);
@@ -368,7 +396,7 @@ export default function Dashboard({
     try {
       const res = await fetch('/api/fintech/autopilot/executar', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           periodo: selectedPeriod,
           bancoOrigem: 'Millennium BIM',
@@ -415,39 +443,32 @@ export default function Dashboard({
   ) => {
     setLoadingAviso(empId);
     try {
-      const res = await fetch('/api/contratos/emitir-aviso-previo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dadosEmpresa: {
-            nome: company.nome || 'Empresa Lda',
-            nuit: company.nuit || '400555321',
-            endereco: company.endereco || 'Av. Eduardo Mondlane, Maputo'
-          },
-          dadosFuncionario: {
-            nome: empName,
-            cargo: empCargo,
-            inss_numero: empInss
-          },
-          dadosContrato: {
-            data_fim: '25 de Julho de 2026',
-            dia_atual: '25',
-            mes_atual: 'Julho',
-            ano_atual: '2026'
-          }
-        })
-      });
+      const dadosEmpresa = {
+        nome: company.nome || 'Empresa Lda',
+        nuit: company.nuit || '400555321',
+        endereco: company.endereco || 'Av. Eduardo Mondlane, Maputo'
+      };
+      const dadosFuncionario = {
+        nome: empName,
+        cargo: empCargo,
+        inss_numero: empInss
+      };
+      const now = new Date();
+      const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      const dadosContrato = {
+        data_fim: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-PT'),
+        dia_atual: String(now.getDate()),
+        mes_atual: meses[now.getMonth()],
+        ano_atual: String(now.getFullYear())
+      };
 
-      if (!res.ok) throw new Error('Falha ao emitir o aviso prévio.');
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `aviso_previo_${empInss.replace(/\s+/g, '_')}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      await downloadOrFallbackPdf({
+        url: '/api/contratos/emitir-aviso-previo',
+        method: 'POST',
+        body: { dadosEmpresa, dadosFuncionario, dadosContrato },
+        filename: `aviso_previo_${(empInss || empName).replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () => generateAvisoPrevioPdfBlob(company, dadosFuncionario, dadosContrato)
+      });
     } catch (err: any) {
       showError(err.message || 'Erro ao gerar o aviso prévio em PDF.');
     } finally {
@@ -455,44 +476,41 @@ export default function Dashboard({
     }
   };
 
-  const downloadEndpoint = async (url: string, filename: string, errMsg: string) => {
+  const handleDownloadMapaPDF = async () => {
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(errMsg);
-      const blob = await res.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(blobUrl);
+      await downloadOrFallbackPdf({
+        url: `/api/exportar/mapa-pdf?periodo=${encodeURIComponent(selectedPeriod)}`,
+        filename: `mapa_salarios_${selectedPeriod.replace(/\s+/g, '_')}.pdf`,
+        generateFallback: () => generateMapaSalariosPdfBlob(company, employees, selectedPeriod)
+      });
     } catch (err: any) {
-      showError(err.message || errMsg);
+      showError(err.message || 'Falha ao gerar o PDF de mapa de salários.');
     }
   };
 
-  const handleDownloadMapaPDF = () =>
-    downloadEndpoint(
-      `/api/exportar/mapa-pdf?periodo=${encodeURIComponent(selectedPeriod)}`,
-      `mapa_salarios_${selectedPeriod.replace(/\s+/g, '_')}.pdf`,
-      'Falha ao gerar o PDF de mapa de salários.'
-    );
+  const handleDownloadMapaExcel = async () => {
+    try {
+      await downloadOrFallbackCsv({
+        url: `/api/exportar/mapa-excel?periodo=${encodeURIComponent(selectedPeriod)}`,
+        filename: `mapa_salarios_${selectedPeriod.replace(/\s+/g, '_')}.csv`,
+        generateFallback: () => generateMapaSalariosCsvContent(employees)
+      });
+    } catch (err: any) {
+      showError(err.message || 'Falha ao gerar o Excel de mapa de salários.');
+    }
+  };
 
-  const handleDownloadMapaExcel = () =>
-    downloadEndpoint(
-      `/api/exportar/mapa-excel?periodo=${encodeURIComponent(selectedPeriod)}`,
-      `mapa_salarios_${selectedPeriod.replace(/\s+/g, '_')}.csv`,
-      'Falha ao gerar o Excel de mapa de salários.'
-    );
-
-  const handleDownloadHistoricoPDF = () =>
-    downloadEndpoint(
-      `/api/exportar/historico-pdf`,
-      `relatorio_historico_financeiro.pdf`,
-      'Falha ao gerar o PDF de histórico financeiro.'
-    );
+  const handleDownloadHistoricoPDF = async () => {
+    try {
+      await downloadOrFallbackPdf({
+        url: `/api/exportar/historico-pdf`,
+        filename: `relatorio_historico_financeiro.pdf`,
+        generateFallback: () => generateHistoricoFinanceiroPdfBlob(company, selectedPeriod, employees, logs)
+      });
+    } catch (err: any) {
+      showError(err.message || 'Falha ao gerar o PDF de histórico financeiro.');
+    }
+  };
 
   const contratosCriticos = contratos.filter((c: any) => c.auditoria?.statusRisco === 'VERMELHO');
   const contratosAviso = contratos.filter((c: any) => c.auditoria?.statusRisco === 'AMARELO');
@@ -1234,19 +1252,28 @@ export default function Dashboard({
                             type="button"
                             onClick={() => handleOpenLogPayslipA4(log)}
                             className="inline-flex items-center gap-1 font-semibold text-slate-900 hover:text-blue-900 cursor-pointer"
-                            title="Abrir Recibo A4 Estilo Primavera V10"
+                            title="Abrir Recibo A4 (ClickPay ERP Enterprise)"
                           >
                             <Printer size={12} /> A4
                           </button>
-                          <a
-                            href={`/download/recibo_${log.employeeId}_${log.periodo.replace(
-                              /\s+/g,
-                              '_'
-                            )}.pdf`}
-                            className="inline-flex items-center gap-1 font-medium text-blue-900 hover:underline"
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadLogPayslipPdf(log)}
+                            className="inline-flex items-center gap-1 font-medium text-blue-900 hover:underline cursor-pointer"
+                            title="Descarregar Recibo em PDF A4"
                           >
                             PDF <Download size={11} />
-                          </a>
+                          </button>
+                          {onDeleteLog && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteLog(log.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              title="Eliminar registo de liquidação"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

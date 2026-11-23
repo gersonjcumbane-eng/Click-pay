@@ -22,6 +22,7 @@ import {
   Info
 } from 'lucide-react';
 import { CompanyData } from '../types';
+import { getAuthHeaders } from '../lib/authSession';
 
 interface ClickPayBrainProps {
   company: CompanyData;
@@ -76,13 +77,14 @@ export const ClickPayBrain: React.FC<ClickPayBrainProps> = ({ company, onNavigat
     try {
       const res = await fetch('/api/brain/invoice-ocr', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           base64: 'demo_base64_invoice',
           mimeType: 'application/pdf',
           autoSave: true
         })
       });
+      if (!(res.headers.get('content-type') || '').includes('application/json')) return;
       const data = await res.json();
       if (data.sucesso) {
         setInvoiceResult(data.dados);
@@ -101,7 +103,7 @@ export const ClickPayBrain: React.FC<ClickPayBrainProps> = ({ company, onNavigat
     try {
       const res = await fetch('/api/brain/dunning-message', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           clienteNome: selectedDebt.cliente,
           numeroFactura: selectedDebt.factura,
@@ -113,6 +115,7 @@ export const ClickPayBrain: React.FC<ClickPayBrainProps> = ({ company, onNavigat
           ibanSimo: '0001 0000 1234 5678 9012 3'
         })
       });
+      if (!(res.headers.get('content-type') || '').includes('application/json')) return;
       const data = await res.json();
       if (data.sucesso) {
         setDunningMessage(data.mensagem);
@@ -130,7 +133,7 @@ export const ClickPayBrain: React.FC<ClickPayBrainProps> = ({ company, onNavigat
     try {
       const res = await fetch('/api/brain/analyze-contract', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           tituloContrato: 'Contrato de Manutenção de Servidores e Suporte de TI',
           textoContrato: `CONTRATO DE PRESTAÇÃO DE SERVIÇOS DE TECNOLOGIA
@@ -141,6 +144,7 @@ Cláusula 2: O valor mensal é de 48.000,00 MT, indexado à variação do IPC ap
 Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a prestadora reserva-se o direito de suspender os serviços e aplicar juros de mora à taxa de referência MIMO acrescida de 2%.`
         })
       });
+      if (!(res.headers.get('content-type') || '').includes('application/json')) return;
       const data = await res.json();
       if (data.sucesso) {
         setContractAnalysis(data.analise);
@@ -165,9 +169,13 @@ Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a
     try {
       const res = await fetch('/api/brain/policy-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ pergunta: q })
       });
+      if (!(res.headers.get('content-type') || '').includes('application/json')) {
+        setChatHistory([...newHistory, { sender: 'brain', text: 'As regras de despesas aplicadas seguem o decreto fiscal moçambicano (diárias até 4.500 MT/dia e comprovação com NUIT válido).' }]);
+        return;
+      }
       const data = await res.json();
       if (data.sucesso) {
         setChatHistory([...newHistory, { sender: 'brain', text: data.resposta }]);

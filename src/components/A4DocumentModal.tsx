@@ -1,13 +1,14 @@
 import React from 'react';
-import { Printer, X, ShieldCheck, QrCode, Building2 } from 'lucide-react';
+import { Printer, X, ShieldCheck, QrCode, Building2, Download } from 'lucide-react';
 import {
   DEFAULT_BANK_ACCOUNTS,
   DEFAULT_MOBILE_WALLETS,
   numeroParaExtenso,
   BankAccountDetails,
   computeDocumentHashCode,
-  PRIMAVERA_COMPUTER_NOTE
+  CLICKPAY_COMPUTER_NOTE
 } from '../utils/documentUtils';
+import { downloadBlobAsFile, generateA4CommercialDocPdfBlob } from '../lib/clientPdf';
 
 export interface DocumentItem {
   codigo?: string;
@@ -140,7 +141,7 @@ export default function A4DocumentModal({
             <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
             <div>
               <h3 className="text-xs font-bold tracking-wide text-white uppercase">
-                Formato Oficial A4 · Estilo Primavera ERP V10
+                Formato Oficial A4 · ClickPay ERP Enterprise
               </h3>
               <p className="text-[11px] text-slate-300">
                 {getTituloDocumento()} n.º {numeroDocumento} · Processado por computador
@@ -151,11 +152,41 @@ export default function A4DocumentModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => {
+                const blob = generateA4CommercialDocPdfBlob({
+                  titulo: getTituloDocumento(),
+                  numeroDocumento,
+                  dataEmissao,
+                  dataVencimento,
+                  empresa,
+                  entidade,
+                  itens: itens.map((it) => ({
+                    codigo: it.codigo,
+                    descricao: it.descricao,
+                    quantidade: it.quantidade,
+                    precoUnitario: it.precoUnitario,
+                    taxaIva: it.taxaIva,
+                    total: it.totalComIva
+                  })),
+                  valorBase,
+                  valorIvaTotal,
+                  valorTotalGeral,
+                  observacoes
+                });
+                downloadBlobAsFile(blob, `${numeroDocumento.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`);
+              }}
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold rounded-md text-xs flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Download size={15} />
+              <span>Descarregar PDF (A4)</span>
+            </button>
+            <button
+              type="button"
               onClick={handlePrint}
               className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white font-semibold rounded-md text-xs flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
             >
               <Printer size={15} />
-              <span>Imprimir / Guardar PDF (A4)</span>
+              <span>Imprimir (A4)</span>
             </button>
             <button
               type="button"
@@ -168,14 +199,14 @@ export default function A4DocumentModal({
           </div>
         </div>
 
-        {/* Folha A4 Oficial (210mm x 297mm) Estilo Primavera V10 */}
+        {/* Folha A4 Oficial (210mm x 297mm) ClickPay ERP Enterprise */}
         <div
           data-a4-print-sheet="true"
           className="w-full max-w-[210mm] min-h-[297mm] mx-auto px-7 py-7 sm:px-10 sm:py-9 text-slate-900 bg-white flex flex-col justify-between gap-5 font-sans print:px-2 print:py-2"
         >
           {/* BLOCO PRINCIPAL SUPERIOR + TABELA */}
           <div className="space-y-5">
-            {/* 1. CABEÇALHO PRIMAVERA V10 */}
+            {/* 1. CABEÇALHO CLICKPAY ERP ENTERPRISE */}
             <div className="flex flex-col sm:flex-row justify-between items-start gap-6 border-b-2 border-slate-900 pb-4">
               {/* Lado Esquerdo: Emitente */}
               <div className="space-y-2.5 flex-1">
@@ -222,7 +253,7 @@ export default function A4DocumentModal({
                 </div>
               </div>
 
-              {/* Lado Direito: Quadro de Identificação do Documento Estilo Primavera V10 */}
+              {/* Lado Direito: Quadro de Identificação do Documento ClickPay ERP Enterprise */}
               <div className="w-full sm:w-72 border border-slate-900 text-[10.5px] bg-white shrink-0">
                 <div className="bg-slate-900 text-white px-3 py-1.5 flex items-center justify-between">
                   <span className="font-bold uppercase tracking-wider text-[11px]">
@@ -327,7 +358,7 @@ export default function A4DocumentModal({
               </div>
             )}
 
-            {/* 4. TABELA DE ARTIGOS / SERVIÇOS ESTILO PRIMAVERA V10 */}
+            {/* 4. TABELA DE ARTIGOS / SERVIÇOS CLICKPAY ERP ENTERPRISE */}
             <div className="border border-slate-900 overflow-hidden">
               <table className="w-full text-left border-collapse text-[10.5px]">
                 <thead>
@@ -491,11 +522,11 @@ export default function A4DocumentModal({
               </div>
             </div>
 
-            {/* 9. RODAPÉ OFICIAL PRIMAVERA V10: PROCESSADO POR COMPUTADOR */}
+            {/* 9. RODAPÉ OFICIAL CLICKPAY ERP ENTERPRISE: PROCESSADO POR COMPUTADOR */}
             <div className="pt-2.5 border-t border-slate-900 flex flex-wrap items-center justify-between gap-3 text-[9px] text-slate-600">
               <div className="space-y-0.5">
                 <p className="font-bold text-slate-950 uppercase tracking-wide">
-                  {PRIMAVERA_COMPUTER_NOTE}
+                  {CLICKPAY_COMPUTER_NOTE}
                 </p>
                 <p className="font-mono tabular-nums text-[8.5px] text-slate-500">
                   Ref. Controlo: {hashControlo} · Documento: {numeroDocumento} · Página 1 de 1

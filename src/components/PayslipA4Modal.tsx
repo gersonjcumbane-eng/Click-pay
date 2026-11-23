@@ -3,8 +3,13 @@ import { Printer, X, ShieldCheck, QrCode, Download } from 'lucide-react';
 import {
   computeDocumentHashCode,
   numeroParaExtenso,
-  PRIMAVERA_COMPUTER_NOTE
+  CLICKPAY_COMPUTER_NOTE
 } from '../utils/documentUtils';
+import {
+  downloadBlobAsFile,
+  downloadOrFallbackPdf,
+  generatePayslipPdfBlob
+} from '../lib/clientPdf';
 
 export interface PayslipA4Data {
   numeroRecibo: string;
@@ -74,7 +79,7 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
             <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
             <div>
               <h3 className="text-xs font-bold tracking-wide text-white uppercase">
-                Recibo de Vencimento A4 · Estilo Primavera ERP V10
+                Recibo de Vencimento A4 · ClickPay ERP Enterprise
               </h3>
               <p className="text-[11px] text-slate-300">
                 {colaborador.nome} · Período {data.periodo} · Processado por computador
@@ -83,22 +88,32 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
           </div>
 
           <div className="flex items-center gap-2">
-            {data.pdfDownloadUrl && (
-              <a
-                href={data.pdfDownloadUrl}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold rounded-md text-xs flex items-center gap-1.5 transition-colors"
-              >
-                <Download size={14} />
-                <span>PDF Servidor</span>
-              </a>
-            )}
+            <button
+              type="button"
+              onClick={async () => {
+                const fileName = `recibo_${colaborador.nome.replace(/\s+/g, '_')}_${data.periodo.replace(/\s+/g, '_')}.pdf`;
+                if (data.pdfDownloadUrl) {
+                  await downloadOrFallbackPdf({
+                    url: data.pdfDownloadUrl,
+                    filename: fileName,
+                    generateFallback: () => generatePayslipPdfBlob(data)
+                  });
+                } else {
+                  downloadBlobAsFile(generatePayslipPdfBlob(data), fileName);
+                }
+              }}
+              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold rounded-md text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Download size={14} />
+              <span>Descarregar PDF (A4)</span>
+            </button>
             <button
               type="button"
               onClick={() => window.print()}
               className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white font-semibold rounded-md text-xs flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
             >
               <Printer size={15} />
-              <span>Imprimir / Guardar PDF (A4)</span>
+              <span>Imprimir (A4)</span>
             </button>
             <button
               type="button"
@@ -111,7 +126,7 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
           </div>
         </div>
 
-        {/* Folha A4 Oficial Primavera V10 — Recibo de Vencimento */}
+        {/* Folha A4 Oficial ClickPay ERP Enterprise — Recibo de Vencimento */}
         <div
           data-a4-print-sheet="true"
           className="w-full max-w-[210mm] min-h-[297mm] mx-auto px-7 py-7 sm:px-10 sm:py-9 text-slate-900 bg-white flex flex-col justify-between gap-5 font-sans print:px-2 print:py-2"
@@ -199,7 +214,7 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
               </div>
             </div>
 
-            {/* 2. DADOS DO TRABALHADOR (GRELHA PRIMAVERA V10) */}
+            {/* 2. DADOS DO TRABALHADOR (GRELHA CLICKPAY ERP ENTERPRISE) */}
             <div className="border border-slate-900 text-[10.5px] a4-avoid-break">
               <div className="bg-slate-100 border-b border-slate-900 px-3 py-1.5 font-bold uppercase tracking-wider text-slate-900 text-[10px]">
                 Identificação do(a) Trabalhador(a)
@@ -238,7 +253,7 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
               </div>
             </div>
 
-            {/* 3. TABELA DE REMUNERAÇÕES E DESCONTOS ESTILO PRIMAVERA V10 */}
+            {/* 3. TABELA DE REMUNERAÇÕES E DESCONTOS CLICKPAY ERP ENTERPRISE */}
             <div className="border border-slate-900 overflow-hidden">
               <table className="w-full text-left border-collapse text-[10.5px]">
                 <thead>
@@ -396,7 +411,7 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
             <div className="pt-2.5 border-t border-slate-900 flex flex-wrap items-center justify-between gap-3 text-[9px] text-slate-600">
               <div className="space-y-0.5">
                 <p className="font-bold text-slate-950 uppercase tracking-wide">
-                  {PRIMAVERA_COMPUTER_NOTE}
+                  {CLICKPAY_COMPUTER_NOTE}
                 </p>
                 <p className="font-mono tabular-nums text-[8.5px] text-slate-500">
                   Ref. Controlo: {hashControlo} · Recibo: {data.numeroRecibo} · Página 1 de 1

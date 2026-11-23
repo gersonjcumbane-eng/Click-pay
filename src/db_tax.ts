@@ -1607,6 +1607,9 @@ export interface ClienteEmpresaRegisto {
   subscription_status?: 'ativo' | 'suspenso' | 'pendente';
   subscription_plan?: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
   next_billing_date?: string;
+  sector_negocio?: string;
+  tamanho_empresa?: string;
+  regime_fiscal_pme?: string;
 }
 
 export let baseDadosClientes: ClienteEmpresaRegisto[] = [

@@ -89,7 +89,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
   // Step 3: Warehouse Initial State
   const [armazemNome, setArmazemNome] = useState('Armazém Principal');
-  const [armazemCodigo, setArmazemCodigo] = useState('PRI');
+  const [armazemCodigo, setArmazemCodigo] = useState('CPY1');
   const [armazemEndereco, setArmazemEndereco] = useState('Endereço do armazém');
 
   // Form Submission & Error State
@@ -139,6 +139,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     const isJsonRes = (r: Response | null) =>
       !!r && (r.headers.get('content-type') || '').includes('application/json');
 
+    let serverCreated = false;
     try {
       const res = await fetch('/api/auth/register-onboarding', {
         method: 'POST',
@@ -155,6 +156,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
       if (res && res.ok && isJsonRes(res)) {
         serverData = await res.json().catch(() => null);
+        serverCreated = Boolean(serverData?.sucesso);
         if (serverData?.usuario?.id || serverData?.usuario?.empresa_id) {
           clientId = serverData.usuario.id || serverData.usuario.empresa_id;
         }
@@ -165,7 +167,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         return;
       }
 
-      // Garantir gravação imediata no Firebase Firestore
+      // Garantir gravação imediata na nuvem ClickPay e cofre local
       const fbResult = await syncRegisteredAccountToFirestore({
         clientId,
         nomeEmpresa: cleanEmpresa,
@@ -173,11 +175,12 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         nuit: cleanNuit,
         password: senha,
         plano: 'Starter',
-        feeBase: getPlanFeeMzn('Starter', 'mensal')
+        feeBase: getPlanFeeMzn('Starter', 'mensal'),
+        isUpdate: false
       });
 
-      if (fbResult.syncedCollections.length === 0) {
-        setFormError('Não foi possível gravar os dados na nuvem ClickPay. Verifique a ligação e tente novamente.');
+      if (!serverCreated && fbResult.syncedCollections.length === 0) {
+        setFormError('Não foi possível criar a conta neste momento. Verifique a ligação e tente novamente.');
         setIsCreatingAccount(false);
         return;
       }
@@ -186,6 +189,36 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       setCreatedSessionData(serverData);
       setEmpresaEmail(cleanEmail);
 
+      // Inicializar espaço de trabalho limpo para a nova empresa (zero dados de outras empresas)
+      try {
+        localStorage.setItem(
+          `clickpay_tenant_${clientId}`,
+          JSON.stringify({
+            company: {
+              nome: cleanEmpresa,
+              nuit: cleanNuit,
+              endereco: endereco || 'Moçambique',
+              provincia: provincia || 'Maputo Cidade',
+              distrito: distrito || 'KaMpfumo',
+              regime_iva: regimeIva,
+              nuel: nuel || '',
+              email: cleanEmail,
+              telefone: empresaTelefone || '+258 84 000 0000',
+              logo: '/clickpay-logo.png',
+              subscription_status: 'ativo',
+              subscription_plan: 'Bronze'
+            },
+            employees: [],
+            logs: [],
+            contracts: [],
+            vales: [],
+            deletedIds: []
+          })
+        );
+      } catch {
+        // Ignore storage quota warning
+      }
+
       // Persistir sessão básica para que o utilizador já fique registado
       localStorage.setItem('paytek_auth', 'true');
       localStorage.setItem('paytek_token', serverData?.token || `token_cliente_${clientId}`);
@@ -193,7 +226,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       localStorage.setItem('paytek_role', serverData?.usuario?.funcao || 'CLIENTE_EMPRESA');
       localStorage.setItem('paytek_company_id', clientId);
       localStorage.setItem('paytek_sub_status', 'ativo');
-      localStorage.setItem('paytek_sub_plan', 'Starter');
+      localStorage.setItem('paytek_sub_plan', 'Bronze');
       localStorage.setItem('paytek_company_name', cleanEmpresa);
 
       setStage('WIZARD');
@@ -277,12 +310,8 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
       const isJson = !!res && (res.headers.get('content-type') || '').includes('application/json');
 
-      if (res && isJson) {
+      if (res && isJson && res.ok) {
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setFormError(data.erro || 'Falha ao concluir registo. Verifique os dados.');
-          return;
-        }
         const clientId = createdCompanyId || data.usuario?.id || data.usuario?.empresa_id || `cli_reg_${Date.now()}`;
         await syncRegisteredAccountToFirestore({
           clientId,
@@ -294,8 +323,41 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
           feeBase,
           telefone: empresaTelefone || '+258 84 000 0000',
           endereco,
-          provincia
+          provincia,
+          isUpdate: Boolean(createdCompanyId)
         });
+
+        try {
+          const tenantRaw = localStorage.getItem(`clickpay_tenant_${clientId}`);
+          const tenantObj = tenantRaw ? JSON.parse(tenantRaw) : {};
+          localStorage.setItem(
+            `clickpay_tenant_${clientId}`,
+            JSON.stringify({
+              employees: tenantObj.employees || [],
+              logs: tenantObj.logs || [],
+              contracts: tenantObj.contracts || [],
+              vales: tenantObj.vales || [],
+              deletedIds: tenantObj.deletedIds || [],
+              company: {
+                ...(tenantObj.company || {}),
+                nome: cleanEmpresa,
+                nuit: cleanNuit,
+                nuel,
+                endereco,
+                provincia,
+                distrito,
+                regime_iva: regimeIva,
+                email: cleanEmail,
+                telefone: empresaTelefone || '+258 84 000 0000',
+                logo: logoUrl || '/clickpay-logo.png',
+                subscription_status: 'ativo',
+                subscription_plan: mappedPlan
+              }
+            })
+          );
+        } catch {
+          // Ignore storage quota warning
+        }
 
         localStorage.setItem('paytek_auth', 'true');
         localStorage.setItem('paytek_token', data.token || `token_cliente_${clientId}`);
@@ -303,15 +365,18 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         localStorage.setItem('paytek_role', data.usuario?.funcao || 'CLIENTE_EMPRESA');
         localStorage.setItem('paytek_company_id', clientId);
         localStorage.setItem('paytek_sub_status', data.usuario?.subscription_status || 'ativo');
-        localStorage.setItem('paytek_sub_plan', data.usuario?.subscription_plan || mappedPlan);
+        localStorage.setItem('paytek_sub_plan', mappedPlan);
         const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         localStorage.setItem('paytek_sub_expire', data.usuario?.next_billing_date || defaultExp);
         localStorage.setItem('paytek_company_name', data.usuario?.nome_empresa || cleanEmpresa);
-        onSuccess(data.usuario);
+        onSuccess({
+          ...data.usuario,
+          subscription_plan: mappedPlan
+        });
         return;
       }
 
-      // Modo nuvem / deploy estático (Firebase Hosting / Vercel): concluir diretamente via Firebase Firestore
+      // Modo nuvem / deploy estático: concluir diretamente e atualizar cofre local/empresa
       const clientId = createdCompanyId || `cli_reg_${Date.now()}`;
       await syncRegisteredAccountToFirestore({
         clientId,
@@ -323,8 +388,41 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         feeBase,
         telefone: empresaTelefone || '+258 84 000 0000',
         endereco,
-        provincia
+        provincia,
+        isUpdate: Boolean(createdCompanyId)
       });
+
+      try {
+        const tenantRaw = localStorage.getItem(`clickpay_tenant_${clientId}`);
+        const tenantObj = tenantRaw ? JSON.parse(tenantRaw) : {};
+        localStorage.setItem(
+          `clickpay_tenant_${clientId}`,
+          JSON.stringify({
+            employees: tenantObj.employees || [],
+            logs: tenantObj.logs || [],
+            contracts: tenantObj.contracts || [],
+            vales: tenantObj.vales || [],
+            deletedIds: tenantObj.deletedIds || [],
+            company: {
+              ...(tenantObj.company || {}),
+              nome: cleanEmpresa,
+              nuit: cleanNuit,
+              nuel,
+              endereco,
+              provincia,
+              distrito,
+              regime_iva: regimeIva,
+              email: cleanEmail,
+              telefone: empresaTelefone || '+258 84 000 0000',
+              logo: logoUrl || '/clickpay-logo.png',
+              subscription_status: 'ativo',
+              subscription_plan: mappedPlan
+            }
+          })
+        );
+      } catch {
+        // Ignore storage quota warning
+      }
 
       const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const fallbackUser = {
@@ -679,7 +777,20 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
             </div>
             <button
               type="button"
-              onClick={() => onSuccess(createdSessionData?.usuario || { email, nome_empresa: nomeEmpresa })}
+              onClick={() => {
+                const resolvedId = createdCompanyId || localStorage.getItem('paytek_company_id') || `cli_reg_${Date.now()}`;
+                onSuccess(
+                  createdSessionData?.usuario || {
+                    id: resolvedId,
+                    empresa_id: resolvedId,
+                    email: email.trim().toLowerCase(),
+                    funcao: 'CLIENTE_EMPRESA',
+                    nome_empresa: nomeEmpresa.trim(),
+                    subscription_status: 'ativo',
+                    subscription_plan: normalizePlanToInternal(selectedPlan)
+                  }
+                );
+              }}
               className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
             >
               <span>Entrar no ERP agora</span>
@@ -1375,7 +1486,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                     type="text"
                     value={armazemCodigo}
                     onChange={(e) => setArmazemCodigo(e.target.value)}
-                    placeholder="PRI"
+                    placeholder="CPY1"
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
                   />
                 </div>

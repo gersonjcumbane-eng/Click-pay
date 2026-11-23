@@ -20,7 +20,7 @@ function computePdfHashCode(refCode: string, total: number, nuit?: string): stri
   return `${hex.slice(0, 4)}-${tail}`;
 }
 
-function drawPrimaveraFooter(
+function drawClickPayEnterpriseFooter(
   doc: any,
   refCode: string,
   options?: { x?: number; width?: number; y?: number; total?: number; nuit?: string; compact?: boolean }
@@ -34,7 +34,7 @@ function drawPrimaveraFooter(
   doc.strokeColor('#0f172a').lineWidth(0.75).moveTo(x, y).lineTo(x + width, y).stroke();
   doc.fontSize(options?.compact ? 6.5 : 7).font('Helvetica-Bold').fillColor('#0f172a');
   doc.text(
-    'Processado por computador · Formato A4 (PRIMAVERA ERP V10)',
+    'Processado por computador · Formato A4 (CLICKPAY ERP ENTERPRISE)',
     x,
     y + 4,
     { width: width - 145, lineBreak: false }
@@ -49,7 +49,7 @@ function drawPrimaveraFooter(
 }
 
 /**
- * Generates a polished A4 PDF salary slip in Primavera ERP V10 style for an employee.
+ * Generates a polished A4 PDF salary slip in ClickPay ERP Enterprise style for an employee.
  * Utilizes default built-in PDFKit fonts (Helvetica, Helvetica-Bold) for native container rendering.
  */
 export function criarReciboSalarioPDF(
@@ -68,7 +68,7 @@ export function criarReciboSalarioPDF(
       const width = 515;
 
       // =========================================================================
-      // 1. CABEÇALHO EMPRESA & QUADRO METADADOS PRIMAVERA V10
+      // 1. CABEÇALHO EMPRESA & QUADRO METADADOS CLICKPAY ENTERPRISE
       // =========================================================================
       let textX = startX;
       let drawn = false;
@@ -125,7 +125,7 @@ export function criarReciboSalarioPDF(
       doc.text(`Regime: ${regimeIvaStr}  |  ${dist}, ${prov}`, textX, 68, { width: 255 });
       doc.text(`Contacto: ${emailEmp}  |  Tel: ${telfEmp}`, textX, 80, { width: 255 });
 
-      // Quadro Direito Primavera V10: RECIBO DE VENCIMENTO (ORIGINAL)
+      // Quadro Direito ClickPay ERP Enterprise: RECIBO DE VENCIMENTO (ORIGINAL)
       const boxX = 355;
       const boxW = 200;
       const boxY = 38;
@@ -162,7 +162,7 @@ export function criarReciboSalarioPDF(
       doc.strokeColor('#0f172a').lineWidth(1.2).moveTo(startX, 122).lineTo(startX + width, 122).stroke();
 
       // =========================================================================
-      // 2. QUADRO DE IDENTIFICAÇÃO DO TRABALHADOR (ESTILO PRIMAVERA V10)
+      // 2. QUADRO DE IDENTIFICAÇÃO DO TRABALHADOR (ESTILO CLICKPAY ENTERPRISE)
       // =========================================================================
       const empBoxY = 132;
       const empBoxH = 66;
@@ -285,7 +285,7 @@ export function criarReciboSalarioPDF(
       });
 
       // =========================================================================
-      // 4. RESUMO FINAL & LÍQUIDO A RECEBER (ESTILO PRIMAVERA V10)
+      // 4. RESUMO FINAL & LÍQUIDO A RECEBER (ESTILO CLICKPAY ENTERPRISE)
       // =========================================================================
       const summaryY = tableBottomY + 22;
       const inssPatronal = dadosSalario.inssEmpresa ?? Math.round(dadosSalario.salarioBase * 0.04 * 100) / 100;
@@ -313,7 +313,7 @@ export function criarReciboSalarioPDF(
       doc.fontSize(10).text(`${dadosSalario.salarioLiquido.toFixed(2)} MT`, totBoxX + 100, summaryY + 44, { width: 112, align: 'right' });
 
       // =========================================================================
-      // 5. ASSINATURAS E RODAPÉ PRIMAVERA V10 ("PROCESSADO POR COMPUTADOR")
+      // 5. ASSINATURAS E RODAPÉ CLICKPAY ENTERPRISE ("PROCESSADO POR COMPUTADOR")
       // =========================================================================
       doc.strokeColor('#64748b').lineWidth(0.6);
       doc.moveTo(65, 710).lineTo(245, 710).stroke();
@@ -323,7 +323,7 @@ export function criarReciboSalarioPDF(
       doc.text('Carimbo e Assinatura da Entidade', 65, 716, { width: 180, align: 'center' });
       doc.text('Assinatura do(a) Trabalhador(a)', 350, 716, { width: 180, align: 'center' });
 
-      drawPrimaveraFooter(doc, numRecibo, {
+      drawClickPayEnterpriseFooter(doc, numRecibo, {
         x: startX,
         width,
         y: 774,
@@ -436,7 +436,7 @@ export function criarAvisoPrevioPDF(
       doc.text('___________________________________________', 280, yAssinatura);
       doc.text('Assinatura do(a) Trabalhador(a)', 340, yAssinatura + 15);
 
-      drawPrimaveraFooter(doc, `AP-${dadosContrato.ano_atual}`, {
+      drawClickPayEnterpriseFooter(doc, `AP-${dadosContrato.ano_atual}`, {
         x: 50,
         width: 495,
         y: 770,
@@ -551,7 +551,7 @@ export function criarExtratoFintechPDF(
         });
       }
 
-      drawPrimaveraFooter(doc, `EX-FIN-${new Date().getFullYear()}`, {
+      drawClickPayEnterpriseFooter(doc, `EX-FIN-${new Date().getFullYear()}`, {
         x: 50,
         width: 495,
         y: 770,
@@ -689,7 +689,7 @@ export function criarRelatorioAuditoriaPDF(
         });
       }
 
-      drawPrimaveraFooter(doc, `AUD-${dadosAuditoria.periodoPesquisado}`, {
+      drawClickPayEnterpriseFooter(doc, `AUD-${dadosAuditoria.periodoPesquisado}`, {
         x: 50,
         width: 495,
         y: 770,
@@ -730,7 +730,7 @@ export function criarReciboValePDF(
       const startX = 40;
       const width = 515;
 
-      // Cabeçalho Primavera V10 (Empresa esquerda + Quadro Documento direita)
+      // Cabeçalho ClickPay ERP Enterprise (Empresa esquerda + Quadro Documento direita)
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(dadosEmpresa.nome.toUpperCase(), startX, 40, { width: 295 });
       doc.fontSize(8).font('Helvetica').fillColor('#475569');
       doc.text(`NUIT: ${dadosEmpresa.nuit || 'N/A'}`, startX, 58, { width: 295 });
@@ -776,7 +776,7 @@ export function criarReciboValePDF(
       doc.font('Helvetica').fillColor('#334155').text('Estado:', startX + 310, benY + 38);
       doc.font('Helvetica-Bold').fillColor('#0f172a').text(labelStatus, startX + 385, benY + 38, { width: 125 });
 
-      // Tabela de Adiantamento Primavera V10
+      // Tabela de Adiantamento ClickPay ERP Enterprise
       const tblY = 212;
       doc.rect(startX, tblY, width, 20).fill('#0f172a');
       doc.fontSize(7.5).font('Helvetica-Bold').fillColor('#ffffff');
@@ -809,7 +809,7 @@ export function criarReciboValePDF(
       doc.text('PELO COLABORADOR', 65, 702, { width: 180, align: 'center' });
       doc.text('PELA ADMINISTRAÇÃO / RH', 350, 702, { width: 180, align: 'center' });
 
-      drawPrimaveraFooter(doc, vale.vale_id, {
+      drawClickPayEnterpriseFooter(doc, vale.vale_id, {
         x: startX,
         width,
         y: 774,
@@ -938,7 +938,7 @@ export function criarRelatorioValesPDF(
         });
       }
 
-      drawPrimaveraFooter(doc, `VALES-${new Date().getFullYear()}`, {
+      drawClickPayEnterpriseFooter(doc, `VALES-${new Date().getFullYear()}`, {
         x: 50,
         width: 495,
         y: 770,
@@ -1135,7 +1135,7 @@ export function criarMapaSalariosPDF(
       doc.fontSize(7).font('Helvetica-Bold').fillColor('#1e293b').text('Departamento de Contabilidade / RH', xAssinatura, yLinha + 29, { align: 'center', width: 230 });
       doc.font('Helvetica').fillColor('#64748b').text('ERP Moçambique (Assinatura Eletrónica)', xAssinatura, yLinha + 39, { align: 'center', width: 230 });
 
-      drawPrimaveraFooter(doc, `MAPA-${periodo}`, {
+      drawClickPayEnterpriseFooter(doc, `MAPA-${periodo}`, {
         x: 40,
         width: 762,
         y: 538,
@@ -1302,7 +1302,7 @@ export function criarRelatorioHistoricoPDF(
         .text('Este relatório contém os dados agregados das folhas de remunerações fechadas e autorizadas no sistema ERP. As retenções do IRPS e INSS aqui sumariadas são as declarações legais correspondentes sob a legislação fiscal de Moçambique, servindo como base fiel de informação para envio à Autoridade Tributária e INSS.', 50, yLinha + 15, { width: 495, align: 'justify' });
 
       // Rodapé de Emissão
-      drawPrimaveraFooter(doc, `HIST-${new Date().getFullYear()}`, {
+      drawClickPayEnterpriseFooter(doc, `HIST-${new Date().getFullYear()}`, {
         x: 50,
         width: 495,
         y: 770,
@@ -1681,7 +1681,7 @@ export function criarGuiaRecolhimentoInssPDF(
       // Desenhar a Segunda Via (Via do Contribuinte) abaixo
       desenharViaGPC(doc, 430);
 
-      drawPrimaveraFooter(doc, dadosGuia.referenciaPagamento || `INSS-${dadosGuia.periodo}`, {
+      drawClickPayEnterpriseFooter(doc, dadosGuia.referenciaPagamento || `INSS-${dadosGuia.periodo}`, {
         x: 40,
         width: 515,
         y: 790,
@@ -2025,7 +2025,7 @@ export function criarGuiaIrpsPDF(
       doc.fontSize(5.5).font('Helvetica-Oblique').fillColor('#94a3b8');
       doc.text('Declaração gerada electronicamente pelo sistema integrado ClickPay ERP. Os valores declarados de Trabalho Dependente correspondem fielmente às folhas de salário fechadas e liquidadas para o período selecionado.', startX, footerY, { align: 'justify', width: width });
 
-      drawPrimaveraFooter(doc, dadosGuia.referenciaPagamento || `IRPS-${dadosGuia.periodo}`, {
+      drawClickPayEnterpriseFooter(doc, dadosGuia.referenciaPagamento || `IRPS-${dadosGuia.periodo}`, {
         x: startX,
         width,
         y: 786,
@@ -2422,8 +2422,8 @@ export function criarRelatorioAgrupadoERPPDF(
         doc.text('Este relatório obedece estritamente aos Princípios Contabilísticos do PGC Moçambique: Especialização do Exercício (Accrual Basis), Partidas Dobradas, Não Compensação de Saldos, Continuidade e Prudência. Todas as obrigações tributárias (IRPS, INSS e IVA) foram devidamente apuradas.', 45, yLinha + 16, { width: 505 });
       }
 
-      // Rodapé Primavera V10 + Processado por computador
-      drawPrimaveraFooter(doc, `${tipoRelatorio.toUpperCase()}-${periodo || 'GERAL'}`, {
+      // Rodapé ClickPay ERP Enterprise + Processado por computador
+      drawClickPayEnterpriseFooter(doc, `${tipoRelatorio.toUpperCase()}-${periodo || 'GERAL'}`, {
         x: 40,
         width: 515,
         y: 785,
