@@ -5,9 +5,7 @@ import {
   signInWithEmailAndPassword,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
   getRedirectResult,
-  signInWithCredential,
   signOut
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -609,157 +607,6 @@ export async function authenticateClientInFirebase(
   return { ok: false };
 }
 
-let gsiLoaderPromise: Promise<boolean> | null = null;
-
-function loadGoogleIdentityScript(): Promise<boolean> {
-  if (typeof window === 'undefined') return Promise.resolve(false);
-  if ((window as any).google?.accounts?.oauth2) return Promise.resolve(true);
-  if (gsiLoaderPromise) return gsiLoaderPromise;
-
-  gsiLoaderPromise = new Promise((resolve) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-clickpay-gsi="true"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(Boolean((window as any).google?.accounts?.oauth2)));
-      existing.addEventListener('error', () => resolve(false));
-      setTimeout(() => resolve(Boolean((window as any).google?.accounts?.oauth2)), 2500);
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.setAttribute('data-clickpay-gsi', 'true');
-    script.onload = () => resolve(Boolean((window as any).google?.accounts?.oauth2));
-    script.onerror = () => resolve(false);
-    document.head.appendChild(script);
-    setTimeout(() => resolve(Boolean((window as any).google?.accounts?.oauth2)), 5000);
-  });
-
-  return gsiLoaderPromise;
-}
-
-async function signInViaGoogleIdentityServices(): Promise<{
-  ok: boolean;
-  cancelled?: boolean;
-  googleAccessToken?: string;
-  idToken?: string;
-  email?: string;
-  emailVerified?: boolean;
-  displayName?: string;
-  error?: string;
-}> {
-  const clientId = (firebaseConfig as any).oAuthClientId;
-  if (!clientId || typeof window === 'undefined') {
-    return { ok: false };
-  }
-
-  const loaded = await loadGoogleIdentityScript();
-  const oauth2 = (window as any).google?.accounts?.oauth2;
-  if (!loaded || !oauth2?.initTokenClient) {
-    return { ok: false };
-  }
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const timeoutId = setTimeout(() => {
-      finish({ ok: false });
-    }, 90000);
-
-    const finish = (val: {
-      ok: boolean;
-      cancelled?: boolean;
-      googleAccessToken?: string;
-      idToken?: string;
-      email?: string;
-      emailVerified?: boolean;
-      displayName?: string;
-      error?: string;
-    }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      resolve(val);
-    };
-
-    try {
-      const tokenClient = oauth2.initTokenClient({
-        client_id: clientId,
-        scope: 'openid email profile',
-        prompt: 'select_account',
-        callback: async (tokenResponse: any) => {
-          if (tokenResponse?.error || !tokenResponse?.access_token) {
-            const errCode = String(tokenResponse?.error || '');
-            if (errCode === 'access_denied') {
-              finish({
-                ok: false,
-                cancelled: true,
-                error: 'Autorização Gmail cancelada pelo utilizador.'
-              });
-              return;
-            }
-            finish({ ok: false });
-            return;
-          }
-
-          try {
-            const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
-            });
-            const info: any = await userInfoRes.json().catch(() => ({}));
-            if (!userInfoRes.ok || !info?.email) {
-              finish({ ok: false });
-              return;
-            }
-
-            // Sincronizar silenciosamente sessão cloud para habilitar leitura/escrita Firestore sem expor UI externa
-            let idToken: string | undefined;
-            try {
-              const cred = GoogleAuthProvider.credential(null, tokenResponse.access_token);
-              const fbSign = await Promise.race([
-                signInWithCredential(auth, cred),
-                new Promise<null>((resTimeout) => setTimeout(() => resTimeout(null), 4000))
-              ]);
-              if (fbSign && 'user' in fbSign && fbSign.user) {
-                idToken = await fbSign.user.getIdToken().catch(() => undefined);
-              }
-            } catch {
-              // Se o domínio não estiver autorizado no provedor secundário, continua apenas com googleAccessToken
-            }
-
-            finish({
-              ok: true,
-              googleAccessToken: tokenResponse.access_token,
-              idToken,
-              email: String(info.email).toLowerCase().trim(),
-              emailVerified: Boolean(info.email_verified),
-              displayName: String(info.name || '')
-            });
-          } catch {
-            finish({ ok: false });
-          }
-        },
-        error_callback: (err: any) => {
-          const errType = String(err?.type || '');
-          if (errType === 'popup_closed') {
-            finish({
-              ok: false,
-              cancelled: true,
-              error: 'Janela de autenticação Gmail fechada antes de concluir.'
-            });
-            return;
-          }
-          finish({ ok: false });
-        }
-      });
-
-      tokenClient.requestAccessToken();
-    } catch {
-      finish({ ok: false });
-    }
-  });
-}
-
 export interface GoogleAuthResult {
   ok: boolean;
   cancelled?: boolean;
@@ -773,33 +620,21 @@ export interface GoogleAuthResult {
 }
 
 export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
-  // 1. Tentar primeiro via Google Identity Services direto (sem mostrar domínio técnico ao utilizador)
-  const gisRes = await signInViaGoogleIdentityServices();
-  if (gisRes.ok && gisRes.googleAccessToken && gisRes.email) {
-    return {
-      ok: true,
-      googleAccessToken: gisRes.googleAccessToken,
-      idToken: gisRes.idToken,
-      email: gisRes.email,
-      emailVerified: gisRes.emailVerified,
-      displayName: gisRes.displayName
-    };
-  }
-  if (gisRes.cancelled) {
-    return { ok: false, cancelled: true, error: gisRes.error || 'Autenticação Gmail cancelada.' };
-  }
-
-  // 2. Fallback silencioso via popup ou redirect se necessário
+  // Usar exclusivamente Firebase Authentication signInWithPopup (conforme Política OAuth 2.0 da Google)
   const provider = new GoogleAuthProvider();
+  provider.addScope('email');
+  provider.addScope('profile');
   provider.setCustomParameters({ prompt: 'select_account' });
 
   try {
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
     const idToken = await user.getIdToken();
+    const credential = GoogleAuthProvider.credentialFromResult(result);
     return {
       ok: true,
       idToken,
+      googleAccessToken: credential?.accessToken,
       email: (user.email || '').toLowerCase().trim(),
       emailVerified: Boolean(user.emailVerified),
       displayName: user.displayName || ''
@@ -807,23 +642,26 @@ export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
   } catch (err: any) {
     const code = err?.code || '';
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return { ok: false, cancelled: true, error: 'Janela de autenticação Gmail fechada antes de concluir.' };
+      return { ok: false, cancelled: true, error: 'Janela de autenticação Google fechada antes de concluir.' };
     }
     if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
-      try {
-        await signInWithRedirect(auth, provider);
-        return { ok: false, redirected: true };
-      } catch {
-        return {
-          ok: false,
-          error: 'O navegador bloqueou a janela do Google. Permita popups para este site ou autentique-se com e-mail e palavra-passe.'
-        };
-      }
-    }
-    if (code === 'auth/unauthorized-domain') {
       return {
         ok: false,
-        error: 'Não foi possível concluir o acesso direto via Gmail neste endereço. Entre com o seu e-mail e palavra-passe.'
+        error:
+          'O navegador bloqueou a janela de início de sessão Google. Permita popups para este site, abra a aplicação num novo separador ou entre com e-mail e palavra-passe.'
+      };
+    }
+    if (code === 'auth/unauthorized-domain') {
+      const host = typeof window !== 'undefined' ? window.location.hostname : '';
+      return {
+        ok: false,
+        error: `O domínio "${host}" ainda não está autorizado para Login Google na Consola Firebase. Adicione-o em Authentication → Settings → Authorized domains ou entre com e-mail e palavra-passe.`
+      };
+    }
+    if (code === 'auth/operation-not-allowed') {
+      return {
+        ok: false,
+        error: 'O provedor Google não está activo no projecto Firebase. Active-o em Authentication → Sign-in method → Google.'
       };
     }
     if (code === 'auth/network-request-failed') {
@@ -834,7 +672,7 @@ export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
     }
     return {
       ok: false,
-      error: 'Não foi possível concluir a autenticação com a sua conta Gmail. Utilize e-mail e palavra-passe.'
+      error: 'Não foi possível concluir a autenticação com a conta Google. Utilize e-mail e palavra-passe.'
     };
   }
 }

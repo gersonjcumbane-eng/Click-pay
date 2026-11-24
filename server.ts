@@ -2125,6 +2125,34 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return { ok: false, status: 400, error: 'Sessão Google inválida ou ausente.' };
     }
 
+    if (hasIdToken && firebaseConfig && firebaseConfig.apiKey) {
+      const lookupRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken })
+        }
+      );
+      const lookupData: any = await lookupRes.json().catch(() => ({}));
+      const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
+      if (lookupRes.ok && fbUser && fbUser.email) {
+        if (fbUser.disabled) {
+          return { ok: false, status: 403, error: 'Esta conta encontra-se desativada.' };
+        }
+        return {
+          ok: true,
+          email: String(fbUser.email).toLowerCase().trim(),
+          emailVerified: fbUser.emailVerified === true,
+          displayName: String(fbUser.displayName || ''),
+          firebaseIdToken: idToken
+        };
+      }
+      if (!hasAccessToken && !hasCredential) {
+        return { ok: false, status: 401, error: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' };
+      }
+    }
+
     if (hasAccessToken) {
       const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: { Authorization: `Bearer ${googleAccessToken}` }
@@ -2179,32 +2207,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       };
     }
 
-    if (!firebaseConfig || !firebaseConfig.apiKey) {
-      return { ok: false, status: 503, error: 'Serviço de validação Google temporariamente indisponível.' };
-    }
-    const lookupRes = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken })
-      }
-    );
-    const lookupData: any = await lookupRes.json().catch(() => ({}));
-    const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
-    if (!lookupRes.ok || !fbUser || !fbUser.email) {
-      return { ok: false, status: 401, error: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' };
-    }
-    if (fbUser.disabled) {
-      return { ok: false, status: 403, error: 'Esta conta encontra-se desativada.' };
-    }
-    return {
-      ok: true,
-      email: String(fbUser.email).toLowerCase().trim(),
-      emailVerified: fbUser.emailVerified === true,
-      displayName: String(fbUser.displayName || ''),
-      firebaseIdToken: idToken
-    };
+    return { ok: false, status: 503, error: 'Serviço de validação Google temporariamente indisponível.' };
   }
 
   // AUTENTICAÇÃO VIA CONTA GOOGLE / GMAIL (COM SUPORTE A OAUTH DIRETO, POPUP, REDIRECT E AUTO-PROVISIONAMENTO)
