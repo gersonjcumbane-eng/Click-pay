@@ -31,7 +31,18 @@ import {
 } from 'lucide-react';
 
 import { Employee, CompanyData, ConfigFiscal, PayrollSummary, PaymentLog } from './types';
-import { getAuthHeaders, isFounderUser } from './lib/authSession';
+import {
+  getAuthHeaders,
+  isFounderUser,
+  isFounderEmail,
+  PAYMENTS_MODULE_LOCKED,
+  PAYMENTS_LOCKED_MESSAGE
+} from './lib/authSession';
+import {
+  consumeGoogleRedirectResult,
+  provisionOrLookupGoogleClientInCloud,
+  signOutGoogleSession
+} from './lib/firebase';
 import Dashboard from './components/Dashboard';
 import EmployeeDirectory from './components/EmployeeDirectory';
 import TaxSimulator from './components/TaxSimulator';
@@ -134,6 +145,50 @@ function LockedFeatureOverlay({ featureName, requiredPlan, description }: Locked
   );
 }
 
+function PaymentsLockedOverlay({ onGoToInvoicing }: { onGoToInvoicing: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl p-8 sm:p-10 text-center border border-rose-200 max-w-2xl mx-auto my-8 space-y-6 shadow-xs"
+    >
+      <div className="w-12 h-12 bg-rose-50 text-rose-700 rounded-xl flex items-center justify-center mx-auto border border-rose-200">
+        <Lock size={22} />
+      </div>
+      <div className="space-y-2">
+        <span className="inline-block px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold uppercase tracking-wider">
+          Pagamentos Bloqueados
+        </span>
+        <h3 className="text-lg font-bold text-slate-950">
+          Módulo de Pagamentos &amp; Carteiras Móveis Desativado
+        </h3>
+        <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+          {PAYMENTS_LOCKED_MESSAGE}
+        </p>
+      </div>
+
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-left space-y-3">
+        <p className="text-xs font-bold text-slate-800">O que está bloqueado para todos os utilizadores:</p>
+        <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4">
+          <li>Liquidações salariais diretas via M-Pesa, e-Mola, mKesh ou conta bancária</li>
+          <li>Recargas de carteira corporativa, transferências em lote e piloto automático</li>
+          <li>Solicitação e desembolso de adiantamentos (Vales)</li>
+        </ul>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={onGoToInvoicing}
+          className="px-5 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+        >
+          Ir para Facturação &amp; Vendas
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function App() {
   const { showSuccess, showError, showInfo } = useToast();
   const confirmAction = useConfirm();
@@ -172,6 +227,18 @@ export default function App() {
   const [company, setCompany] = useState<CompanyData>({ nome: '', nuit: '', endereco: '' });
   const [availableCompanies, setAvailableCompanies] = useState<any[]>([]);
 
+  const handleSessionExpired = () => {
+    localStorage.removeItem('paytek_auth');
+    localStorage.removeItem('paytek_role');
+    localStorage.removeItem('paytek_token');
+    localStorage.removeItem('paytek_user');
+    localStorage.removeItem('paytek_company_id');
+    setAvailableCompanies([]);
+    setAuthenticated(false);
+    setShowLogin(true);
+    showInfo('A sua sessão expirou. Inicie sessão novamente para sincronizar com o servidor.');
+  };
+
   const loadCompanies = async () => {
     if (!isFounderUser()) {
       setAvailableCompanies([]);
@@ -181,6 +248,10 @@ export default function App() {
       const res = await fetch('/api/clients', {
         headers: getAuthHeaders()
       });
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       const contentType = res.headers.get('content-type') || '';
       if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
@@ -402,6 +473,11 @@ export default function App() {
         fetch('/api/logs', { headers: authHeaders }).catch(() => null)
       ]);
 
+      if (empRes?.status === 401 || configRes?.status === 401 || summaryRes?.status === 401 || logsRes?.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+
       const isJson = (res: Response | null) => res && res.ok && (res.headers.get('content-type') || '').includes('application/json');
 
       if (isJson(empRes) && isJson(configRes) && isJson(summaryRes) && isJson(logsRes)) {
@@ -447,6 +523,84 @@ export default function App() {
     } else {
       setLoading(false);
     }
+  }, [authenticated]);
+
+  // Completar autenticação se o navegador retornar de um redirect Google OAuth
+  useEffect(() => {
+    if (authenticated) return;
+    let active = true;
+    consumeGoogleRedirectResult().then(async (redirectRes) => {
+      if (!active || !redirectRes || !redirectRes.ok || !redirectRes.email) return;
+      const persistRedirect = (token: string, usuario: any) => {
+        const resolvedEmail = String(usuario?.email || redirectRes.email || '').toLowerCase().trim();
+        const resolvedRole = usuario?.funcao || 'CLIENTE_EMPRESA';
+        localStorage.setItem('paytek_auth', 'true');
+        localStorage.setItem('paytek_token', token || `token_clickpay_${Date.now()}`);
+        localStorage.setItem('paytek_user', resolvedEmail);
+        localStorage.setItem('paytek_role', resolvedRole);
+        if (usuario?.empresa_id) {
+          localStorage.setItem('paytek_company_id', usuario.empresa_id);
+        } else if (resolvedRole === 'SUPER_ADMIN_PAYROLL') {
+          localStorage.setItem('paytek_company_id', 'cli_founders');
+        }
+        localStorage.setItem('paytek_sub_status', usuario?.subscription_status || 'ativo');
+        localStorage.setItem('paytek_sub_plan', usuario?.subscription_plan || 'Bronze');
+        localStorage.setItem('paytek_company_name', usuario?.nome_empresa || '');
+        localStorage.setItem('paytek_payments_locked', 'true');
+        setUserRole(resolvedRole);
+        setAuthenticated(true);
+        setShowLogin(false);
+      };
+
+      try {
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            googleAccessToken: redirectRes.googleAccessToken,
+            idToken: redirectRes.idToken
+          })
+        });
+        const isJson = (res.headers.get('content-type') || '').includes('application/json');
+        if (isJson && res.ok) {
+          const data = await res.json();
+          if (data.sucesso) {
+            persistRedirect(data.token, data.usuario);
+            return;
+          }
+        }
+        if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
+          if (isFounderEmail(redirectRes.email) && redirectRes.emailVerified) {
+            persistRedirect(`token_google_${Date.now()}`, {
+              email: redirectRes.email,
+              funcao: 'SUPER_ADMIN_PAYROLL',
+              empresa_id: 'cli_founders',
+              nome_empresa: 'ClickPay Moçambique Lda',
+              subscription_status: 'ativo',
+              subscription_plan: 'Platinum'
+            });
+            return;
+          }
+          const client = await provisionOrLookupGoogleClientInCloud({
+            email: redirectRes.email,
+            displayName: redirectRes.displayName
+          });
+          persistRedirect(`token_google_${client.id}`, {
+            email: client.email,
+            funcao: 'CLIENTE_EMPRESA',
+            empresa_id: client.id,
+            nome_empresa: client.companyName,
+            subscription_status: client.status,
+            subscription_plan: client.plan
+          });
+        }
+      } catch {
+        // Fallback silencioso caso o utilizador esteja offline
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [authenticated]);
 
   // Monitorar parâmetro 'plano' da URL para roteamento inteligente de novos cadastros
@@ -841,6 +995,8 @@ export default function App() {
                 localStorage.removeItem('paytek_role');
                 localStorage.removeItem('paytek_token');
                 localStorage.removeItem('paytek_user');
+                localStorage.removeItem('paytek_company_id');
+                signOutGoogleSession().catch(() => {});
                 setAuthenticated(false);
                 setShowLogin(false);
               }}
@@ -882,6 +1038,7 @@ export default function App() {
     localStorage.removeItem('paytek_sub_plan');
     localStorage.removeItem('paytek_sub_status');
     localStorage.removeItem('paytek_sub_expire');
+    signOutGoogleSession().catch(() => {});
     setAvailableCompanies([]);
     setAuthenticated(false);
     setShowLogin(false);
@@ -1056,7 +1213,14 @@ export default function App() {
                     )
                   )}
                   {activeTab === 'fintech' && (
-                    company.subscription_plan === 'Bronze' ? (
+                    PAYMENTS_MODULE_LOCKED ? (
+                      <PaymentsLockedOverlay
+                        onGoToInvoicing={() => {
+                          setActiveTab('financial');
+                          setFinancialSubTab('vendas');
+                        }}
+                      />
+                    ) : company.subscription_plan === 'Bronze' ? (
                       <LockedFeatureOverlay 
                         featureName="Vales & Fintech M-Pesa / e-Mola" 
                         requiredPlan="Profissional (Silver)" 

@@ -41,7 +41,7 @@ import { Employee, CompanyData, PaymentLog } from '../types';
 import { sendBrowserNotification } from '../utils/notifications';
 import { configuracaoFiscal, matrizFiscaisMoçambique } from '../db_tax';
 import { useToast, useConfirm } from '../context/ToastContext';
-import { getAuthHeaders } from '../lib/authSession';
+import { getAuthHeaders, PAYMENTS_MODULE_LOCKED, PAYMENTS_LOCKED_MESSAGE } from '../lib/authSession';
 import {
   downloadOrFallbackPdf,
   generateExtratoFintechPdfBlob,
@@ -465,6 +465,7 @@ export default function FintechPayments({
   };
 
   useEffect(() => {
+    if (PAYMENTS_MODULE_LOCKED) return;
     fetchVales();
     fetchSaldo();
     fetchContasBancarias();
@@ -830,6 +831,29 @@ export default function FintechPayments({
 
   // Selected employee for advances details
   const currentSelectedEmp = employees.find(e => e.id === selectedFuncId);
+
+  if (PAYMENTS_MODULE_LOCKED) {
+    return (
+      <div id="fintech_panel" className="bg-white rounded-3xl p-8 border border-rose-200 shadow-sm space-y-4">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
+            <Lock size={24} />
+          </div>
+          <div className="space-y-1.5">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-rose-100 text-rose-800 rounded-md text-[10px] font-bold uppercase tracking-wider">
+              Módulo de Pagamentos Bloqueado · Apenas Facturação
+            </span>
+            <h2 className="text-lg font-black text-slate-900">
+              Carteira Móvel, Vales & Pagamentos Desativados
+            </h2>
+            <p className="text-xs text-slate-600 leading-relaxed max-w-2xl">
+              {PAYMENTS_LOCKED_MESSAGE}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="fintech_panel" className="space-y-6">

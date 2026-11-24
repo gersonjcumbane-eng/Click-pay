@@ -392,7 +392,7 @@ export function converterPropostaEmVenda(propostaId: string): VendaItem | null {
     taxa_iva: taxaIva,
     valor_iva: valorIva,
     total_com_iva: totalComIva,
-    estado: 'Cobrado',
+    estado: 'Pendente',
     metodo_recebimento: 'Transferencia_Bancaria',
     periodo: prop.periodo || getCurrentPeriod()
   });
@@ -1712,7 +1712,6 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     logo: "/clickpay-logo.png",
     fee_base: 1500.00,
     fee_por_slip: 120.00,
-    password: "bronze2026",
     subscription_status: "ativo",
     subscription_plan: "Bronze",
     next_billing_date: "2026-08-30",
@@ -1798,7 +1797,6 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     logo: "/clickpay-logo.png",
     fee_base: 3500.00,
     fee_por_slip: 100.00,
-    password: "silver2026",
     subscription_status: "ativo",
     subscription_plan: "Silver",
     next_billing_date: "2026-08-30",
@@ -1884,7 +1882,6 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     logo: "/clickpay-logo.png",
     fee_base: 6900.00,
     fee_por_slip: 95.00,
-    password: "gold2026",
     subscription_status: "ativo",
     subscription_plan: "Gold",
     next_billing_date: "2026-08-30",

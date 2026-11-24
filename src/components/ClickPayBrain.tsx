@@ -207,7 +207,7 @@ Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
               Inspirado no modelo <span className="font-bold text-white">BRAIN da Bujeti (YC)</span> e 100% calibrado para a legislação tributária de Moçambique: 
-              Recolha e OCR de facturas com IVA (16%), cobrança com M-Pesa/SIMO, vigilância de contratos e políticas de despesas.
+              Recolha e OCR de facturas com IVA (16%), gestão documental de facturação, vigilância de contratos e políticas de despesas (pagamentos online bloqueados).
             </p>
           </div>
 
@@ -273,9 +273,9 @@ Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a
             </span>
           </div>
           <div>
-            <h3 className="text-sm font-black leading-tight">Cobrança Ativa AR</h3>
+            <h3 className="text-sm font-black leading-tight">Gestão de Facturas AR</h3>
             <p className={`text-[11px] mt-0.5 leading-tight ${activeAssistant === 'ar' ? 'text-emerald-100' : 'text-slate-500'}`}>
-              Dunning WhatsApp & Link M-Pesa
+              Lembrete WhatsApp & Facturação
             </p>
           </div>
         </button>
@@ -479,7 +479,7 @@ Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a
                   Agente de Cobrança Inteligente (Accounts Receivable)
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Vigia faturas vencidas a clientes e redige cobranças calibradas no tom certo com link de liquidação por M-Pesa e SIMO.
+                  Vigia facturas vencidas a clientes e redige lembretes de facturação calibrados (links de pagamento móvel desativados no modo actual).
                 </p>
               </div>
             </div>
@@ -724,7 +724,7 @@ Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a
                   'Qual é a diária para viagem a Nampula ou Beira?',
                   'Posso reembolsar almoço com cliente sem NUIT na factura?',
                   'Quanto é o reembolso por quilómetro em viatura própria?',
-                  'Qual é o prazo para submeter despesas e quando recebo no M-Pesa?'
+                  'Qual é o prazo para submeter comprovativos de despesas para facturação?'
                 ].map((pergunta, idx) => (
                   <button
                     key={idx}

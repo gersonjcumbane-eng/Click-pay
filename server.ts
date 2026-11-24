@@ -96,13 +96,28 @@ const DEFAULT_PUBLIC_FIREBASE_CONFIG = {
   authDomain: 'future-charter-96ppv.firebaseapp.com',
   firestoreDatabaseId: 'ai-studio-payrolltechmz-673532dd-d855-41df-b5e3-8559e94940a5',
   storageBucket: 'future-charter-96ppv.firebasestorage.app',
-  messagingSenderId: '492655395269'
+  messagingSenderId: '492655395269',
+  oAuthClientId: '492655395269-uei4qr097d7fvbier7mqj2df9ini2v4r.apps.googleusercontent.com'
 };
 
 export async function createApp(options?: { skipStatic?: boolean }) {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   const isServerless = Boolean(process.env.VERCEL || options?.skipStatic);
+
+  const PAYMENTS_MODULE_LOCKED = true;
+  const PAYMENTS_LOCKED_MESSAGE =
+    'Pagamentos bloqueados no sistema. Apenas o módulo de Facturação e gestão documental está ativo para todas as contas.';
+  function sendPaymentsBlocked(res: Response, customMsg?: string) {
+    return res.status(403).json({
+      sucesso: false,
+      blocked: true,
+      code: 'PAYMENTS_BLOCKED',
+      modo_sistema: 'apenas_facturacao',
+      erro: customMsg || PAYMENTS_LOCKED_MESSAGE,
+      error: customMsg || PAYMENTS_LOCKED_MESSAGE
+    });
+  }
 
   // Carregar configuração do Firebase sem importação estática de JSON (compatível com Node ESM e Vercel Serverless)
   const safeDirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
@@ -126,41 +141,91 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     console.log('[Firebase Integration] Configurações Firebase padrão carregadas:', firebaseConfig.projectId);
   }
 
-  // Sincronizar contas do ERP com Firebase Authentication via REST API
-  async function syncUserToFirebase(email: string, password: string) {
-    if (!firebaseConfig || !firebaseConfig.apiKey) {
+  // Sincronizar contas do ERP com Firebase Authentication via REST API (cria ou actualiza senha quando há idToken/previousPassword)
+  async function syncUserToFirebase(
+    email: string,
+    password: string,
+    opts?: { idToken?: string; previousPassword?: string }
+  ) {
+    if (isEmailPasswordProviderDisabled || !firebaseConfig || !firebaseConfig.apiKey || !password) {
       return;
     }
+    const emailNorm = String(email || '').toLowerCase().trim();
+    if (!emailNorm) return;
+
+    const updateWithIdToken = async (tokenToUse: string) => {
+      try {
+        const updRes = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${firebaseConfig.apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              idToken: tokenToUse,
+              password,
+              returnSecureToken: false
+            })
+          }
+        );
+        if (updRes.ok) {
+          console.log(`[Firebase Sync] Palavra-passe actualizada no Firebase Auth: ${emailNorm}`);
+        }
+      } catch {
+        // Ignorar falha silenciosa de rede
+      }
+    };
+
     try {
       const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email,
+          email: emailNorm,
           password,
           returnSecureToken: false
         })
       });
       const data: any = await res.json();
       if (res.ok) {
-        console.log(`[Firebase Sync] Conta criada com sucesso no Firebase Auth: ${email}`);
-        isEmailPasswordProviderDisabled = false; // Reset if some succeeded
+        console.log(`[Firebase Sync] Conta criada com sucesso no Firebase Auth: ${emailNorm}`);
+        isEmailPasswordProviderDisabled = false;
       } else if (data.error && data.error.message === 'EMAIL_EXISTS') {
-        console.log(`[Firebase Sync] Conta já existente no Firebase Auth: ${email}`);
-        isEmailPasswordProviderDisabled = false; // Reset if it exists (which implies provider works or at least exists)
+        isEmailPasswordProviderDisabled = false;
+        if (opts?.idToken) {
+          await updateWithIdToken(opts.idToken);
+        } else if (opts?.previousPassword && opts.previousPassword !== password) {
+          const signInRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: emailNorm,
+                password: opts.previousPassword,
+                returnSecureToken: true
+              })
+            }
+          ).catch(() => null);
+          if (signInRes && signInRes.ok) {
+            const signInData: any = await signInRes.json().catch(() => ({}));
+            if (signInData?.idToken) {
+              await updateWithIdToken(signInData.idToken);
+            }
+          }
+        }
       } else if (
         data.error &&
         (data.error.message === 'OPERATION_NOT_ALLOWED' ||
           data.error.message === 'PASSWORD_LOGIN_DISABLED' ||
           data.error.message === 'EMAIL_SIGNUP_DISABLED')
       ) {
-        console.warn(`[Firebase Sync Warning] Email/Password provider is disabled in Firebase console: ${email}`);
+        console.warn(`[Firebase Sync Warning] Email/Password provider is disabled in Firebase console: ${emailNorm}`);
         isEmailPasswordProviderDisabled = true;
       } else {
-        console.error(`[Firebase Sync Error] ${email}:`, data.error ? data.error.message : data);
+        console.error(`[Firebase Sync Error] ${emailNorm}:`, data.error ? data.error.message : data);
       }
     } catch (err) {
-      console.error(`[Firebase Sync Network Error] Falha de comunicação para ${email}:`, err);
+      console.error(`[Firebase Sync Network Error] Falha de comunicação para ${emailNorm}:`, err);
     }
   }
 
@@ -184,7 +249,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
         "font-src 'self' data: https://fonts.gstatic.com",
         "img-src 'self' data: blob: https:",
-        "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://accounts.google.com https://apis.google.com wss://*.firebaseio.com",
+        "connect-src 'self' https://*.googleapis.com https://oauth2.googleapis.com https://www.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://accounts.google.com https://apis.google.com wss://*.firebaseio.com",
         "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://*.google.com",
         "object-src 'none'",
         "base-uri 'self'"
@@ -347,12 +412,24 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     exp: number;
   }
 
-  const SESSION_SIGNING_SECRET =
-    process.env.SESSION_SECRET ||
-    crypto
-      .createHash('sha256')
-      .update(`${process.env.FOUNDER_ADMIN_PASSWORD || ''}|${firebaseConfig?.projectId || 'future-charter-96ppv'}|${firebaseConfig?.apiKey || ''}|clickpay-mz-session-key`)
-      .digest('hex');
+  function loadOrCreateSessionSecret(): string {
+    const fromEnv = (process.env.SESSION_SECRET || '').trim();
+    if (fromEnv.length >= 16) return fromEnv;
+    const secretFile = path.join(tmpDir, 'clickpay-session.secret');
+    try {
+      if (fs.existsSync(secretFile)) {
+        const stored = fs.readFileSync(secretFile, 'utf8').trim();
+        if (stored.length >= 32) return stored;
+      }
+      const generated = crypto.randomBytes(32).toString('hex');
+      fs.writeFileSync(secretFile, generated, { encoding: 'utf8', mode: 0o600 });
+      return generated;
+    } catch {
+      return crypto.randomBytes(32).toString('hex');
+    }
+  }
+
+  const SESSION_SIGNING_SECRET = loadOrCreateSessionSecret();
 
   function signSessionToken(payload: { email: string; role: string; empresa_id?: string }, ttlMs = 7 * 24 * 60 * 60 * 1000): string {
     const body: AuthSessionPayload = {
@@ -410,29 +487,61 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     next();
   };
 
-  // CREDENCIAIS MESTRE DO FUNDADOR (EXCLUSIVAS NO SERVIDOR)
-  const INITIAL_FOUNDER_PASSWORD = process.env.FOUNDER_ADMIN_PASSWORD || "ClickPay@2026MZ!";
+  // CREDENCIAIS MESTRE DO FUNDADOR (EXCLUSIVAS NO SERVIDOR — SEM SENHAS HARDCODED)
+  const ENV_FOUNDER_PASSWORD = (process.env.FOUNDER_ADMIN_PASSWORD || '').trim();
   const CREDENCIAIS_FOUNDERS = {
     email: "gersonjcumbane@gmail.com",
-    password: INITIAL_FOUNDER_PASSWORD,
     emails: [
       "gersonjcumbane@gmail.com",
       "admin@clickpay.co.mz",
       "admin@payrolltech.co.mz",
       "click@payrolltech.co.mz"
-    ],
-    passwords: Array.from(new Set([
-      INITIAL_FOUNDER_PASSWORD,
-      "ClickPay@2026MZ!",
-      "ClickPay2026!",
-      "UEM_Finanças_Engenharia_2026!"
-    ]))
+    ]
   };
 
   function isFounderEmail(email?: string | null): boolean {
     const emailNorm = String(email || '').toLowerCase().trim();
     if (!emailNorm) return false;
     return CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm);
+  }
+
+  function constantTimeStringMatch(a: string, b: string): boolean {
+    if (!a || !b) return false;
+    const bufA = Buffer.from(a, 'utf8');
+    const bufB = Buffer.from(b, 'utf8');
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  }
+
+  function generateSecurePassword(length = 14): string {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghijkmnopqrstuvwxyz';
+    const digits = '23456789';
+    const symbols = '@#$!%*?';
+    const all = upper + lower + digits + symbols;
+    const chars = [
+      upper[crypto.randomInt(0, upper.length)],
+      lower[crypto.randomInt(0, lower.length)],
+      digits[crypto.randomInt(0, digits.length)],
+      symbols[crypto.randomInt(0, symbols.length)]
+    ];
+    for (let i = chars.length; i < length; i++) {
+      chars.push(all[crypto.randomInt(0, all.length)]);
+    }
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j = crypto.randomInt(0, i + 1);
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
+  }
+
+  function generateSecureApiToken(prefixSlug = 'live'): { token: string; tokenPrefix: string; tokenHash: string } {
+    const rawSecret = crypto.randomBytes(20).toString('hex');
+    const cleanSlug = prefixSlug.replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 10) || 'live';
+    const token = `cp_${cleanSlug}_${rawSecret}`;
+    const tokenPrefix = `${token.substring(0, 16)}••••••••`;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    return { token, tokenPrefix, tokenHash };
   }
 
   const CREDENTIAL_STORE_PATH = path.join(tmpDir, 'clickpay-rotated-creds.json');
@@ -448,19 +557,25 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     rotatedPasswordHashes = {};
   }
 
-  async function persistRotatedCredential(emailNorm: string, rawPass: string) {
+  function isFounderPasswordConfigured(): boolean {
+    if (ENV_FOUNDER_PASSWORD.length >= 8) return true;
+    return CREDENCIAIS_FOUNDERS.emails.some((e) => Boolean(rotatedPasswordHashes[e.toLowerCase().trim()]));
+  }
+
+  async function persistRotatedCredential(emailNorm: string, rawPass: string): Promise<string> {
+    const hashed = await hashPassword(rawPass);
     try {
-      const hashed = await hashPassword(rawPass);
       rotatedPasswordHashes[emailNorm] = hashed;
       if (isFounderEmail(emailNorm)) {
         for (const fe of CREDENCIAIS_FOUNDERS.emails) {
           rotatedPasswordHashes[fe.toLowerCase().trim()] = hashed;
         }
       }
-      fs.writeFileSync(CREDENTIAL_STORE_PATH, JSON.stringify(rotatedPasswordHashes), 'utf8');
+      fs.writeFileSync(CREDENTIAL_STORE_PATH, JSON.stringify(rotatedPasswordHashes), { encoding: 'utf8', mode: 0o600 });
     } catch (err) {
       console.warn('[CredStore Warning]:', err);
     }
+    return hashed;
   }
 
   const requireSuperAdmin = (req: Request, res: Response, next: any) => {
@@ -658,7 +773,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   }
 
   function issueOtpChallenge(email: string, authPayload: any, res: Response) {
-    const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+    const otpCode = String(crypto.randomInt(100000, 1000000));
     const { tentativaId, expiresAt } = createStatelessOtpToken(email, otpCode, authPayload);
 
     if (pendingOtpRequests.length > 500) {
@@ -696,7 +811,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Gerson Cumbane",
       email: "gersonjcumbane@gmail.com",
       passwordMasked: "••••••••••••",
-      rawPassword: INITIAL_FOUNDER_PASSWORD,
+      passwordConfigured: isFounderPasswordConfigured(),
       role: "SUPER_ADMIN_PAYROLL",
       roleLabel: "Super Admin (Fundador)",
       plan: "Platinum",
@@ -705,14 +820,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       status: "ativo",
       createdAt: "2026-01-01",
       lastLogin: "Hoje (Ativo)",
-      apiTokenPrefix: "cp_live_mestre_..."
+      apiTokenPrefix: "cp_live_mestre_••••••••"
     },
     {
       id: "usr_rh_02",
       name: "Dra. Amina Patel",
       email: "rh@clickpay.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "Rh@ClickPay2026!",
+      passwordConfigured: Boolean(rotatedPasswordHashes["rh@clickpay.co.mz"]),
       role: "GESTOR_RH",
       roleLabel: "Gestor de Recursos Humanos & Folha",
       plan: "Gold",
@@ -720,15 +835,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 84 311 9922",
       status: "ativo",
       createdAt: "2026-02-15",
-      lastLogin: "Ontem às 16:45",
-      apiTokenPrefix: "cp_live_rh_..."
+      lastLogin: "Aguardando definição de senha",
+      apiTokenPrefix: "cp_live_rh_••••••••"
     },
     {
       id: "usr_contab_03",
       name: "Dr. Carlos Mondlane",
       email: "contabilidade@clickpay.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "Pgc@ClickPay2026!",
+      passwordConfigured: Boolean(rotatedPasswordHashes["contabilidade@clickpay.co.mz"]),
       role: "CONTABILISTA",
       roleLabel: "Contabilista Certificado (PGC & AT)",
       plan: "Gold",
@@ -736,15 +851,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 82 445 1199",
       status: "ativo",
       createdAt: "2026-03-01",
-      lastLogin: "Hoje às 08:30",
-      apiTokenPrefix: "cp_live_contab_..."
+      lastLogin: "Aguardando definição de senha",
+      apiTokenPrefix: "cp_live_contab_••••••••"
     },
     {
       id: "usr_cli_bronze_04",
       name: "Construtora Limpopo Lda",
       email: "construcao@payrolltech.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "bronze2026",
+      passwordConfigured: Boolean(rotatedPasswordHashes["construcao@payrolltech.co.mz"]),
       role: "CLIENTE_EMPRESA",
       roleLabel: "Cliente Empresa (Starter)",
       plan: "Bronze",
@@ -752,15 +867,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 84 111 2233",
       status: "ativo",
       createdAt: "2026-04-10",
-      lastLogin: "07 de Novembro de 2026",
-      apiTokenPrefix: "cp_live_cli_bronze_..."
+      lastLogin: "Aguardando definição de senha",
+      apiTokenPrefix: "cp_live_bronze_••••••••"
     },
     {
       id: "usr_cli_silver_05",
       name: "Instituto Rovuma Lda",
       email: "educacao@payrolltech.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "silver2026",
+      passwordConfigured: Boolean(rotatedPasswordHashes["educacao@payrolltech.co.mz"]),
       role: "CLIENTE_EMPRESA",
       roleLabel: "Cliente Empresa (Profissional)",
       plan: "Silver",
@@ -768,15 +883,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 82 333 4455",
       status: "ativo",
       createdAt: "2026-05-18",
-      lastLogin: "08 de Novembro de 2026",
-      apiTokenPrefix: "cp_live_cli_silver_..."
+      lastLogin: "Aguardando definição de senha",
+      apiTokenPrefix: "cp_live_silver_••••••••"
     },
     {
       id: "usr_cli_gold_06",
       name: "Kuvanga Consultoria Lda",
       email: "servicos@payrolltech.co.mz",
       passwordMasked: "••••••••••••",
-      rawPassword: "gold2026",
+      passwordConfigured: Boolean(rotatedPasswordHashes["servicos@payrolltech.co.mz"]),
       role: "CLIENTE_EMPRESA",
       roleLabel: "Cliente Empresa (Empresarial)",
       plan: "Gold",
@@ -784,57 +899,66 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 85 555 6677",
       status: "ativo",
       createdAt: "2026-06-22",
-      lastLogin: "Hoje às 11:15",
-      apiTokenPrefix: "cp_live_cli_gold_..."
+      lastLogin: "Aguardando definição de senha",
+      apiTokenPrefix: "cp_live_gold_••••••••"
     }
   ];
 
-  const activeApiTokens: any[] = [
-    {
-      id: "tok_sissmo_inss_mz",
-      name: "Integração SISSMO & Guia INSS Oficial M/01",
-      tokenPrefix: "cp_live_sissmo_••••••••",
-      fullToken: "cp_live_sissmo_inss_mz_2026_oficial_sec",
-      scopes: ["payroll:export", "inss:guia", "sissmo:read"],
-      createdAt: "2026-01-15",
-      lastUsedAt: "Hoje às 10:20",
-      status: "ativo",
-      createdBy: "Super Admin (Gerson Cumbane)"
-    },
-    {
-      id: "tok_fintech_mpesa_gw",
-      name: "Gateway Fintech Carteiras Móveis M-Pesa & e-Mola",
-      tokenPrefix: "cp_live_fintech_••••••••",
-      fullToken: "cp_live_fintech_mpesa_emola_01_gateway_payout",
-      scopes: ["fintech:payout", "vales:write", "bancos:reconcile"],
-      createdAt: "2026-02-01",
-      lastUsedAt: "Hoje às 09:45",
-      status: "ativo",
-      createdBy: "Super Admin (Gerson Cumbane)"
-    },
-    {
-      id: "tok_at_faturacao_api",
-      name: "API de Facturação Eletrónica AT Moçambique (POS)",
-      tokenPrefix: "cp_live_faturacao_••••••••",
-      fullToken: "cp_live_pos_invoicing_at_mz_certified_2026",
-      scopes: ["invoicing:create", "iva:m01", "recibos:pdf"],
-      createdAt: "2026-03-10",
-      lastUsedAt: "Ontem às 17:30",
-      status: "ativo",
-      createdBy: "Super Admin (Gerson Cumbane)"
-    },
-    {
-      id: "tok_webhook_erp_mz",
-      name: "ClickPay Webhook Sync & Mobile Connect",
-      tokenPrefix: "cp_live_webhook_••••••••",
-      fullToken: "cp_live_webhook_sync_mobile_push_erp_99",
-      scopes: ["notifications:push", "leads:sync"],
-      createdAt: "2026-04-05",
-      lastUsedAt: "Há 2 dias",
-      status: "ativo",
-      createdBy: "Super Admin (Gerson Cumbane)"
-    }
-  ];
+  const makeInitialApiTokens = () => {
+    const t1 = generateSecureApiToken('sissmo');
+    const t2 = generateSecureApiToken('fintech');
+    const t3 = generateSecureApiToken('fat');
+    const t4 = generateSecureApiToken('webhook');
+    return [
+      {
+        id: "tok_sissmo_inss_mz",
+        name: "Integração SISSMO & Guia INSS Oficial M/01",
+        tokenPrefix: t1.tokenPrefix,
+        tokenHash: t1.tokenHash,
+        scopes: ["payroll:export", "inss:guia", "sissmo:read"],
+        createdAt: "2026-01-15",
+        lastUsedAt: "Hoje às 10:20",
+        status: "ativo",
+        createdBy: "Super Admin (Gerson Cumbane)"
+      },
+      {
+        id: "tok_fintech_mpesa_gw",
+        name: "Gateway Fintech Carteiras Móveis M-Pesa & e-Mola (Bloqueado)",
+        tokenPrefix: t2.tokenPrefix,
+        tokenHash: t2.tokenHash,
+        scopes: ["fintech:payout", "vales:write", "bancos:reconcile"],
+        createdAt: "2026-02-01",
+        lastUsedAt: null,
+        status: PAYMENTS_MODULE_LOCKED ? "revogado" : "ativo",
+        revokedReason: PAYMENTS_MODULE_LOCKED ? "Módulo de pagamentos bloqueado (Apenas Facturação)" : undefined,
+        createdBy: "Super Admin (Gerson Cumbane)"
+      },
+      {
+        id: "tok_at_faturacao_api",
+        name: "API de Facturação Eletrónica Moçambique (POS)",
+        tokenPrefix: t3.tokenPrefix,
+        tokenHash: t3.tokenHash,
+        scopes: ["invoicing:create", "iva:m01", "recibos:pdf"],
+        createdAt: "2026-03-10",
+        lastUsedAt: "Ontem às 17:30",
+        status: "ativo",
+        createdBy: "Super Admin (Gerson Cumbane)"
+      },
+      {
+        id: "tok_webhook_erp_mz",
+        name: "ClickPay Webhook Sync & Mobile Connect",
+        tokenPrefix: t4.tokenPrefix,
+        tokenHash: t4.tokenHash,
+        scopes: ["notifications:push", "leads:sync"],
+        createdAt: "2026-04-05",
+        lastUsedAt: "Há 2 dias",
+        status: "ativo",
+        createdBy: "Super Admin (Gerson Cumbane)"
+      }
+    ];
+  };
+
+  const activeApiTokens: any[] = makeInitialApiTokens();
 
   // Estado multi-tenant isolado por empresa (carteira, contas bancárias, histórico, auditoria e persistência)
   const makeDefaultBankAccounts = () => ([
@@ -844,7 +968,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       numero_conta: "0001-2222-3333",
       nib: "000100010002222333344",
       saldo: 10000000.00,
-      senha: "1234"
+      pinConfigured: false
     }
   ]);
 
@@ -1057,17 +1181,24 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   function saveRuntimeState() {
     try {
       syncCompanyGlobalsIfActive(founderActiveCompanyId);
+      const sanitizedSystemUsers = systemUsersList.map(({ rawPassword: _rp, apiToken: _at, ...rest }) => rest);
+      const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, ...rest }) => rest);
       const state = {
         founderActiveCompanyId,
+        founderEmails: CREDENCIAIS_FOUNDERS.emails,
         deletedSeedEmployeeIds: Array.from(deletedSeedEmployeeIds),
         clients: baseDadosClientes,
         registeredUsers: clientesRegistadosPelosFounders,
+        systemUsers: sanitizedSystemUsers,
+        apiTokens: sanitizedTokens,
+        otpSecurityConfig,
+        accessAuditLogs: accessAuditLogs.slice(0, 80),
         walletsByCompany,
         bankAccountsByCompany,
         historicoByCompany,
         auditLogsByCompany
       };
-      fs.writeFileSync(RUNTIME_STATE_PATH, JSON.stringify(state), 'utf8');
+      fs.writeFileSync(RUNTIME_STATE_PATH, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
     } catch (err) {
       console.warn('[RuntimeState Save Warning]:', err);
     }
@@ -1080,6 +1211,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return;
 
+      if (Array.isArray(parsed.founderEmails)) {
+        parsed.founderEmails.forEach((em: string) => {
+          const cleanEm = String(em || '').toLowerCase().trim();
+          if (cleanEm && !CREDENCIAIS_FOUNDERS.emails.includes(cleanEm)) {
+            CREDENCIAIS_FOUNDERS.emails.push(cleanEm);
+          }
+        });
+      }
       if (Array.isArray(parsed.deletedSeedEmployeeIds)) {
         deletedSeedEmployeeIds.clear();
         parsed.deletedSeedEmployeeIds.forEach((id: string) => deletedSeedEmployeeIds.add(String(id)));
@@ -1089,11 +1228,65 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
       if (Array.isArray(parsed.clients)) {
         baseDadosClientes.length = 0;
-        baseDadosClientes.push(...parsed.clients);
+        baseDadosClientes.push(
+          ...parsed.clients.map((c: any) => {
+            // Remover senhas demo antigas em texto limpo ao carregar estado legado
+            if (c && typeof c.password === 'string' && ['bronze2026', 'silver2026', 'gold2026'].includes(c.password)) {
+              const { password: _drop, ...cleanClient } = c;
+              return cleanClient;
+            }
+            return c;
+          })
+        );
       }
       if (Array.isArray(parsed.registeredUsers)) {
         clientesRegistadosPelosFounders.length = 0;
         clientesRegistadosPelosFounders.push(...parsed.registeredUsers);
+      }
+      if (Array.isArray(parsed.systemUsers) && parsed.systemUsers.length > 0) {
+        const mergedMap = new Map<string, any>();
+        parsed.systemUsers.forEach((u: any) => {
+          if (u?.email) {
+            const cleanEmail = String(u.email).toLowerCase().trim();
+            const { rawPassword: _rp, apiToken: _at, ...safeUser } = u;
+            safeUser.passwordConfigured = Boolean(
+              safeUser.passwordHash ||
+                rotatedPasswordHashes[cleanEmail] ||
+                (isFounderEmail(cleanEmail) && isFounderPasswordConfigured())
+            );
+            mergedMap.set(cleanEmail, safeUser);
+          }
+        });
+        systemUsersList.forEach((defU: any) => {
+          const k = String(defU.email).toLowerCase().trim();
+          if (!mergedMap.has(k)) mergedMap.set(k, defU);
+        });
+        systemUsersList.length = 0;
+        systemUsersList.push(...Array.from(mergedMap.values()));
+      }
+      if (Array.isArray(parsed.apiTokens) && parsed.apiTokens.length > 0) {
+        activeApiTokens.length = 0;
+        activeApiTokens.push(
+          ...parsed.apiTokens.map((t: any) => {
+            const { fullToken: _ft, ...safeTok } = t || {};
+            if (
+              PAYMENTS_MODULE_LOCKED &&
+              (safeTok.id === 'tok_fintech_mpesa_gw' ||
+                (Array.isArray(safeTok.scopes) && safeTok.scopes.includes('fintech:payout')))
+            ) {
+              safeTok.status = 'revogado';
+              safeTok.revokedReason = 'Módulo de pagamentos bloqueado (Apenas Facturação)';
+            }
+            return safeTok;
+          })
+        );
+      }
+      if (parsed.otpSecurityConfig && typeof parsed.otpSecurityConfig === 'object') {
+        Object.assign(otpSecurityConfig, parsed.otpSecurityConfig);
+      }
+      if (Array.isArray(parsed.accessAuditLogs) && parsed.accessAuditLogs.length > 0) {
+        accessAuditLogs.length = 0;
+        accessAuditLogs.push(...parsed.accessAuditLogs.slice(0, 80));
       }
       if (parsed.walletsByCompany && typeof parsed.walletsByCompany === 'object') {
         Object.assign(walletsByCompany, parsed.walletsByCompany);
@@ -1215,13 +1408,96 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   };
 
   // =========================================================================
+  // =========================================================================
   // GESTÃO DE CREDENCIAIS & LOGIN INTEGRADO COM FIREBASE AUTH
   // =========================================================================
 
+  // Estado de configuração inicial do Fundador (sem senhas hardcoded)
+  app.get('/api/auth/bootstrap-status', (_req: Request, res: Response) => {
+    return res.json({
+      founderConfigured: isFounderPasswordConfigured(),
+      founderEmail: CREDENCIAIS_FOUNDERS.email,
+      pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+      modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo'
+    });
+  });
+
+  // Configuração única da palavra-passe inicial do Fundador quando ainda não existe credencial definida
+  app.post('/api/auth/bootstrap-claim', async (req: Request, res: Response) => {
+    if (isFounderPasswordConfigured()) {
+      return res.status(409).json({
+        erro: 'As credenciais do Fundador já se encontram configuradas. Utilize o início de sessão normal ou actualize a senha via Conta Google.'
+      });
+    }
+
+    const emailNorm = String(req.body?.email || CREDENCIAIS_FOUNDERS.email).toLowerCase().trim();
+    const cleanPass = String(req.body?.newPassword || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+
+    if (!isFounderEmail(emailNorm)) {
+      return res.status(403).json({
+        erro: 'Apenas o e-mail oficial do Fundador pode activar a credencial mestre inicial.'
+      });
+    }
+    if (cleanPass.length < 8) {
+      return res.status(400).json({
+        erro: 'A palavra-passe inicial do Fundador deve ter no mínimo 8 caracteres.'
+      });
+    }
+
+    const hashed = await persistRotatedCredential(emailNorm, cleanPass);
+    systemUsersList.forEach((u) => {
+      if (isFounderEmail(u.email)) {
+        u.passwordConfigured = true;
+        u.passwordHash = hashed;
+        u.lastLogin = 'Configurado agora';
+      }
+    });
+    saveRuntimeState();
+
+    if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
+      await syncUserToFirebase(emailNorm, cleanPass);
+    }
+
+    notifyFounder(
+      'Credencial Inicial do Fundador Configurada',
+      `Palavra-passe mestre definida para ${emailNorm} com encriptação PBKDF2-SHA256.`,
+      { userEmail: emailNorm, status: 'sucesso' }
+    );
+
+    founderActiveCompanyId = 'cli_founders';
+    selecionarClienteEmpresa('cli_founders');
+    syncCompanyGlobalsIfActive('cli_founders');
+    const founderComp = baseDadosClientes.find(c => c.id === 'cli_founders');
+
+    const sessionPayload = {
+      sucesso: true,
+      pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+      modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+      mensagem: 'Credenciais do Fundador configuradas e activadas com sucesso!',
+      token: signSessionToken({ email: emailNorm, role: 'SUPER_ADMIN_PAYROLL', empresa_id: 'cli_founders' }),
+      usuario: {
+        nome: 'Gerson Cumbane (Fundador ClickPay)',
+        email: emailNorm,
+        funcao: 'SUPER_ADMIN_PAYROLL',
+        empresa_id: 'cli_founders',
+        area_visualizacao: 'Painel Executivo Global',
+        nome_empresa: founderComp?.nome || empresaAtual.nome || 'ClickPay Moçambique Lda',
+        subscription_status: 'ativo',
+        subscription_plan: 'Platinum'
+      }
+    };
+
+    if (otpSecurityConfig.requireOtpOnLogin) {
+      return issueOtpChallenge(emailNorm, sessionPayload, res);
+    }
+
+    return res.json(sessionPayload);
+  });
+
   app.post('/api/auth/login', async (req: Request, res: Response) => {
-    const { email, password } = req.body;
+    const { email, password, senha, firebaseIdToken } = req.body || {};
     const emailNorm = String(email || '').replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase().trim();
-    const passwordRaw = String(password || '').replace(/[\u200B-\u200D\uFEFF]/g, '');
+    const passwordRaw = String(password ?? senha ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '');
     const passwordClean = passwordRaw.trim();
 
     if (!emailNorm || !passwordClean) {
@@ -1272,14 +1548,20 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     // 1. Acesso Mestre: Verifica se é o Fundador (Super Admin / Gerson Cumbane)
     if (isFounderEmail(emailNorm)) {
-      const isCorrectPassword =
-        matchesRotatedHash ||
-        (!rotatedHash && (
-          CREDENCIAIS_FOUNDERS.password === passwordClean ||
-          CREDENCIAIS_FOUNDERS.passwords.includes(passwordClean) ||
-          CREDENCIAIS_FOUNDERS.passwords.includes(passwordRaw)
-        )) ||
-        isFirebaseAuthed;
+      if (!isFounderPasswordConfigured() && !isFirebaseAuthed) {
+        return res.status(403).json({
+          code: 'FOUNDER_BOOTSTRAP_REQUIRED',
+          erro: 'A palavra-passe inicial do Fundador ainda não foi definida. Utilize "Configurar Senha do Fundador" ou entre diretamente com a sua Conta Google (Gmail).'
+        });
+      }
+
+      const matchesEnvFounder =
+        !rotatedHash &&
+        ENV_FOUNDER_PASSWORD.length > 0 &&
+        (constantTimeStringMatch(passwordClean, ENV_FOUNDER_PASSWORD) ||
+          constantTimeStringMatch(passwordRaw, ENV_FOUNDER_PASSWORD));
+
+      const isCorrectPassword = matchesRotatedHash || matchesEnvFounder || isFirebaseAuthed;
 
       if (isCorrectPassword) {
         if (!isFirebaseAuthed && !isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
@@ -1293,6 +1575,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
         const sessionPayload = {
           sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
           mensagem: "Acesso de Fundador Autorizado com Sucesso!",
           token: signSessionToken({ email: emailNorm, role: "SUPER_ADMIN_PAYROLL", empresa_id: "cli_founders" }),
           usuario: {
@@ -1323,24 +1607,16 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         return res.status(403).json({ erro: 'Esta conta encontra-se desativada. Contacte o Administrador.' });
       }
 
-      const planTierAliases =
-        systemUser.plan === 'Bronze' ? ['bronze2026', 'construcao2026'] :
-        systemUser.plan === 'Silver' ? ['silver2026', 'educacao2026'] :
-        systemUser.plan === 'Gold' ? ['gold2026', 'servicos2026'] :
-        [];
+      const storedSysHash = String(systemUser.passwordHash || '');
+      const matchesSysHash = storedSysHash
+        ? (await verifyPassword(passwordClean, storedSysHash)) || (await verifyPassword(passwordRaw, storedSysHash))
+        : false;
 
-      const isCorrectSystemPassword =
-        matchesRotatedHash ||
-        (!rotatedHash && (
-          systemUser.rawPassword === passwordClean ||
-          systemUser.rawPassword === passwordRaw ||
-          planTierAliases.includes(passwordClean)
-        )) ||
-        isFirebaseAuthed;
+      const isCorrectSystemPassword = matchesRotatedHash || matchesSysHash || isFirebaseAuthed;
 
       if (isCorrectSystemPassword) {
         if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
-          syncUserToFirebase(emailNorm, systemUser.rawPassword || passwordClean);
+          syncUserToFirebase(emailNorm, passwordClean);
         }
 
         let targetCompanyId = "cli_founders";
@@ -1370,6 +1646,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
         const sessionPayload = {
           sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
           mensagem: `Sessão iniciada como ${systemUser.roleLabel || systemUser.role}`,
           token: signSessionToken({ email: systemUser.email, role: systemUser.role, empresa_id: targetCompanyId }),
           usuario: {
@@ -1398,14 +1676,19 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       c => String(c.email || '').toLowerCase().trim() === emailNorm
     );
     if (clienteEncontrado) {
+      const storedRegPass = String(clienteEncontrado.password || '');
       const isCorrectPassword =
-        clienteEncontrado.password === passwordClean ||
-        clienteEncontrado.password === passwordRaw ||
-        isFirebaseAuthed;
+        matchesRotatedHash ||
+        isFirebaseAuthed ||
+        (storedRegPass
+          ? (await verifyPassword(passwordClean, storedRegPass)) || (await verifyPassword(passwordRaw, storedRegPass))
+          : false);
       if (isCorrectPassword) {
         const matchedCompany = baseDadosClientes.find(c => c.id === clienteEncontrado.empresa_id);
         const sessionPayload = {
           sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
           mensagem: "Acesso Cliente Autorizado!",
           token: signSessionToken({
             email: clienteEncontrado.email,
@@ -1432,98 +1715,31 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
     }
 
-    // 4. Procurar ou provisionar dinamicamente os clientes padrão / registados em baseDadosClientes
-    let clienteErp = baseDadosClientes.find(c =>
-      String(c.email || '').toLowerCase().trim() === emailNorm ||
-      ((emailNorm === 'bronze@payrolltech.co.mz' || emailNorm === 'construcao@payrolltech.co.mz') && c.id === 'cli_bronze') ||
-      ((emailNorm === 'silver@payrolltech.co.mz' || emailNorm === 'educacao@payrolltech.co.mz') && c.id === 'cli_silver') ||
-      ((emailNorm === 'gold@payrolltech.co.mz' || emailNorm === 'servicos@payrolltech.co.mz') && c.id === 'cli_gold')
+    // 4. Procurar clientes registados em baseDadosClientes (sem senhas padrão estáticas)
+    const clienteErp = baseDadosClientes.find(c =>
+      String(c.email || '').toLowerCase().trim() === emailNorm
     );
 
-    if (!clienteErp) {
-      if ((emailNorm === 'construcao@payrolltech.co.mz' || emailNorm === 'bronze@payrolltech.co.mz') && (passwordClean === 'construcao2026' || passwordClean === 'bronze2026' || isFirebaseAuthed)) {
-        clienteErp = adicionarClienteEmpresa({
-          id: "cli_bronze",
-          nome: "Construtora & Obras do Limpopo Lda",
-          nuit: "400111222",
-          endereco: "Av. 25 de Setembro, nº 1200, Xai-Xai, Gaza",
-          provincia: "Gaza",
-          distrito: "Xai-Xai",
-          regime_iva: "Geral (16%)",
-          nuel: "10045612",
-          email: "construcao@payrolltech.co.mz",
-          telefone: "+258 84 111 2233",
-          logo: "/clickpay-logo.png",
-          fee_base: 1500.00,
-          fee_por_slip: 120.00,
-          password: "bronze2026",
-          subscription_status: "ativo",
-          subscription_plan: "Bronze",
-          next_billing_date: "2026-08-30"
-        });
-      } else if ((emailNorm === 'educacao@payrolltech.co.mz' || emailNorm === 'silver@payrolltech.co.mz') && (passwordClean === 'educacao2026' || passwordClean === 'silver2026' || isFirebaseAuthed)) {
-        clienteErp = adicionarClienteEmpresa({
-          id: "cli_silver",
-          nome: "Instituto de Ensino & Formação do Rovuma Lda",
-          nuit: "400333444",
-          endereco: "Av. Samora Machel, nº 850, Nampula",
-          provincia: "Nampula",
-          distrito: "Nampula Cidade",
-          regime_iva: "Geral (16%)",
-          nuel: "10077882",
-          email: "educacao@payrolltech.co.mz",
-          telefone: "+258 82 333 4455",
-          logo: "/clickpay-logo.png",
-          fee_base: 3500.00,
-          fee_por_slip: 100.00,
-          password: "silver2026",
-          subscription_status: "ativo",
-          subscription_plan: "Silver",
-          next_billing_date: "2026-08-30"
-        });
-      } else if ((emailNorm === 'servicos@payrolltech.co.mz' || emailNorm === 'gold@payrolltech.co.mz') && (passwordClean === 'servicos2026' || passwordClean === 'gold2026' || isFirebaseAuthed)) {
-        clienteErp = adicionarClienteEmpresa({
-          id: "cli_gold",
-          nome: "Kuvanga Tecnologias & Consultoria Lda",
-          nuit: "400555666",
-          endereco: "Av. Julius Nyerere, nº 2200, Polana, Maputo",
-          provincia: "Maputo Cidade",
-          distrito: "KaMpfumo",
-          regime_iva: "Geral (16%)",
-          nuel: "10099123",
-          email: "servicos@payrolltech.co.mz",
-          telefone: "+258 85 555 6677",
-          logo: "/clickpay-logo.png",
-          fee_base: 6900.00,
-          fee_por_slip: 95.00,
-          password: "gold2026",
-          subscription_status: "ativo",
-          subscription_plan: "Gold",
-          next_billing_date: "2026-08-30"
-        });
-      }
-    }
-
     if (clienteErp) {
-      const tierPasswords =
-        clienteErp.id === 'cli_bronze' ? ['bronze2026', 'construcao2026'] :
-        clienteErp.id === 'cli_silver' ? ['silver2026', 'educacao2026'] :
-        clienteErp.id === 'cli_gold' ? ['gold2026', 'servicos2026'] :
-        [];
+      const storedClientPass = String(clienteErp.password || '');
+      const matchesStoredClient = storedClientPass
+        ? (await verifyPassword(passwordClean, storedClientPass)) || (await verifyPassword(passwordRaw, storedClientPass))
+        : false;
 
       const isCorrectPassword =
-        clienteErp.password === passwordClean ||
-        clienteErp.password === passwordRaw ||
-        tierPasswords.includes(passwordClean) ||
-        isFirebaseAuthed;
+        matchesRotatedHash ||
+        isFirebaseAuthed ||
+        matchesStoredClient;
 
       if (isCorrectPassword) {
-        if (!isFirebaseAuthed && firebaseConfig && firebaseConfig.apiKey) {
-          syncUserToFirebase(emailNorm, clienteErp.password || passwordClean);
+        if (!isFirebaseAuthed && !isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
+          syncUserToFirebase(emailNorm, passwordClean);
         }
         const resolvedRole = clienteErp.id === 'cli_founders' ? "SUPER_ADMIN_PAYROLL" : "CLIENTE_EMPRESA";
         const sessionPayload = {
           sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
           mensagem: `Sessão iniciada como Administrador de ${clienteErp.nome}`,
           token: signSessionToken({ email: clienteErp.email, role: resolvedRole, empresa_id: clienteErp.id }),
           usuario: {
@@ -1551,9 +1767,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       try {
         const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
         const queryUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
+        const fsHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (typeof firebaseIdToken === 'string' && firebaseIdToken.length >= 20) {
+          fsHeaders.Authorization = `Bearer ${firebaseIdToken}`;
+        }
         const fsRes = await fetch(queryUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: fsHeaders,
           body: JSON.stringify({
             structuredQuery: {
               from: [{ collectionId: 'saas_clients' }],
@@ -1614,6 +1834,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               }
               const sessionPayload = {
                 sucesso: true,
+                pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+                modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
                 mensagem: `Sessão restaurada com sucesso para ${companyName}`,
                 token: signSessionToken({ email: emailNorm, role: 'CLIENTE_EMPRESA', empresa_id: restored.id }),
                 usuario: {
@@ -1666,6 +1888,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
       const sessionPayload = {
         sucesso: true,
+        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+        modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
         mensagem: "Sessão autenticada via Firebase Auth!",
         token: signSessionToken({ email: emailNorm, role: "CLIENTE_EMPRESA", empresa_id: isolatedComp.id }),
         usuario: {
@@ -1817,7 +2041,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     const statelessPayload = tentativaId ? verifyStatelessOtpToken(String(tentativaId)) : null;
     if (statelessPayload && !usedOtpChallengeIds.has(statelessPayload.id) && Date.now() <= statelessPayload.exp + 10 * 60 * 1000) {
-      const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+      const newOtp = String(crypto.randomInt(100000, 1000000));
       const { tentativaId: newTentativaId, expiresAt } = createStatelessOtpToken(
         statelessPayload.email,
         newOtp,
@@ -1857,7 +2081,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       });
     }
 
-    const newOtp = String(Math.floor(100000 + Math.random() * 900000));
+    const newOtp = String(crypto.randomInt(100000, 1000000));
     const { tentativaId: newTentativaId, expiresAt } = createStatelessOtpToken(
       existing.email,
       newOtp,
@@ -1882,75 +2106,121 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     });
   });
 
-  // AUTENTICAÇÃO VIA CONTA GOOGLE / GMAIL (COM SUPORTE A OAUTH DIRETO E FALLBACK SILENCIOSO)
-  const handleGoogleAuth = async (req: Request, res: Response) => {
-    const { googleAccessToken, idToken } = req.body || {};
+  // Helper partilhado para validar tokens Google (GIS Access Token, Firebase ID Token ou Google Identity JWT)
+  async function verifyGoogleIdentityPayload(body: any): Promise<{
+    ok: boolean;
+    status?: number;
+    error?: string;
+    email?: string;
+    emailVerified?: boolean;
+    displayName?: string;
+    firebaseIdToken?: string;
+  }> {
+    const { googleAccessToken, idToken, credential } = body || {};
     const hasAccessToken = typeof googleAccessToken === 'string' && googleAccessToken.length >= 20;
     const hasIdToken = typeof idToken === 'string' && idToken.length >= 20;
+    const hasCredential = typeof credential === 'string' && credential.length >= 20;
 
-    if (!hasAccessToken && !hasIdToken) {
-      return res.status(400).json({ erro: 'Sessão Google inválida ou ausente.' });
+    if (!hasAccessToken && !hasIdToken && !hasCredential) {
+      return { ok: false, status: 400, error: 'Sessão Google inválida ou ausente.' };
     }
 
+    if (hasAccessToken) {
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${googleAccessToken}` }
+      });
+      const userInfo: any = await userInfoRes.json().catch(() => ({}));
+      if (!userInfoRes.ok || !userInfo?.email) {
+        return { ok: false, status: 401, error: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' };
+      }
+
+      const expectedClient = firebaseConfig?.oAuthClientId || DEFAULT_PUBLIC_FIREBASE_CONFIG.oAuthClientId;
+      const projectPrefix = `${firebaseConfig?.messagingSenderId || '492655395269'}-`;
+      const tokenInfoRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(googleAccessToken)}`
+      ).catch(() => null);
+      if (tokenInfoRes && tokenInfoRes.ok) {
+        const tokenInfo: any = await tokenInfoRes.json().catch(() => ({}));
+        const tokenClient = String(tokenInfo?.azp || tokenInfo?.aud || '');
+        if (tokenClient && expectedClient && tokenClient !== expectedClient && !tokenClient.startsWith(projectPrefix)) {
+          return { ok: false, status: 401, error: 'Token Google não pertence a esta aplicação.' };
+        }
+      }
+
+      return {
+        ok: true,
+        email: String(userInfo.email).toLowerCase().trim(),
+        emailVerified: Boolean(userInfo.email_verified),
+        displayName: String(userInfo.name || ''),
+        firebaseIdToken: hasIdToken ? idToken : undefined
+      };
+    }
+
+    if (hasCredential) {
+      const credInfoRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+      ).catch(() => null);
+      const credInfo: any = credInfoRes ? await credInfoRes.json().catch(() => ({})) : {};
+      if (!credInfoRes || !credInfoRes.ok || !credInfo?.email) {
+        return { ok: false, status: 401, error: 'Credencial Google inválida ou expirada.' };
+      }
+      const expectedClient = firebaseConfig?.oAuthClientId || DEFAULT_PUBLIC_FIREBASE_CONFIG.oAuthClientId;
+      const projectPrefix = `${firebaseConfig?.messagingSenderId || '492655395269'}-`;
+      const tokenClient = String(credInfo?.azp || credInfo?.aud || '');
+      if (tokenClient && expectedClient && tokenClient !== expectedClient && !tokenClient.startsWith(projectPrefix)) {
+        return { ok: false, status: 401, error: 'Credencial Google não pertence a esta aplicação.' };
+      }
+      return {
+        ok: true,
+        email: String(credInfo.email).toLowerCase().trim(),
+        emailVerified: credInfo.email_verified === true || credInfo.email_verified === 'true',
+        displayName: String(credInfo.name || ''),
+        firebaseIdToken: hasIdToken ? idToken : undefined
+      };
+    }
+
+    if (!firebaseConfig || !firebaseConfig.apiKey) {
+      return { ok: false, status: 503, error: 'Serviço de validação Google temporariamente indisponível.' };
+    }
+    const lookupRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      }
+    );
+    const lookupData: any = await lookupRes.json().catch(() => ({}));
+    const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
+    if (!lookupRes.ok || !fbUser || !fbUser.email) {
+      return { ok: false, status: 401, error: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' };
+    }
+    if (fbUser.disabled) {
+      return { ok: false, status: 403, error: 'Esta conta encontra-se desativada.' };
+    }
+    return {
+      ok: true,
+      email: String(fbUser.email).toLowerCase().trim(),
+      emailVerified: fbUser.emailVerified === true,
+      displayName: String(fbUser.displayName || ''),
+      firebaseIdToken: idToken
+    };
+  }
+
+  // AUTENTICAÇÃO VIA CONTA GOOGLE / GMAIL (COM SUPORTE A OAUTH DIRETO, POPUP, REDIRECT E AUTO-PROVISIONAMENTO)
+  const handleGoogleAuth = async (req: Request, res: Response) => {
     try {
-      let emailNorm = '';
-      let emailVerified = false;
-      let displayName = '';
-
-      if (hasAccessToken) {
-        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${googleAccessToken}` }
-        });
-        const userInfo: any = await userInfoRes.json().catch(() => ({}));
-        if (!userInfoRes.ok || !userInfo?.email) {
-          return res.status(401).json({ erro: 'Sessão Gmail inválida ou expirada. Tente autenticar novamente.' });
-        }
-
-        // Validar audiência OAuth quando configurado
-        if (firebaseConfig?.oAuthClientId) {
-          const tokenInfoRes = await fetch(
-            `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(googleAccessToken)}`
-          ).catch(() => null);
-          if (tokenInfoRes && tokenInfoRes.ok) {
-            const tokenInfo: any = await tokenInfoRes.json().catch(() => ({}));
-            const tokenClient = tokenInfo?.azp || tokenInfo?.aud;
-            if (tokenClient && tokenClient !== firebaseConfig.oAuthClientId) {
-              return res.status(401).json({ erro: 'Token Google não pertence a esta aplicação.' });
-            }
-          }
-        }
-
-        emailNorm = String(userInfo.email).toLowerCase().trim();
-        emailVerified = Boolean(userInfo.email_verified);
-        displayName = String(userInfo.name || '');
-      } else if (hasIdToken) {
-        if (!firebaseConfig || !firebaseConfig.apiKey) {
-          return res.status(503).json({ erro: 'Serviço de validação Google temporariamente indisponível.' });
-        }
-        const lookupRes = await fetch(
-          `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ idToken })
-          }
-        );
-        const lookupData: any = await lookupRes.json().catch(() => ({}));
-        const fbUser = Array.isArray(lookupData?.users) ? lookupData.users[0] : null;
-        if (!lookupRes.ok || !fbUser || !fbUser.email) {
-          return res.status(401).json({ erro: 'Sessão Google inválida ou expirada. Tente autenticar novamente.' });
-        }
-        if (fbUser.disabled) {
-          return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
-        }
-        emailNorm = String(fbUser.email).toLowerCase().trim();
-        emailVerified = fbUser.emailVerified === true;
-        displayName = String(fbUser.displayName || '');
+      const verified = await verifyGoogleIdentityPayload(req.body);
+      if (!verified.ok || !verified.email) {
+        return res.status(verified.status || 401).json({ erro: verified.error || 'Sessão Google inválida.' });
+      }
+      if (!verified.emailVerified) {
+        return res.status(403).json({ erro: 'O e-mail da conta Google não está verificado.' });
       }
 
-      if (!emailVerified) {
-        return res.status(403).json({ erro: 'O e-mail da conta Gmail não está verificado.' });
-      }
+      const emailNorm = verified.email;
+      const displayName = verified.displayName || '';
+      const firebaseIdToken = verified.firebaseIdToken;
 
       // 1. Fundador (Super Admin)
       if (isFounderEmail(emailNorm)) {
@@ -1960,6 +2230,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         const founderComp = baseDadosClientes.find(c => c.id === 'cli_founders');
         const sessionPayload = {
           sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
           mensagem: "Acesso de Fundador autenticado via Conta Google Verificada!",
           token: signSessionToken({ email: emailNorm, role: "SUPER_ADMIN_PAYROLL", empresa_id: "cli_founders" }),
           usuario: {
@@ -1991,10 +2263,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           ? baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm)
           : null;
         const targetCompanyId = matchedClient?.id || (sysUser.role === 'CLIENTE_EMPRESA' ? 'cli_bronze' : 'cli_founders');
-        sysUser.lastLogin = 'Agora (Gmail)';
+        sysUser.lastLogin = 'Agora (Google)';
+        saveRuntimeState();
         const sessionPayload = {
           sucesso: true,
-          mensagem: `Sessão iniciada via Gmail como ${sysUser.roleLabel || sysUser.role}`,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+          mensagem: `Sessão iniciada via Google como ${sysUser.roleLabel || sysUser.role}`,
           token: signSessionToken({ email: emailNorm, role: sysUser.role, empresa_id: targetCompanyId }),
           usuario: {
             nome: sysUser.name,
@@ -2007,20 +2282,51 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             next_billing_date: matchedClient?.next_billing_date || getDefaultNextBillingDate()
           }
         };
-        notifyFounder('Login via Gmail', `Acesso autorizado para ${emailNorm} (${sysUser.role}).`, { userEmail: emailNorm, status: 'sucesso' });
+        notifyFounder('Login via Google', `Acesso autorizado para ${emailNorm} (${sysUser.role}).`, { userEmail: emailNorm, status: 'sucesso' });
         return res.json(sessionPayload);
       }
 
-      // 3. Cliente empresarial (memória ou base de dados cloud saas_clients / erp_clients)
+      // 3. Utilizadores registados manualmente pelos Founders
+      const regUser = clientesRegistadosPelosFounders.find(
+        u => String(u.email || '').toLowerCase().trim() === emailNorm
+      );
+      if (regUser) {
+        const regCompany = baseDadosClientes.find(c => c.id === regUser.empresa_id);
+        return res.json({
+          sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+          mensagem: 'Sessão iniciada via Conta Google!',
+          token: signSessionToken({
+            email: emailNorm,
+            role: regUser.funcao || 'CLIENTE_EMPRESA',
+            empresa_id: regUser.empresa_id || 'cli_bronze'
+          }),
+          usuario: {
+            email: emailNorm,
+            funcao: regUser.funcao || 'CLIENTE_EMPRESA',
+            empresa_id: regUser.empresa_id || 'cli_bronze',
+            nome_empresa: regCompany?.nome || regUser.nome || 'Empresa ClickPay',
+            subscription_status: regCompany?.subscription_status || 'ativo',
+            subscription_plan: regCompany?.subscription_plan || 'Bronze',
+            next_billing_date: regCompany?.next_billing_date || getDefaultNextBillingDate()
+          }
+        });
+      }
+
+      // 4. Cliente empresarial existente (memória ou Firestore autenticado)
       let clienteErp = baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm);
-      if (!clienteErp && firebaseConfig.projectId) {
+      if (!clienteErp && firebaseConfig.projectId && firebaseIdToken) {
         const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
         const queryUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${dbId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
         for (const colName of ['saas_clients', 'erp_clients']) {
           if (clienteErp) break;
           const fsRes = await fetch(queryUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${firebaseIdToken}`
+            },
             body: JSON.stringify({
               structuredQuery: {
                 from: [{ collectionId: colName }],
@@ -2069,36 +2375,187 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         }
       }
 
-      if (clienteErp) {
-        const sessionPayload = {
-          sucesso: true,
-          mensagem: `Sessão iniciada via Gmail para ${clienteErp.nome}`,
-          token: signSessionToken({ email: emailNorm, role: 'CLIENTE_EMPRESA', empresa_id: clienteErp.id }),
-          usuario: {
-            email: emailNorm,
-            funcao: 'CLIENTE_EMPRESA',
-            empresa_id: clienteErp.id,
-            nome_empresa: clienteErp.nome,
-            subscription_status: clienteErp.subscription_status || 'ativo',
-            subscription_plan: clienteErp.subscription_plan || 'Bronze',
-            next_billing_date: clienteErp.next_billing_date || getDefaultNextBillingDate()
-          }
-        };
-        notifyFounder('Login de Cliente via Gmail', `Acesso autorizado para ${clienteErp.nome} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
-        return res.json(sessionPayload);
+      // 5. Auto-provisionamento seguro para qualquer conta Google verificada ainda sem empresa associada
+      if (!clienteErp) {
+        const googleTenantId = `cli_google_${crypto.createHash('md5').update(emailNorm).digest('hex').slice(0, 10)}`;
+        const companyTitle = displayName
+          ? `${displayName} (ClickPay ERP)`
+          : `Empresa ${emailNorm.split('@')[0].toUpperCase()}`;
+        clienteErp = adicionarClienteEmpresa({
+          id: googleTenantId,
+          nome: companyTitle,
+          nuit: '400000000',
+          endereco: 'Maputo, Moçambique',
+          provincia: 'Maputo Cidade',
+          distrito: 'KaMpfumo',
+          regime_iva: 'Geral (16%)',
+          nuel: '',
+          email: emailNorm,
+          telefone: '+258 84 000 0000',
+          logo: '/clickpay-logo.png',
+          password: '',
+          subscription_status: 'ativo',
+          subscription_plan: 'Bronze',
+          next_billing_date: getDefaultNextBillingDate(),
+          fee_base: getPlanFeeMzn('Starter'),
+          fee_por_slip: getPlanExtraSlipFeeMzn('Starter')
+        });
+        ensureTenantContainers(clienteErp.id);
+        saveRuntimeState();
       }
 
-      return res.status(403).json({
-        erro: `A conta Gmail (${emailNorm}) não está associada a nenhuma empresa registada no ClickPay ERP.`
-      });
+      const sessionPayload = {
+        sucesso: true,
+        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+        modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+        mensagem: `Sessão iniciada via Conta Google para ${clienteErp.nome}`,
+        token: signSessionToken({ email: emailNorm, role: 'CLIENTE_EMPRESA', empresa_id: clienteErp.id }),
+        usuario: {
+          email: emailNorm,
+          funcao: 'CLIENTE_EMPRESA',
+          empresa_id: clienteErp.id,
+          nome_empresa: clienteErp.nome,
+          subscription_status: clienteErp.subscription_status || 'ativo',
+          subscription_plan: clienteErp.subscription_plan || 'Bronze',
+          next_billing_date: clienteErp.next_billing_date || getDefaultNextBillingDate()
+        }
+      };
+      notifyFounder('Login de Cliente via Google', `Acesso autorizado para ${clienteErp.nome} (${emailNorm}).`, { userEmail: emailNorm, status: 'sucesso' });
+      return res.json(sessionPayload);
     } catch (err: any) {
       console.error('[Google Auth Error]:', err);
-      return res.status(500).json({ erro: 'Erro ao validar a autenticação Gmail.' });
+      return res.status(500).json({ erro: 'Erro ao validar a autenticação com Conta Google.' });
     }
   };
 
   app.post('/api/auth/google', handleGoogleAuth);
   app.post('/api/auth/google-firebase', handleGoogleAuth);
+
+  // REDEFINIÇÃO / ACTUALIZAÇÃO DE PALAVRA-PASSE COM VERIFICAÇÃO CRYPTOGRÁFICA GOOGLE
+  app.post('/api/auth/reset-password-via-google', async (req: Request, res: Response) => {
+    try {
+      const cleanNewPass = String(req.body?.newPassword || '').trim();
+      if (!cleanNewPass || cleanNewPass.length < 8) {
+        return res.status(400).json({ erro: 'A nova palavra-passe deve ter no mínimo 8 caracteres.' });
+      }
+
+      const verified = await verifyGoogleIdentityPayload(req.body);
+      if (!verified.ok || !verified.email) {
+        return res.status(verified.status || 401).json({ erro: verified.error || 'Falha na validação da conta Google.' });
+      }
+      if (!verified.emailVerified) {
+        return res.status(403).json({ erro: 'O e-mail da conta Google não está verificado.' });
+      }
+
+      const emailNorm = verified.email;
+      const isFounderTarget = isFounderEmail(emailNorm);
+      const hashedPass = await persistRotatedCredential(emailNorm, cleanNewPass);
+
+      systemUsersList.forEach((u) => {
+        if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+          u.passwordConfigured = true;
+          u.passwordHash = hashedPass;
+          u.passwordMasked = '••••••••••••';
+          u.lastLogin = 'Agora (Senha atualizada)';
+        }
+      });
+
+      clientesRegistadosPelosFounders.forEach((u) => {
+        if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+          u.password = hashedPass;
+        }
+      });
+
+      let matchedCompany = baseDadosClientes.find((c) => String(c.email || '').toLowerCase().trim() === emailNorm);
+      baseDadosClientes.forEach((c) => {
+        if (String(c.email || '').toLowerCase().trim() === emailNorm) {
+          c.password = hashedPass;
+        }
+      });
+
+      if (!isFounderTarget && !matchedCompany && !systemUsersList.some((u) => String(u.email || '').toLowerCase().trim() === emailNorm)) {
+        const googleTenantId = `cli_google_${crypto.createHash('md5').update(emailNorm).digest('hex').slice(0, 10)}`;
+        matchedCompany = adicionarClienteEmpresa({
+          id: googleTenantId,
+          nome: verified.displayName ? `${verified.displayName} (ClickPay ERP)` : `Empresa ${emailNorm.split('@')[0].toUpperCase()}`,
+          nuit: '400000000',
+          endereco: 'Maputo, Moçambique',
+          provincia: 'Maputo Cidade',
+          distrito: 'KaMpfumo',
+          regime_iva: 'Geral (16%)',
+          nuel: '',
+          email: emailNorm,
+          telefone: '+258 84 000 0000',
+          logo: '/clickpay-logo.png',
+          password: hashedPass,
+          subscription_status: 'ativo',
+          subscription_plan: 'Bronze',
+          next_billing_date: getDefaultNextBillingDate(),
+          fee_base: getPlanFeeMzn('Starter'),
+          fee_por_slip: getPlanExtraSlipFeeMzn('Starter')
+        });
+        ensureTenantContainers(matchedCompany.id);
+      }
+
+      saveRuntimeState();
+      if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
+        await syncUserToFirebase(emailNorm, cleanNewPass, { idToken: verified.firebaseIdToken });
+      }
+
+      notifyFounder(
+        'Palavra-Passe Atualizada via Conta Google',
+        `A palavra-passe da conta "${emailNorm}" foi redefinida com verificação Google.`,
+        { userEmail: emailNorm, status: 'sucesso' }
+      );
+
+      if (isFounderTarget) {
+        founderActiveCompanyId = 'cli_founders';
+        selecionarClienteEmpresa('cli_founders');
+        syncCompanyGlobalsIfActive('cli_founders');
+        const founderComp = baseDadosClientes.find(c => c.id === 'cli_founders');
+        return res.json({
+          sucesso: true,
+          pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+          modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+          mensagem: `Palavra-passe de ${emailNorm} atualizada com sucesso!`,
+          token: signSessionToken({ email: emailNorm, role: 'SUPER_ADMIN_PAYROLL', empresa_id: 'cli_founders' }),
+          usuario: {
+            nome: verified.displayName || 'Gerson Cumbane (Fundador ClickPay)',
+            email: emailNorm,
+            funcao: 'SUPER_ADMIN_PAYROLL',
+            empresa_id: 'cli_founders',
+            nome_empresa: founderComp?.nome || empresaAtual.nome || 'ClickPay Moçambique Lda',
+            subscription_status: 'ativo',
+            subscription_plan: 'Platinum'
+          }
+        });
+      }
+
+      const sysUser = systemUsersList.find((u) => String(u.email || '').toLowerCase().trim() === emailNorm);
+      const role = sysUser?.role || 'CLIENTE_EMPRESA';
+      const targetCompanyId = matchedCompany?.id || (role === 'CLIENTE_EMPRESA' ? 'cli_bronze' : 'cli_founders');
+      return res.json({
+        sucesso: true,
+        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+        modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+        mensagem: `Palavra-passe de ${emailNorm} atualizada com sucesso!`,
+        token: signSessionToken({ email: emailNorm, role, empresa_id: targetCompanyId }),
+        usuario: {
+          nome: sysUser?.name || verified.displayName || emailNorm,
+          email: emailNorm,
+          funcao: role,
+          empresa_id: targetCompanyId,
+          nome_empresa: matchedCompany?.nome || sysUser?.companyName || 'Empresa ClickPay',
+          subscription_status: matchedCompany?.subscription_status || 'ativo',
+          subscription_plan: matchedCompany?.subscription_plan || sysUser?.plan || 'Bronze',
+          next_billing_date: matchedCompany?.next_billing_date || getDefaultNextBillingDate()
+        }
+      });
+    } catch (err: any) {
+      console.error('[Reset Password Google Error]:', err);
+      return res.status(500).json({ erro: 'Erro ao atualizar a palavra-passe.' });
+    }
+  });
 
   // =========================================================================
   // ENDPOINTS DE GESTÃO DE ACESSO, TOKENS DE API & IDENTIFICADORES FISCAIS (EXCLUSIVO SUPER ADMIN)
@@ -2107,8 +2564,19 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // Visão Geral Completa de Acessos (sem expor senhas nem tokens completos em texto limpo)
   app.get('/api/access/overview', requireSuperAdmin, (req: Request, res: Response) => {
     try {
-      const sanitizedUsers = systemUsersList.map(({ rawPassword: _rp, apiToken: _at, ...rest }) => rest);
-      const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, ...rest }) => rest);
+      const sanitizedUsers = systemUsersList.map(({ rawPassword: _rp, passwordHash: _ph, apiToken: _at, ...rest }) => {
+        const em = String(rest.email || '').toLowerCase().trim();
+        const configured = Boolean(
+          rest.passwordConfigured ||
+            rotatedPasswordHashes[em] ||
+            (isFounderEmail(em) && isFounderPasswordConfigured())
+        );
+        return {
+          ...rest,
+          passwordConfigured: configured
+        };
+      });
+      const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, tokenHash: _th, ...rest }) => rest);
       const sanitizedLogs = accessAuditLogs.map(({ meta, ...rest }) => {
         if (!meta) return rest;
         const { otpCode: _otp, ...safeMeta } = meta;
@@ -2119,6 +2587,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         tokens: sanitizedTokens,
         auditLogs: sanitizedLogs,
         securityConfig: otpSecurityConfig,
+        pagamentosBloqueados: PAYMENTS_MODULE_LOCKED,
         nuitNuel: {
           nuit: empresaAtual.nuit,
           nuel: empresaAtual.nuel
@@ -2129,7 +2598,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   });
 
-  // Gerar Automaticamente Credenciais para Novo Usuário
+  // Gerar Automaticamente Credenciais para Novo Usuário (CSPRNG + Hash PBKDF2)
   app.post('/api/access/auto-generate-credential', requireSuperAdmin, async (req: Request, res: Response) => {
     const { nome, email, role, plan, phone, companyName } = req.body;
     if (!nome || !email) {
@@ -2137,13 +2606,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
 
     const emailNorm = String(email).toLowerCase().trim();
-
-    // Gerar palavra-passe segura de 12 caracteres com números e símbolos
-    const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase() + Math.floor(10 + Math.random() * 90);
-    const generatedPassword = `CP#2026-${randomSuffix}`;
-
-    // Gerar Token de API único
-    const generatedApiToken = `cp_live_${Math.random().toString(36).substring(2, 10)}_${Math.random().toString(36).substring(2, 10)}`;
+    const generatedPassword = generateSecurePassword(14);
+    const { token: generatedApiToken, tokenPrefix, tokenHash } = generateSecureApiToken('live');
 
     const roleLabels: Record<string, string> = {
       'SUPER_ADMIN_PAYROLL': 'Super Admin (Fundador)',
@@ -2162,12 +2626,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     const compName = companyName || empresaAtual.nome;
     const userPhone = phone || '+258 84 000 0000';
 
-    const newUser = {
+    const hashedPwd = await persistRotatedCredential(emailNorm, generatedPassword);
+
+    const safeUserRecord = {
       id: `usr_${Date.now()}`,
       name: nome,
       email: emailNorm,
-      passwordMasked: generatedPassword.replace(/./g, '•'),
-      rawPassword: generatedPassword,
+      passwordMasked: '••••••••••••',
+      passwordConfigured: true,
+      passwordHash: hashedPwd,
       role: selectedRole,
       roleLabel: roleLabels[selectedRole] || selectedRole,
       plan: selectedPlan,
@@ -2176,90 +2643,330 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       status: 'ativo' as const,
       createdAt: new Date().toISOString().substring(0, 10),
       lastLogin: 'Nunca acedeu (Aguardando primeiro login)',
-      apiToken: generatedApiToken,
-      apiTokenPrefix: generatedApiToken.substring(0, 14) + '...'
+      apiTokenPrefix: tokenPrefix
     };
 
-    systemUsersList.unshift(newUser);
+    let assignedCompanyId = 'cli_founders';
+    if (selectedRole === 'CLIENTE_EMPRESA') {
+      let existingComp = baseDadosClientes.find(
+        c => String(c.email || '').toLowerCase().trim() === emailNorm
+      );
+      if (!existingComp) {
+        const mappedPlan = normalizeSubscriptionPlan(selectedPlan);
+        const newCid = `cli_gen_${Date.now()}`;
+        existingComp = adicionarClienteEmpresa({
+          id: newCid,
+          nome: compName,
+          nuit: `400${crypto.randomInt(100000, 1000000)}`,
+          endereco: 'Maputo, Moçambique',
+          provincia: 'Maputo Cidade',
+          distrito: 'KaMpfumo',
+          regime_iva: 'Geral (16%)',
+          nuel: '',
+          email: emailNorm,
+          telefone: userPhone,
+          logo: '/clickpay-logo.png',
+          password: hashedPwd,
+          subscription_status: 'ativo',
+          subscription_plan: mappedPlan,
+          next_billing_date: getDefaultNextBillingDate(),
+          fee_base: getPlanFeeMzn(selectedPlan),
+          fee_por_slip: getPlanExtraSlipFeeMzn(selectedPlan)
+        });
+        ensureTenantContainers(existingComp.id);
+      } else {
+        existingComp.password = hashedPwd;
+      }
+      assignedCompanyId = existingComp.id;
+    }
 
-    // Registar na lista de logins locais para que consiga entrar imediatamente
-    clientesRegistadosPelosFounders.push({
-      email: emailNorm,
-      password: generatedPassword,
-      funcao: selectedRole,
-      empresa_id: selectedPlan === 'Gold' ? 'cli_gold' : selectedPlan === 'Silver' ? 'cli_silver' : 'cli_bronze'
-    });
+    const existingSysIdx = systemUsersList.findIndex(u => String(u.email || '').toLowerCase().trim() === emailNorm);
+    if (existingSysIdx >= 0) {
+      systemUsersList[existingSysIdx] = { ...systemUsersList[existingSysIdx], ...safeUserRecord };
+    } else {
+      systemUsersList.unshift(safeUserRecord);
+    }
 
-    // Registar também um token de API correspondente
+    const existingRegIdx = clientesRegistadosPelosFounders.findIndex(u => String(u.email || '').toLowerCase().trim() === emailNorm);
+    if (existingRegIdx >= 0) {
+      clientesRegistadosPelosFounders[existingRegIdx] = {
+        ...clientesRegistadosPelosFounders[existingRegIdx],
+        password: hashedPwd,
+        funcao: selectedRole,
+        empresa_id: assignedCompanyId
+      };
+    } else {
+      clientesRegistadosPelosFounders.push({
+        email: emailNorm,
+        password: hashedPwd,
+        funcao: selectedRole,
+        empresa_id: assignedCompanyId
+      });
+    }
+
+    // Registar também um token de API correspondente (apenas escopos permitidos sem pagamentos)
+    const tokenScopes = selectedRole === 'SUPER_ADMIN_PAYROLL'
+      ? ['* (Sem Pagamentos)']
+      : ['payroll:read', 'invoicing:write', 'reports:read'];
     activeApiTokens.unshift({
       id: `tok_${Date.now()}`,
       name: `Token Pessoal - ${nome} (${roleLabels[selectedRole] || selectedRole})`,
-      tokenPrefix: generatedApiToken.substring(0, 16) + '••••••••',
-      fullToken: generatedApiToken,
-      scopes: selectedRole === 'SUPER_ADMIN_PAYROLL' 
-        ? ['* (Acesso Total)'] 
-        : ['payroll:read', 'invoicing:write', 'reports:read'],
+      tokenPrefix,
+      tokenHash,
+      scopes: tokenScopes,
       createdAt: new Date().toISOString().substring(0, 10),
       lastUsedAt: null,
       status: 'ativo' as const,
       createdBy: 'Gerador Automático de Credenciais'
     });
 
-    // Tentar sincronização com Firebase Auth se configurado
-    if (firebaseConfig && firebaseConfig.apiKey) {
+    saveRuntimeState();
+
+    if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
       syncUserToFirebase(emailNorm, generatedPassword);
     }
 
-    // Disparar notificação ao fundador
     notifyFounder(
       'Novas Credenciais Geradas Automaticamente',
-      `Credenciais criadas para ${nome} (${emailNorm}). Função: ${newUser.roleLabel}, Plano: ${selectedPlan}. Senha inicial e Token de API emitidos com segurança.`,
+      `Credenciais criadas para ${nome} (${emailNorm}). Função: ${safeUserRecord.roleLabel}, Plano: ${selectedPlan}. Senha inicial e Token de API emitidos com segurança.`,
       { userEmail: emailNorm, plan: selectedPlan, status: 'sucesso' }
+    );
+
+    const { passwordHash: _ph, ...publicUser } = safeUserRecord;
+    return res.json({
+      sucesso: true,
+      mensagem: "Credenciais geradas e ativadas com sucesso! Fundador notificado.",
+      usuario: {
+        ...publicUser,
+        rawPassword: generatedPassword,
+        apiToken: generatedApiToken
+      },
+      notificadoA: "gersonjcumbane@gmail.com (+258 86 139 0061)"
+    });
+  });
+
+  // Actualizar Perfil, Permissões, Plano ou Estado de Utilizador do Sistema
+  app.patch('/api/access/users/:id', requireSuperAdmin, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const target = systemUsersList.find(u => u.id === id);
+    if (!target) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado.' });
+    }
+
+    const oldEmail = String(target.email || '').toLowerCase().trim();
+    const { name, email, role, plan, phone, companyName, status } = req.body || {};
+    const nextEmail = email ? String(email).toLowerCase().trim() : oldEmail;
+
+    if (oldEmail === 'gersonjcumbane@gmail.com' && status === 'inativo') {
+      return res.status(400).json({ erro: 'A conta principal do Fundador não pode ser desactivada.' });
+    }
+
+    const roleLabels: Record<string, string> = {
+      'SUPER_ADMIN_PAYROLL': 'Super Admin (Fundador)',
+      'GESTOR_RH': 'Gestor de Recursos Humanos & Folha',
+      'CONTABILISTA': 'Contabilista Certificado (PGC & AT)',
+      'OPERADOR_VENDAS': 'Operador de Facturação & Vendas',
+      'CLIENTE_EMPRESA': 'Cliente Empresa (Portal Completo)'
+    };
+
+    if (name && String(name).trim()) target.name = String(name).trim();
+    if (phone !== undefined) target.phone = String(phone).trim();
+    if (companyName && String(companyName).trim()) target.companyName = String(companyName).trim();
+    if (plan) target.plan = String(plan);
+    if (status === 'ativo' || status === 'inativo') target.status = status;
+
+    if (role) {
+      const requestedRole = String(role);
+      target.role =
+        requestedRole === 'SUPER_ADMIN_PAYROLL' && !isFounderEmail(nextEmail)
+          ? target.role || 'GESTOR_RH'
+          : requestedRole;
+      target.roleLabel = roleLabels[target.role] || target.role;
+    }
+
+    if (nextEmail && nextEmail !== oldEmail) {
+      target.email = nextEmail;
+      if (isFounderEmail(oldEmail) && !CREDENCIAIS_FOUNDERS.emails.includes(nextEmail)) {
+        CREDENCIAIS_FOUNDERS.emails.push(nextEmail);
+      }
+      if (rotatedPasswordHashes[oldEmail] && !rotatedPasswordHashes[nextEmail]) {
+        rotatedPasswordHashes[nextEmail] = rotatedPasswordHashes[oldEmail];
+        try {
+          fs.writeFileSync(CREDENTIAL_STORE_PATH, JSON.stringify(rotatedPasswordHashes), { encoding: 'utf8', mode: 0o600 });
+        } catch {
+          // ignore
+        }
+      }
+      clientesRegistadosPelosFounders.forEach(u => {
+        if (String(u.email || '').toLowerCase().trim() === oldEmail) {
+          u.email = nextEmail;
+          if (target.role) u.funcao = target.role;
+        }
+      });
+      baseDadosClientes.forEach(c => {
+        if (String(c.email || '').toLowerCase().trim() === oldEmail) {
+          c.email = nextEmail;
+          if (target.status) c.subscription_status = target.status === 'ativo' ? 'ativo' : 'suspenso';
+        }
+      });
+    } else if (target.status) {
+      baseDadosClientes.forEach(c => {
+        if (String(c.email || '').toLowerCase().trim() === oldEmail) {
+          c.subscription_status = target.status === 'ativo' ? 'ativo' : 'suspenso';
+        }
+      });
+    }
+
+    saveRuntimeState();
+    notifyFounder(
+      'Permissões / Dados de Acesso Actualizados',
+      `Utilizador "${target.name}" (${target.email}) actualizado. Função: ${target.roleLabel}, Estado: ${target.status}.`,
+      { userEmail: target.email, status: 'sucesso' }
+    );
+
+    const { rawPassword: _rp, passwordHash: _ph, apiToken: _at, ...safeUser } = target;
+    return res.json({
+      sucesso: true,
+      mensagem: `Dados de acesso de ${target.email} actualizados com sucesso!`,
+      usuario: safeUser
+    });
+  });
+
+  // Rotação Instantânea de Palavra-Passe (1 Clique) para Utilizador
+  app.post('/api/access/users/:id/rotate-password', requireSuperAdmin, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const target = systemUsersList.find(u => u.id === id);
+    if (!target) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado.' });
+    }
+
+    const emailNorm = String(target.email || '').toLowerCase().trim();
+    const newPassword = generateSecurePassword(14);
+    const hashed = await persistRotatedCredential(emailNorm, newPassword);
+
+    target.passwordConfigured = true;
+    target.passwordHash = hashed;
+    target.passwordMasked = '••••••••••••';
+    target.lastLogin = 'Senha rodada (aguarda novo login)';
+
+    clientesRegistadosPelosFounders.forEach(u => {
+      if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+        u.password = hashed;
+      }
+    });
+    baseDadosClientes.forEach(c => {
+      if (String(c.email || '').toLowerCase().trim() === emailNorm) {
+        c.password = hashed;
+      }
+    });
+
+    saveRuntimeState();
+    if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
+      await syncUserToFirebase(emailNorm, newPassword);
+    }
+
+    notifyFounder(
+      'Palavra-Passe Rodada com Segurança',
+      `Nova palavra-passe aleatória emitida para "${emailNorm}" pelo Fundador.`,
+      { userEmail: emailNorm, status: 'sucesso' }
     );
 
     return res.json({
       sucesso: true,
-      mensagem: "Credenciais geradas e ativadas com sucesso! Fundador notificado.",
-      usuario: newUser,
-      notificadoA: "gersonjcumbane@gmail.com (+258 86 139 0061)"
+      email: emailNorm,
+      name: target.name,
+      role: target.role,
+      roleLabel: target.roleLabel,
+      plan: target.plan,
+      companyName: target.companyName,
+      rawPassword: newPassword,
+      mensagem: `Nova palavra-passe gerada e activada para ${emailNorm}!`
     });
   });
 
   // Gestão de Tokens de API: Listar (mascarado)
   app.get('/api/access/tokens', requireSuperAdmin, (req: Request, res: Response) => {
-    const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, ...rest }) => rest);
+    const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, tokenHash: _th, ...rest }) => rest);
     res.json({ tokens: sanitizedTokens });
   });
 
-  // Gestão de Tokens de API: Criar Novo
+  // Gestão de Tokens de API: Criar Novo (CSPRNG, bloqueando escopos de pagamento)
   app.post('/api/access/tokens', requireSuperAdmin, (req: Request, res: Response) => {
     const { name, scopes } = req.body;
     if (!name) {
       return res.status(400).json({ erro: 'O nome de identificação do token é obrigatório.' });
     }
 
-    const generatedKey = `cp_live_${crypto.randomBytes(12).toString('hex')}`;
-    const newToken = {
+    const requestedScopes: string[] = Array.isArray(scopes) && scopes.length > 0
+      ? scopes.map((s: any) => String(s))
+      : ['payroll:read', 'invoicing:write'];
+
+    if (PAYMENTS_MODULE_LOCKED && requestedScopes.some(s => s.includes('fintech:payout') || s.includes('payment'))) {
+      return sendPaymentsBlocked(res, 'Não é permitido emitir tokens com permissões de pagamento enquanto o sistema está em modo Apenas Facturação.');
+    }
+
+    const { token: generatedKey, tokenPrefix, tokenHash } = generateSecureApiToken('live');
+    const newTokenRecord = {
       id: `tok_${Date.now()}`,
       name: String(name).trim(),
-      tokenPrefix: generatedKey.substring(0, 16) + '••••••••',
-      fullToken: generatedKey,
-      scopes: Array.isArray(scopes) && scopes.length > 0 ? scopes : ['payroll:read', 'invoicing:write'],
+      tokenPrefix,
+      tokenHash,
+      scopes: requestedScopes,
       createdAt: new Date().toISOString().substring(0, 10),
       lastUsedAt: null,
       status: 'ativo' as const,
       createdBy: 'Super Admin (Gerson Cumbane)'
     };
 
-    activeApiTokens.unshift(newToken);
+    activeApiTokens.unshift(newTokenRecord);
+    saveRuntimeState();
 
     notifyFounder(
       'Novo Token de API Criado',
-      `O token "${name}" foi emitido com escopos [${newToken.scopes.join(', ')}].`,
+      `O token "${name}" foi emitido com escopos [${newTokenRecord.scopes.join(', ')}].`,
       { status: 'sucesso' }
     );
 
-    return res.json({ sucesso: true, token: newToken });
+    const { tokenHash: _th, ...publicToken } = newTokenRecord;
+    return res.json({ sucesso: true, token: { ...publicToken, fullToken: generatedKey } });
+  });
+
+  // Gestão de Tokens de API: Rodar Chave Existente
+  app.post('/api/access/tokens/:id/rotate', requireSuperAdmin, (req: Request, res: Response) => {
+    const { id } = req.params;
+    const token = activeApiTokens.find(t => t.id === id);
+    if (!token) {
+      return res.status(404).json({ erro: 'Token não encontrado.' });
+    }
+    if (
+      PAYMENTS_MODULE_LOCKED &&
+      (token.id === 'tok_fintech_mpesa_gw' ||
+        (Array.isArray(token.scopes) && token.scopes.includes('fintech:payout')))
+    ) {
+      token.status = 'revogado';
+      saveRuntimeState();
+      return sendPaymentsBlocked(res, 'Tokens de pagamento estão bloqueados e revogados no sistema.');
+    }
+
+    const { token: rotatedKey, tokenPrefix, tokenHash } = generateSecureApiToken('live');
+    token.tokenPrefix = tokenPrefix;
+    token.tokenHash = tokenHash;
+    token.status = 'ativo';
+    token.lastUsedAt = 'Chave rodada agora';
+    saveRuntimeState();
+
+    notifyFounder(
+      'Token de API Rodado',
+      `A chave do token "${token.name}" foi rodada com sucesso. A chave anterior foi invalidada.`,
+      { status: 'sucesso' }
+    );
+
+    const { fullToken: _ft, tokenHash: _th, ...publicToken } = token;
+    return res.json({
+      sucesso: true,
+      mensagem: `Token "${token.name}" rodado com sucesso!`,
+      token: { ...publicToken, fullToken: rotatedKey }
+    });
   });
 
   // Gestão de Tokens de API: Revogar
@@ -2268,6 +2975,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     const token = activeApiTokens.find(t => t.id === id);
     if (token) {
       token.status = 'revogado';
+      saveRuntimeState();
       notifyFounder(
         'Token de API Revogado',
         `O token de integração "${token.name}" foi revogado e desativado imediatamente.`,
@@ -2283,6 +2991,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     const { requireOtpOnLogin } = req.body;
     if (typeof requireOtpOnLogin === 'boolean') {
       otpSecurityConfig.requireOtpOnLogin = requireOtpOnLogin;
+      saveRuntimeState();
       notifyFounder(
         'Configuração de Segurança OTP Alterada',
         `A proteção OTP (2FA) em todos os logins foi ${requireOtpOnLogin ? 'ATIVADA' : 'DESATIVADA'}.`,
@@ -2313,6 +3022,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       if (nuel) matchFounders.nuel = String(nuel).trim();
     }
 
+    saveRuntimeState();
     notifyFounder(
       'Identificadores Fiscais da ClickPayroll Atualizados',
       `NUIT e NUEL da ClickPayroll atualizados globalmente para NUIT: ${empresaAtual.nuit} e NUEL: ${empresaAtual.nuel}. Todos os módulos de faturas, recibos e relatórios fiscais refletem a alteração.`,
@@ -2338,7 +3048,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   // Disparo de Teste de Notificação & OTP
   app.post('/api/access/test-notification', requireSuperAdmin, (req: Request, res: Response) => {
-    const testOtp = String(Math.floor(100000 + Math.random() * 900000));
+    const testOtp = String(crypto.randomInt(100000, 1000000));
     const log = notifyFounder(
       'Disparo de Teste de Notificação & OTP',
       `Teste manual de envio de alerta de segurança e verificação de 2 fatores OTP para o Fundador Gerson Cumbane. Código de teste: ${testOtp}.`,
@@ -2407,33 +3117,40 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   app.post('/api/firebase-auth/users', requireSuperAdmin, async (req: Request, res: Response) => {
     const { email, password, role, companyId } = req.body;
-    if (!email || !password || !role) {
+    const emailNorm = String(email || '').toLowerCase().trim();
+    const cleanPass = String(password || '').trim();
+    if (!emailNorm || !cleanPass || !role) {
       return res.status(400).json({ error: 'Dados insuficientes para criar utilizador no Firebase.' });
     }
 
     try {
-      // 1. Sincronizar com Firebase Auth
-      await syncUserToFirebase(email, password);
+      await syncUserToFirebase(emailNorm, cleanPass);
+      const hashedPass = await persistRotatedCredential(emailNorm, cleanPass);
 
-      // 2. Registar localmente na lista correspondente
-      if (role === "SUPER_ADMIN_PAYROLL") {
-        // Nada a registar, super admin é estático ou mestre
-      } else {
+      if (role !== "SUPER_ADMIN_PAYROLL") {
         const comp = baseDadosClientes.find(c => c.id === companyId);
         if (comp) {
-          comp.email = email;
-          comp.password = password;
+          comp.email = emailNorm;
+          comp.password = hashedPass;
         } else {
           clientesRegistadosPelosFounders.push({
-            email,
-            password,
+            email: emailNorm,
+            password: hashedPass,
             funcao: "CLIENTE_EMPRESA",
             empresa_id: companyId || "cli_bronze"
           });
         }
       }
 
-      res.status(201).json({ success: true, mensagem: `Conta ${email} registada no Firebase com sucesso!` });
+      systemUsersList.forEach(u => {
+        if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+          u.passwordConfigured = true;
+          u.passwordHash = hashedPass;
+        }
+      });
+
+      saveRuntimeState();
+      res.status(201).json({ success: true, mensagem: `Conta ${emailNorm} registada no Firebase com sucesso!` });
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao criar conta no Firebase.' });
     }
@@ -2452,20 +3169,21 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       });
     }
 
-    const isFounderTarget = CREDENCIAIS_FOUNDERS.emails.map(e => e.toLowerCase().trim()).includes(emailNorm);
-    if (isFounderTarget) {
-      CREDENCIAIS_FOUNDERS.password = cleanNewPass;
-      CREDENCIAIS_FOUNDERS.passwords = [cleanNewPass];
-      if (cleanNewEmail && !CREDENCIAIS_FOUNDERS.emails.includes(cleanNewEmail)) {
-        CREDENCIAIS_FOUNDERS.emails.push(cleanNewEmail);
-      }
+    const effectiveEmail = cleanNewEmail || emailNorm;
+    const hashed = await persistRotatedCredential(effectiveEmail, cleanNewPass);
+    const isFounderTarget = isFounderEmail(emailNorm);
+    if (isFounderTarget && cleanNewEmail && !CREDENCIAIS_FOUNDERS.emails.includes(cleanNewEmail)) {
+      CREDENCIAIS_FOUNDERS.emails.push(cleanNewEmail);
+      await persistRotatedCredential(cleanNewEmail, cleanNewPass);
     }
 
     let updatedAny = isFounderTarget;
     systemUsersList.forEach(u => {
       if (String(u.email || '').toLowerCase().trim() === emailNorm) {
-        u.rawPassword = cleanNewPass;
-        u.passwordMasked = cleanNewPass.replace(/./g, '•');
+        u.passwordConfigured = true;
+        u.passwordHash = hashed;
+        u.passwordMasked = '••••••••••••';
+        u.lastLogin = 'Senha actualizada agora';
         if (cleanNewEmail) u.email = cleanNewEmail;
         updatedAny = true;
       }
@@ -2473,7 +3191,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     clientesRegistadosPelosFounders.forEach(u => {
       if (String(u.email || '').toLowerCase().trim() === emailNorm) {
-        u.password = cleanNewPass;
+        u.password = hashed;
         if (cleanNewEmail) u.email = cleanNewEmail;
         updatedAny = true;
       }
@@ -2481,7 +3199,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     baseDadosClientes.forEach(c => {
       if (String(c.email || '').toLowerCase().trim() === emailNorm) {
-        c.password = cleanNewPass;
+        c.password = hashed;
         if (cleanNewEmail) c.email = cleanNewEmail;
         updatedAny = true;
       }
@@ -2491,21 +3209,22 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.status(404).json({ erro: `Utilizador "${emailNorm}" não encontrado.` });
     }
 
-    await persistRotatedCredential(cleanNewEmail || emailNorm, cleanNewPass);
+    saveRuntimeState();
 
-    if (firebaseConfig && firebaseConfig.apiKey) {
-      await syncUserToFirebase(cleanNewEmail || emailNorm, cleanNewPass);
+    if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
+      await syncUserToFirebase(effectiveEmail, cleanNewPass);
     }
 
     notifyFounder(
       'Credenciais de Acesso Atualizadas',
       `A palavra-passe da conta "${emailNorm}" foi atualizada com sucesso pelo Fundador.`,
-      { userEmail: cleanNewEmail || emailNorm, status: 'sucesso' }
+      { userEmail: effectiveEmail, status: 'sucesso' }
     );
 
     return res.json({
       sucesso: true,
-      mensagem: `Credenciais de acesso para ${cleanNewEmail || emailNorm} atualizadas com sucesso!`
+      email: effectiveEmail,
+      mensagem: `Credenciais de acesso para ${effectiveEmail} atualizadas com sucesso!`
     });
   });
 
@@ -2518,54 +3237,51 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
 
     try {
-      const superAdmin = isFounderEmail(emailNorm);
-      if (superAdmin) {
-        CREDENCIAIS_FOUNDERS.password = cleanPass;
-        CREDENCIAIS_FOUNDERS.passwords = [cleanPass];
-      }
+      const hashed = await persistRotatedCredential(emailNorm, cleanPass);
 
       systemUsersList.forEach(u => {
         if (String(u.email || '').toLowerCase().trim() === emailNorm) {
-          u.rawPassword = cleanPass;
-          u.passwordMasked = cleanPass.replace(/./g, '•');
+          u.passwordConfigured = true;
+          u.passwordHash = hashed;
+          u.passwordMasked = '••••••••••••';
         }
       });
 
       clientesRegistadosPelosFounders.forEach(u => {
-        if (String(u.email || '').toLowerCase().trim() === emailNorm) u.password = cleanPass;
+        if (String(u.email || '').toLowerCase().trim() === emailNorm) u.password = hashed;
       });
 
       baseDadosClientes.forEach(c => {
-        if (String(c.email || '').toLowerCase().trim() === emailNorm) c.password = cleanPass;
+        if (String(c.email || '').toLowerCase().trim() === emailNorm) c.password = hashed;
       });
 
-      await persistRotatedCredential(emailNorm, cleanPass);
-
-      // Sincronizar de forma forçada no Firebase Auth
+      saveRuntimeState();
       await syncUserToFirebase(emailNorm, cleanPass);
 
-      res.json({ success: true, mensagem: `Senha do utilizador ${emailNorm} atualizada com sucesso no Firebase!` });
+      res.json({ success: true, mensagem: `Senha do utilizador ${emailNorm} atualizada com sucesso!` });
     } catch (err: any) {
-      res.status(500).json({ error: 'Erro ao atualizar senha no Firebase.' });
+      res.status(500).json({ error: 'Erro ao atualizar senha.' });
     }
   });
 
   app.delete('/api/firebase-auth/users/:email', requireSuperAdmin, (req: Request, res: Response) => {
     const { email } = req.params;
+    const emailNorm = String(email || '').toLowerCase().trim();
     try {
-      const indexFounders = clientesRegistadosPelosFounders.findIndex(u => u.email === email);
+      const indexFounders = clientesRegistadosPelosFounders.findIndex(u => String(u.email || '').toLowerCase().trim() === emailNorm);
       if (indexFounders !== -1) {
         clientesRegistadosPelosFounders.splice(indexFounders, 1);
       }
 
       baseDadosClientes.forEach(c => {
-        if (c.email === email) {
+        if (String(c.email || '').toLowerCase().trim() === emailNorm) {
           c.email = "";
           c.password = "";
         }
       });
+      saveRuntimeState();
 
-      res.json({ success: true, mensagem: `Conta ${email} desassociada do Firebase.` });
+      res.json({ success: true, mensagem: `Conta ${email} desassociada com sucesso.` });
     } catch (err: any) {
       res.status(500).json({ error: 'Erro ao remover conta.' });
     }
@@ -2578,18 +3294,21 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     if (!novoEmailCliente || !senhaProvisoria || !idNovaEmpresa) {
       return res.status(400).json({ erro: 'Dados em falta para registo de novo cliente.' });
     }
-    
-    // Sincroniza automaticamente no Firebase Auth
-    await syncUserToFirebase(novoEmailCliente, senhaProvisoria);
+
+    const emailNorm = String(novoEmailCliente).toLowerCase().trim();
+    const cleanPass = String(senhaProvisoria).trim();
+    await syncUserToFirebase(emailNorm, cleanPass);
+    const hashed = await persistRotatedCredential(emailNorm, cleanPass);
 
     clientesRegistadosPelosFounders.push({
-      email: novoEmailCliente,
-      password: senhaProvisoria,
+      email: emailNorm,
+      password: hashed,
       funcao: "CLIENTE_EMPRESA",
       empresa_id: idNovaEmpresa
     });
+    saveRuntimeState();
 
-    res.json({ sucesso: true, mensagem: `Cliente ${novoEmailCliente} registado manualmente no ERP e integrado no Firebase!` });
+    res.json({ sucesso: true, mensagem: `Cliente ${emailNorm} registado manualmente no ERP!` });
   });
 
   // CONSULTA DE NUEL (REGISTO DE EMPRESAS DE MOÇAMBIQUE)
@@ -2725,6 +3444,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
           return res.status(200).json({
             sucesso: true,
+            pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+            modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
             mensagem: 'Configuração da empresa atualizada com sucesso na ClickPay!',
             token: signSessionToken({
               email: existingCompany.email || cleanEmail,
@@ -2749,12 +3470,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
 
       const companyId = `cli_reg_${Date.now()}`;
+      const hashedPassword = await persistRotatedCredential(cleanEmail, cleanPassword);
 
       // 1. Criar empresa isolada (sem colaboradores ou contratos pré-populados)
       const novaEmpresa = adicionarClienteEmpresa({
         id: companyId,
         nome: cleanEmpresa,
-        nuit: cleanNuit || `400${Math.floor(100000 + Math.random() * 900000)}`,
+        nuit: cleanNuit || `400${crypto.randomInt(100000, 1000000)}`,
         endereco: endereco || 'Av. 25 de Setembro, Maputo',
         provincia: provincia || 'Maputo Cidade',
         distrito: distrito || 'KaMpfumo',
@@ -2763,7 +3485,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         email: cleanEmail,
         telefone: contacto || '+258 84 000 0000',
         logo: logo || '/clickpay-logo.png',
-        password: cleanPassword,
+        password: hashedPassword,
         subscription_status: 'ativo',
         subscription_plan: mappedPlan,
         next_billing_date: nextBillingDate,
@@ -2775,7 +3497,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       // 2. Registar utilizador local, na gestão de acessos e sincronizar no Firebase Auth
       clientesRegistadosPelosFounders.push({
         email: cleanEmail,
-        password: cleanPassword,
+        password: hashedPassword,
         funcao: 'CLIENTE_EMPRESA',
         empresa_id: companyId,
         nome: nomeCompletoUsuario,
@@ -2786,8 +3508,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         id: `usr_${Date.now()}`,
         name: cleanEmpresa,
         email: cleanEmail,
-        passwordMasked: cleanPassword.replace(/./g, '•'),
-        rawPassword: cleanPassword,
+        passwordMasked: '••••••••••••',
+        passwordConfigured: true,
+        passwordHash: hashedPassword,
         role: 'CLIENTE_EMPRESA',
         roleLabel: `Cliente Empresa (${selectedPlan})`,
         plan: mappedPlan,
@@ -2796,7 +3519,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         status: 'ativo',
         createdAt: new Date().toISOString().substring(0, 10),
         lastLogin: 'Registado agora',
-        apiTokenPrefix: `cp_live_${companyId.substring(0, 10)}...`
+        apiTokenPrefix: `cp_key_${companyId.substring(0, 10)}...`
       });
 
       saveRuntimeState();
@@ -2810,6 +3533,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
       return res.status(201).json({
         sucesso: true,
+        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+        modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
         mensagem: 'Conta e empresa criadas com sucesso! Bem-vindo à ClickPay.',
         token: signSessionToken({ email: cleanEmail, role: 'CLIENTE_EMPRESA', empresa_id: companyId }),
         usuario: {
@@ -2948,7 +3673,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   });
 
   // UPDATE CLIENT SUBSCRIPTION DETAILS (Platform Founder Control)
-  app.post('/api/clients/update-subscription', requireFounder, (req: Request, res: Response) => {
+  app.post('/api/clients/update-subscription', requireFounder, async (req: Request, res: Response) => {
     try {
       const { id, status, plan, fee_base, fee_por_slip, next_billing_date, password } = req.body;
       if (!id) {
@@ -2965,7 +3690,27 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       if (fee_base !== undefined) cliente.fee_base = Number(fee_base);
       if (fee_por_slip !== undefined) cliente.fee_por_slip = Number(fee_por_slip);
       if (next_billing_date !== undefined) cliente.next_billing_date = next_billing_date;
-      if (password !== undefined && password !== '') cliente.password = password;
+      if (password !== undefined && String(password).trim() !== '') {
+        const cleanPwd = String(password).trim();
+        const emailNorm = String(cliente.email || '').toLowerCase().trim();
+        const hashed = emailNorm ? await persistRotatedCredential(emailNorm, cleanPwd) : await hashPassword(cleanPwd);
+        cliente.password = hashed;
+        if (emailNorm) {
+          systemUsersList.forEach(u => {
+            if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+              u.passwordConfigured = true;
+              u.passwordHash = hashed;
+              u.passwordMasked = '••••••••••••';
+            }
+          });
+          clientesRegistadosPelosFounders.forEach(u => {
+            if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+              u.password = hashed;
+            }
+          });
+          await syncUserToFirebase(emailNorm, cleanPwd);
+        }
+      }
 
       syncCompanyGlobalsIfActive(cliente.id);
       saveRuntimeState();
@@ -3418,6 +4163,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // 3. Simulated Fintech bulk payments helper
   // Takes standard Array of { id: string, diasFaltas: number }
   app.post('/api/payroll/bulk-process-and-pay', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'Pagamentos salariais em lote estão bloqueados. Utilize apenas a emissão de recibos PDF/A4 e Facturação.');
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { items, periodo } = req.body;
@@ -3496,6 +4244,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   // NOVA ROTA: PROCESSAR, LIQUIDAR E PREPARAR DOWNLOAD COM CÁLCULO OFICIAL CORRIGIDO (LEI Nº 11/2025 E LEI Nº 13/2023)
   app.post('/api/payroll/process-and-pay', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'Pagamentos e liquidações salariais estão bloqueados. Utilize o cálculo documental / emissão de recibo A4.');
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { dadosEmpresa, dadosFuncionario, diasFaltas, periodo } = req.body;
@@ -3583,6 +4334,56 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     } catch (error: any) {
       console.error('Erro crítico no processamento de download:', error);
       res.status(500).json({ erro: error.message || 'Erro interno ao processar folha de salário e preparar arquivo.' });
+    }
+  });
+
+  // ROTA DOCUMENTAL SEM PAGAMENTO: CALCULAR RECIBO E GERAR PDF (SEM TRANSFERÊNCIA OU LIQUIDAÇÃO)
+  app.post('/api/payroll/simular-recibo', async (req: Request, res: Response) => {
+    try {
+      const ctx = resolveTenantContext(req);
+      const { dadosEmpresa, dadosFuncionario, diasFaltas, periodo } = req.body;
+      const activePeriod = periodo || getCurrentPeriod();
+
+      if (!dadosFuncionario) {
+        return res.status(400).json({ erro: 'Informações de funcionário em falta.' });
+      }
+
+      const salarioCalculado: any = await processarSalarioOficial(
+        Number(dadosFuncionario.salario_base),
+        Number(diasFaltas) || 0,
+        Number(dadosFuncionario.numero_dependentes)
+      );
+
+      const periodoFormatado = activePeriod.replace(/\s+/g, '_');
+      const nomeFicheiro = `recibo_${ctx.companyId}_${dadosFuncionario.id || dadosFuncionario.inss_numero || 'beneficiario'}_${periodoFormatado}.pdf`;
+      const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
+
+      salarioCalculado.periodo = activePeriod;
+
+      const fullEmployee: any = {
+        id: dadosFuncionario.id || 'temp',
+        nome: dadosFuncionario.nome,
+        nuit: dadosFuncionario.nuit || 'Isento',
+        inss_numero: dadosFuncionario.inss_numero || 'Pendente',
+        cargo: dadosFuncionario.cargo || 'Trabalhador',
+        salario_base: Number(dadosFuncionario.salario_base),
+        numero_dependentes: Number(dadosFuncionario.numero_dependentes),
+        carteira_movel: dadosFuncionario.carteira_movel || ''
+      };
+
+      const companySnapshot = buildCompanyDataView(ctx.company);
+      await criarReciboSalarioPDF(salarioCalculado, companySnapshot || dadosEmpresa, fullEmployee, caminhoDestinoCompleto);
+
+      return res.json({
+        sucesso: true,
+        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+        mensagem: `Recibo calculado e PDF gerado para ${dadosFuncionario.nome} (pagamentos bloqueados · apenas emissão documental).`,
+        detalhesSalario: salarioCalculado,
+        linkFicheiro: `/download/${nomeFicheiro}`
+      });
+    } catch (error: any) {
+      console.error('Erro ao gerar recibo documental:', error);
+      return res.status(500).json({ erro: error.message || 'Erro interno ao gerar recibo PDF.' });
     }
   });
 
@@ -4226,7 +5027,11 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
 
   app.post('/api/compras', (req: Request, res: Response) => {
     try {
-      const nova = addCompra(req.body);
+      if (PAYMENTS_MODULE_LOCKED && String(req.body?.estado || '').toLowerCase() === 'pago') {
+        return sendPaymentsBlocked(res, 'Pagamentos a fornecedores estão bloqueados. Registe a compra no estado Pendente.');
+      }
+      const payload = PAYMENTS_MODULE_LOCKED ? { ...req.body, estado: req.body?.estado || 'Pendente' } : req.body;
+      const nova = addCompra(payload);
       res.json(nova);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Erro ao registar compra.' });
@@ -4235,6 +5040,9 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
 
   app.put('/api/compras/:id', (req: Request, res: Response) => {
     try {
+      if (PAYMENTS_MODULE_LOCKED && String(req.body?.estado || '').toLowerCase() === 'pago') {
+        return sendPaymentsBlocked(res, 'Pagamentos a fornecedores estão bloqueados.');
+      }
       const updated = updateCompra(req.params.id, req.body);
       if (!updated) return res.status(404).json({ error: 'Compra não encontrada.' });
       res.json(updated);
@@ -4253,7 +5061,7 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
     }
   });
 
-  // 6.2 Vendas (Sales)
+  // 6.2 Vendas (Sales / Facturação)
   app.get('/api/vendas', (req: Request, res: Response) => {
     try {
       const periodo = req.query.periodo as string;
@@ -4266,7 +5074,11 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
 
   app.post('/api/vendas', (req: Request, res: Response) => {
     try {
-      const nova = addVenda(req.body);
+      if (PAYMENTS_MODULE_LOCKED && String(req.body?.estado || '').toLowerCase() === 'cobrado') {
+        return sendPaymentsBlocked(res, 'Cobranças/pagamentos diretos estão bloqueados. Emita a factura no estado Pendente (Apenas Facturação).');
+      }
+      const payload = PAYMENTS_MODULE_LOCKED ? { ...req.body, estado: req.body?.estado || 'Pendente' } : req.body;
+      const nova = addVenda(payload);
       res.json(nova);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Erro ao registar venda.' });
@@ -4275,6 +5087,9 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
 
   app.put('/api/vendas/:id', (req: Request, res: Response) => {
     try {
+      if (PAYMENTS_MODULE_LOCKED && String(req.body?.estado || '').toLowerCase() === 'cobrado') {
+        return sendPaymentsBlocked(res, 'Pagamentos e liquidações de facturas estão bloqueados.');
+      }
       const updated = updateVenda(req.params.id, req.body);
       if (!updated) return res.status(404).json({ error: 'Venda não encontrada.' });
       res.json(updated);
@@ -4306,6 +5121,9 @@ Utilize uma linguagem profissional de auditoria, objetiva, encorajadora, destaca
 
   app.post('/api/caixa', (req: Request, res: Response) => {
     try {
+      if (PAYMENTS_MODULE_LOCKED && String(req.body?.tipo || '').toLowerCase() === 'saida') {
+        return sendPaymentsBlocked(res, 'Pagamentos e saídas de caixa estão bloqueados. Utilize apenas a Facturação.');
+      }
       const novo = addCaixaItem(req.body);
       res.json(novo);
     } catch (err: any) {
@@ -5278,6 +6096,9 @@ Host: https://clickpay.co.mz
 
   // API FINTECH: CADASTRAR NOVA CONTA BANCÁRIA DA EMPRESA (PESSOAL / REAL)
   app.post('/api/fintech/contas-bancarias', (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'O registo de contas bancárias para pagamentos está bloqueado. Apenas Facturação está ativa.');
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { banco, numero_conta, saldo, senha } = req.body;
@@ -5326,6 +6147,9 @@ Host: https://clickpay.co.mz
 
   // API FINTECH: APAGAR/REMOVER CONTA BANCÁRIA DA EMPRESA
   app.delete('/api/fintech/contas-bancarias/:numero_conta', (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res);
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { numero_conta } = req.params;
@@ -5357,6 +6181,9 @@ Host: https://clickpay.co.mz
 
   // API FINTECH: CARREGAR SALDO NA CARTEIRA DA EMPRESA (COM SENHA DE SEGURANÇA)
   app.post('/api/fintech/recarregar', (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'Recargas de carteira e movimentos de pagamento estão bloqueados no sistema.');
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { valor, banco, senha } = req.body;
@@ -5410,6 +6237,9 @@ Host: https://clickpay.co.mz
 
   // API FINTECH: PROCESSAR PAGAMENTO COM DÉBITO DIRETO NO BANCO DA EMPRESA
   app.post('/api/fintech/liquidar-via-carteira', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res);
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { listaTrabalhadores, banco_origem } = req.body;
@@ -5556,6 +6386,9 @@ Host: https://clickpay.co.mz
 
   // API FINTECH: AGENTE PILOTO AUTOMÁTICO COMPLETO (AUTO-PILOT)
   app.post('/api/fintech/autopilot/executar', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'O Piloto Automático de pagamentos está bloqueado. Apenas o módulo de Facturação está disponível.');
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { periodo, bancoOrigem } = req.body;
@@ -5734,6 +6567,9 @@ Host: https://clickpay.co.mz
   });
 
   app.post('/api/fintech/liquidar-lote', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res);
+    }
     try {
       const { empresa_id, listaTrabalhadores } = req.body;
       
@@ -5806,6 +6642,9 @@ Host: https://clickpay.co.mz
   });
 
   app.post('/api/payments/c2b/collect', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'Cobranças e pagamentos via M-Pesa / e-Mola / mKesh estão bloqueados.');
+    }
     try {
       const { phone, amount, reference, description, operator } = req.body;
       if (!phone || !amount || Number(amount) <= 0) {
@@ -5828,6 +6667,9 @@ Host: https://clickpay.co.mz
   });
 
   app.post('/api/payments/b2c/disburse', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'Desembolsos e transferências via carteira móvel estão bloqueados.');
+    }
     try {
       const { phone, amount, beneficiaryName, reference, operator } = req.body;
       if (!phone || !amount || Number(amount) <= 0) {
@@ -5955,6 +6797,9 @@ Host: https://clickpay.co.mz
 
   // Rota A: Lançar e aprovar um vale a meio do mês
   app.post('/api/vales/solicitar', async (req: Request, res: Response) => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      return sendPaymentsBlocked(res, 'Solicitação e transferência de vales/adiantamentos estão bloqueadas no sistema.');
+    }
     try {
       const ctx = resolveTenantContext(req);
       const { funcionario_id, nome, valor_solicitado } = req.body;
@@ -6932,7 +7777,12 @@ Host: https://clickpay.co.mz
         });
       }).catch(() => {});
 
-      return res.status(201).json({ sucesso: true, request: novaSolicitacao });
+      return res.status(201).json({
+        sucesso: true,
+        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+        modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+        request: novaSolicitacao
+      });
     } catch (err: any) {
       return res.status(500).json({ erro: 'Erro ao registar solicitação de credenciais.' });
     }
@@ -7618,14 +8468,9 @@ Host: https://clickpay.co.mz
     loadRuntimeState();
     console.log('[SERVER] Pre-seeded demo portfolio and restored runtime tenant state successfully.');
 
-    // Sincronizar as contas padrões com o Firebase Auth em segundo plano
-    if (!isServerless && firebaseConfig && firebaseConfig.apiKey) {
-      console.log('[Firebase Sync] Sincronização automática das contas padrão iniciada...');
-      syncUserToFirebase("gersonjcumbane@gmail.com", CREDENCIAIS_FOUNDERS.password);
-      syncUserToFirebase("admin@payrolltech.co.mz", CREDENCIAIS_FOUNDERS.password);
-      syncUserToFirebase("bronze@payrolltech.co.mz", "bronze2026");
-      syncUserToFirebase("silver@payrolltech.co.mz", "silver2026");
-      syncUserToFirebase("gold@payrolltech.co.mz", "gold2026");
+    // Sincronizar contas do Fundador apenas se configuradas via variável de ambiente
+    if (!isServerless && firebaseConfig && firebaseConfig.apiKey && ENV_FOUNDER_PASSWORD) {
+      syncUserToFirebase("gersonjcumbane@gmail.com", ENV_FOUNDER_PASSWORD);
     }
   } catch (e) {
     console.error('[SERVER] Pre-seeding error:', e);

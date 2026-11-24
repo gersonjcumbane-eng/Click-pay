@@ -26,7 +26,8 @@ import {
   ChevronRight,
   Sparkles,
   Printer,
-  Eye
+  Eye,
+  Lock
 } from 'lucide-react';
 import { CompraItem, VendaItem, LivroCaixaItem, ApuramentoIVA, CompanyData } from '../types';
 import { useToast, useConfirm } from '../context/ToastContext';
@@ -56,7 +57,7 @@ import {
   getDemonstracaoResultados
 } from '../db_tax';
 import A4DocumentModal, { DocumentItem } from './A4DocumentModal';
-import { getAuthHeaders } from '../lib/authSession';
+import { getAuthHeaders, PAYMENTS_MODULE_LOCKED, PAYMENTS_LOCKED_MESSAGE } from '../lib/authSession';
 import {
   downloadOrFallbackPdf,
   downloadOrFallbackCsv,
@@ -264,12 +265,14 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const openVendaA4 = (v: VendaItem) => {
     setSelectedDocA4({
       isOpen: true,
-      tipoDocumento: v.estado === 'Cobrado' ? 'factura_recibo' : 'fatura',
+      tipoDocumento: v.estado === 'Cobrado' && !PAYMENTS_MODULE_LOCKED ? 'factura_recibo' : 'fatura',
       numeroDocumento: v.numero_factura || `FT-${v.id.substring(0, 8)}`,
       dataEmissao: v.data,
       dataVencimento: v.data,
-      estadoPagamento: (v.estado as any) || 'Cobrado',
-      metodoPagamento: 'Transferência Bancária / M-Pesa',
+      estadoPagamento: (v.estado as any) || 'Pendente',
+      metodoPagamento: PAYMENTS_MODULE_LOCKED
+        ? 'Facturação (Pagamentos Bloqueados)'
+        : 'Transferência Bancária',
       entidade: {
         nome: v.cliente,
         nuit: v.nuit_cliente || 'Consumidor Final',
@@ -369,7 +372,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
     categoria: 'Insumos' as CompraItem['categoria'],
     valor_base: 0,
     taxa_iva: 16,
-    estado: 'Pago' as CompraItem['estado'],
+    estado: (PAYMENTS_MODULE_LOCKED ? 'Pendente' : 'Pago') as CompraItem['estado'],
     metodo_pagamento: 'Transferencia_Bancaria' as CompraItem['metodo_pagamento']
   });
 
@@ -383,7 +386,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
     categoria: 'Servicos' as VendaItem['categoria'],
     valor_base: 0,
     taxa_iva: 16,
-    estado: 'Cobrado' as VendaItem['estado'],
+    estado: (PAYMENTS_MODULE_LOCKED ? 'Pendente' : 'Cobrado') as VendaItem['estado'],
     metodo_recebimento: 'Transferencia_Bancaria' as VendaItem['metodo_recebimento']
   });
 
@@ -440,6 +443,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const handleSaveCompra = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (PAYMENTS_MODULE_LOCKED && formCompra.estado === 'Pago') {
+        showError(PAYMENTS_LOCKED_MESSAGE);
+        return;
+      }
       const vPGC = validarEClassificarLancamentoPGC('compra', formCompra);
       if (!vPGC.valido) {
         showError(`Erro PGC-NIRF: ${vPGC.erros.join(', ')}`);
@@ -458,7 +465,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
       if (isJson) {
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Não foi possível guardar a compra.');
+          throw new Error(errData.erro || errData.error || 'Não foi possível guardar a compra.');
         }
       } else {
         addCompra({
@@ -478,7 +485,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
         categoria: 'Insumos',
         valor_base: 0,
         taxa_iva: 16,
-        estado: 'Pago',
+        estado: PAYMENTS_MODULE_LOCKED ? 'Pendente' : 'Pago',
         metodo_pagamento: 'Transferencia_Bancaria'
       });
       showSuccess('Factura de compra guardada com sucesso!');
@@ -492,6 +499,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const handleSaveVenda = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (PAYMENTS_MODULE_LOCKED && formVenda.estado === 'Cobrado') {
+        showError(PAYMENTS_LOCKED_MESSAGE);
+        return;
+      }
       const vPGC = validarEClassificarLancamentoPGC('venda', formVenda);
       if (!vPGC.valido) {
         showError(`Erro PGC-NIRF: ${vPGC.erros.join(', ')}`);
@@ -510,7 +521,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
       if (isJson) {
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Não foi possível guardar a venda.');
+          throw new Error(errData.erro || errData.error || 'Não foi possível guardar a venda.');
         }
       } else {
         addVenda({
@@ -530,7 +541,7 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
         categoria: 'Servicos',
         valor_base: 0,
         taxa_iva: 16,
-        estado: 'Cobrado',
+        estado: PAYMENTS_MODULE_LOCKED ? 'Pendente' : 'Cobrado',
         metodo_recebimento: 'Transferencia_Bancaria'
       });
       showSuccess('Factura de venda guardada com sucesso!');
@@ -544,6 +555,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
   const handleSaveCaixa = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (PAYMENTS_MODULE_LOCKED && formCaixa.tipo === 'Saida') {
+        showError(PAYMENTS_LOCKED_MESSAGE);
+        return;
+      }
       const res = await fetch('/api/caixa', {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -554,7 +569,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
       });
       const isJson = (res.headers.get('content-type') || '').includes('application/json');
       if (isJson) {
-        if (!res.ok) throw new Error('Não foi possível guardar movimento de caixa.');
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.erro || errData.error || 'Não foi possível guardar movimento de caixa.');
+        }
       } else {
         addCaixaItem({ ...formCaixa, periodo: selectedPeriod } as any);
       }
@@ -890,6 +908,26 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
           {/* TAB 1: LIVRO DE CAIXA */}
           {activeSubTab === 'caixa' && (
             <div className="space-y-6">
+              {PAYMENTS_MODULE_LOCKED && (
+                <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <Lock className="text-rose-600 shrink-0 mt-0.5" size={18} />
+                    <div>
+                      <p className="text-xs font-extrabold text-rose-950">Pagamentos / Saídas de Caixa Bloqueados — Apenas Facturação Ativa</p>
+                      <p className="text-[11px] text-rose-800 mt-0.5">
+                        Não é possível registar pagamentos ou saídas financeiras neste sistema. Utilize a aba <b>Vendas & Facturação</b> para emitir facturas A4.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('vendas')}
+                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[11px] font-bold shrink-0 cursor-pointer"
+                  >
+                    Ir para Facturação
+                  </button>
+                </div>
+              )}
               {/* KPIs Caixa */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-xs space-y-2">
@@ -1226,6 +1264,17 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
           {/* TAB 3: COMPRAS & IVA DEDUTÍVEL */}
           {activeSubTab === 'compras' && (
             <div className="space-y-6">
+              {PAYMENTS_MODULE_LOCKED && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3">
+                  <Lock className="text-amber-700 shrink-0 mt-0.5" size={18} />
+                  <div>
+                    <p className="text-xs font-extrabold text-amber-950">Pagamentos a Fornecedores Bloqueados — Apenas Registo Pendente</p>
+                    <p className="text-[11px] text-amber-800 mt-0.5">
+                      Compras são lançadas exclusivamente no estado <b>Pendente (Conta Corrente)</b> sem movimentar caixa ou carteiras de pagamento.
+                    </p>
+                  </div>
+                </div>
+              )}
               {/* KPIs Compras */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-xs space-y-2">
@@ -2462,8 +2511,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                       onChange={(e) => setFormCompra({ ...formCompra, estado: e.target.value as CompraItem['estado'] })}
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-900 font-semibold"
                     >
-                      <option value="Pago">Pago (Lança no Caixa)</option>
-                      <option value="Pendente">Pendente (A Prazo)</option>
+                      <option value="Pendente">Pendente (A Prazo / Conta Corrente)</option>
+                      <option value="Pago" disabled={PAYMENTS_MODULE_LOCKED}>
+                        {PAYMENTS_MODULE_LOCKED ? 'Pago (Pagamentos Bloqueados)' : 'Pago (Lança no Caixa)'}
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -2696,14 +2747,16 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                     </select>
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Estado da Cobrança</label>
+                    <label className="block font-bold text-slate-700 mb-1">Estado da Factura</label>
                     <select
                       value={formVenda.estado}
                       onChange={(e) => setFormVenda({ ...formVenda, estado: e.target.value as VendaItem['estado'] })}
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-800 font-semibold"
                     >
-                      <option value="Cobrado">Cobrado (Lança no Caixa)</option>
-                      <option value="Pendente">Pendente (A Prazo)</option>
+                      <option value="Pendente">Facturado (Apenas Facturação / A Prazo)</option>
+                      <option value="Cobrado" disabled={PAYMENTS_MODULE_LOCKED}>
+                        {PAYMENTS_MODULE_LOCKED ? 'Cobrado / Pago (Pagamentos Bloqueados)' : 'Cobrado (Lança no Caixa)'}
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -2830,8 +2883,10 @@ export default function FinancialManagement({ company, selectedPeriod, initialSu
                       onChange={(e) => setFormCaixa({ ...formCaixa, tipo: e.target.value as LivroCaixaItem['tipo'] })}
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 font-bold"
                     >
-                      <option value="Entrada">Recebimento / Entrada (+)</option>
-                      <option value="Saida">Pagamento / Saída (-)</option>
+                      <option value="Entrada">Registo / Entrada (+)</option>
+                      <option value="Saida" disabled={PAYMENTS_MODULE_LOCKED}>
+                        {PAYMENTS_MODULE_LOCKED ? 'Pagamento / Saída (-) — Bloqueado' : 'Pagamento / Saída (-)'}
+                      </option>
                     </select>
                   </div>
                   <div>

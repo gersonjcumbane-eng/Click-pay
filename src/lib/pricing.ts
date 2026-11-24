@@ -62,7 +62,7 @@ export const CLICKPAY_PLANS: ClickPayPlanSpec[] = [
       'Até 5 utilizadores simultâneos',
       'Ficheiros SISSMO, guias INSS & Contratos (Lei 13/2023)',
       'Compras, fornecedores, stocks e CRM comercial',
-      'Pagamentos em lote via M-Pesa e e-Mola'
+      'Facturação A4 avançada & gestão de clientes e faturas'
     ]
   },
   {

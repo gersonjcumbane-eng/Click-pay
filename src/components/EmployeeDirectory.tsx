@@ -32,13 +32,14 @@ import {
   DollarSign,
   CheckSquare,
   Info,
-  Printer
+  Printer,
+  Lock
 } from 'lucide-react';
 import { useToast, useConfirm } from '../context/ToastContext';
 import { Employee, CompanyData } from '../types';
 import { calcularFolhaSalario } from '../db_tax';
 import { scanFileForMalware } from '../lib/security';
-import { getAuthHeaders } from '../lib/authSession';
+import { getAuthHeaders, PAYMENTS_MODULE_LOCKED } from '../lib/authSession';
 import { downloadOrFallbackPdf, generatePayslipPdfBlob } from '../lib/clientPdf';
 import PayslipA4Modal, { PayslipA4Data } from './PayslipA4Modal';
 
@@ -589,7 +590,10 @@ export default function EmployeeDirectory({
     setLoadingPay(true);
     setCalcResult(null);
     try {
-      const res = await fetch('/api/payroll/process-and-pay', {
+      const endpoint = PAYMENTS_MODULE_LOCKED
+        ? '/api/payroll/simular-recibo'
+        : '/api/payroll/process-and-pay';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
@@ -608,38 +612,17 @@ export default function EmployeeDirectory({
           onReload();
           return;
         }
-        showError(data.error || data.erro || 'Erro ao liquidar salário.');
+        showError(data.error || data.erro || 'Erro ao gerar recibo salarial.');
         return;
       }
 
-      // Fallback estático (Firebase Hosting / offline)
+      // Fallback estático (Firebase Hosting / offline) — apenas cálculo & emissão PDF (sem liquidação/pagamento)
       const calc = calcularFolhaSalario(emp.salario_base, diasFaltas, emp.numero_dependentes || 0);
       calc.periodo = selectedPeriod;
-      const cid = localStorage.getItem('paytek_company_id') || 'cli_bronze';
-      const tenantKey = `clickpay_tenant_${cid}`;
-      try {
-        const raw = localStorage.getItem(tenantKey);
-        const snap = raw ? JSON.parse(raw) : { employees: [...employees], logs: [], contratos: [], vales: [] };
-        const logEntry = {
-          id: `log_${Date.now()}`,
-          employeeId: emp.id,
-          employeeName: emp.nome,
-          carteira_movel: emp.carteira_movel,
-          salarioLiquido: calc.salarioLiquido,
-          status: 'Liquidado',
-          periodo: selectedPeriod,
-          timestamp: new Date().toISOString(),
-          txId: `TX-${Math.floor(10000 + Math.random() * 90000)}`
-        };
-        snap.logs = [logEntry, ...(Array.isArray(snap.logs) ? snap.logs : [])];
-        localStorage.setItem(tenantKey, JSON.stringify(snap));
-      } catch {
-        // Ignorar erro de quota
-      }
 
       setCalcResult({
         sucesso: true,
-        mensagem: `Salário processado com sucesso para ${emp.nome}!`,
+        mensagem: `Recibo calculado para ${emp.nome} (pagamentos bloqueados · apenas emissão documental).`,
         detalhesSalario: calc,
         linkFicheiro: `/download/recibo_${emp.id}_${selectedPeriod.replace(/\s+/g, '_')}.pdf`
       });
@@ -650,7 +633,7 @@ export default function EmployeeDirectory({
       calc.periodo = selectedPeriod;
       setCalcResult({
         sucesso: true,
-        mensagem: `Salário processado localmente para ${emp.nome}!`,
+        mensagem: `Recibo calculado localmente para ${emp.nome} (pagamentos bloqueados).`,
         detalhesSalario: calc,
         linkFicheiro: `/download/recibo_${emp.id}_${selectedPeriod.replace(/\s+/g, '_')}.pdf`
       });
@@ -1880,16 +1863,26 @@ export default function EmployeeDirectory({
                             </div>
                           </div>
 
-                          {/* Col 3: Liquidação Final */}
-                          <div className="bg-white p-4 rounded-xl border border-emerald-100 flex flex-col justify-between space-y-4">
+                          {/* Col 3: Cálculo Líquido & Emissão Documental (Pagamentos Bloqueados) */}
+                          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-4">
                             <div>
-                              <h5 className="font-bold text-slate-700 pb-1.5 border-b border-slate-100">Montante Líquido a Receber</h5>
+                              <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+                                <h5 className="font-bold text-slate-700">Montante Líquido Calculado</h5>
+                                {PAYMENTS_MODULE_LOCKED && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded text-[9px] font-bold">
+                                    <Lock size={9} />
+                                    Pagamentos Bloqueados
+                                  </span>
+                                )}
+                              </div>
                               <div className="pt-2">
                                 <p className="text-2xl font-extrabold text-emerald-600" id={`net_val_${emp.id}`}>
                                   {calculoPadrao.salarioLiquido.toLocaleString('pt-MZ')} MT
                                 </p>
-                                <p className="text-[10px] text-slate-400 mt-1">
-                                  Valor total que será debitado da empresa e creditado para a carteira {emp.carteira_movel}.
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  {PAYMENTS_MODULE_LOCKED
+                                    ? 'Transferências e pagamentos via carteira móvel bloqueados. Pode calcular o recibo e gerar o documento A4/PDF.'
+                                    : `Valor total que será debitado da empresa e creditado para a carteira ${emp.carteira_movel}.`}
                                 </p>
                               </div>
                             </div>
@@ -1903,9 +1896,16 @@ export default function EmployeeDirectory({
                                   handleProcessIndividual(emp, diasFaltas);
                                 }}
                                 disabled={loadingPay}
-                                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-semibold rounded-lg shadow-sm cursor-pointer text-xs transition-all"
+                                className="w-full py-2 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-semibold rounded-lg shadow-sm cursor-pointer text-xs transition-all flex items-center justify-center gap-1.5"
                               >
-                                {loadingPay ? 'A transferir fundos...' : '⚡ LIQUIDAR & GERAR RECIBO'}
+                                <FileText size={13} />
+                                <span>
+                                  {loadingPay
+                                    ? 'A gerar recibo...'
+                                    : PAYMENTS_MODULE_LOCKED
+                                    ? 'CALCULAR & GERAR RECIBO PDF'
+                                    : 'LIQUIDAR & GERAR RECIBO'}
+                                </span>
                               </button>
                               <button
                                 type="button"
@@ -2177,7 +2177,11 @@ export default function EmployeeDirectory({
                               <CheckCircle2 className="text-emerald-600 shrink-0" size={20} />
                               <div>
                                 <p className="font-bold text-emerald-900 text-[11px]">{calcResult.mensagem}</p>
-                                <p className="text-[10px] text-emerald-700">O colaborador foi liquidado e a folha foi actualizada.</p>
+                                <p className="text-[10px] text-emerald-700">
+                                  {PAYMENTS_MODULE_LOCKED
+                                    ? 'Recibo salarial calculado e pronto para emissão A4/PDF (pagamentos bloqueados).'
+                                    : 'O colaborador foi liquidado e a folha foi actualizada.'}
+                                </p>
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2 shrink-0">

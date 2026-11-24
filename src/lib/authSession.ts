@@ -45,6 +45,15 @@ export function isFounderEmail(email?: string | null): boolean {
   return (FOUNDER_EMAILS as readonly string[]).includes(effective);
 }
 
+export const PAYMENTS_MODULE_LOCKED = true;
+export const SYSTEM_MODE = 'apenas_facturacao' as const;
+export const PAYMENTS_LOCKED_MESSAGE =
+  'Todas as funcionalidades de pagamento estão bloqueadas. O sistema encontra-se configurado exclusivamente para Facturação.';
+
+export function isPaymentsLocked(): boolean {
+  return PAYMENTS_MODULE_LOCKED;
+}
+
 export function isFounderUser(role?: string | null, email?: string | null): boolean {
   return isSuperAdminRole(role) && isFounderEmail(email);
 }

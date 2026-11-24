@@ -12,7 +12,6 @@ import {
   ArrowLeft, 
   ArrowRight, 
   CheckCircle2, 
-  CreditCard, 
   Check, 
   X, 
   Mail, 
@@ -78,14 +77,11 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
   const [empresaTelefone, setEmpresaTelefone] = useState('');
   const [endereco, setEndereco] = useState('');
 
-  // Step 2: Subscription & Payment State
+  // Step 2: Subscription State (Pagamentos bloqueados — Apenas Facturação)
   const [selectedPlan, setSelectedPlan] = useState<'Starter' | 'Growth' | 'Business' | 'Vitalicio'>('Starter');
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('mensal');
   const [paymentSubStep, setPaymentSubStep] = useState<'PLANS' | 'PAYMENT'>('PLANS');
-  const [metodoPagamento, setMetodoPagamento] = useState<'ONLINE' | 'VOUCHER'>('ONLINE');
-  const [carteiraNumero, setCarteiraNumero] = useState('');
-  const [voucherCode, setVoucherCode] = useState('');
-  const [isPayingPlan, setIsPayingPlan] = useState(false);
+  const [metodoPagamento] = useState<string>('BLOQUEADO_APENAS_FACTURACAO');
 
   // Step 3: Warehouse Initial State
   const [armazemNome, setArmazemNome] = useState('Armazém Principal');
@@ -228,6 +224,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       localStorage.setItem('paytek_sub_status', 'ativo');
       localStorage.setItem('paytek_sub_plan', 'Bronze');
       localStorage.setItem('paytek_company_name', cleanEmpresa);
+      localStorage.setItem('paytek_payments_locked', 'true');
 
       setStage('WIZARD');
       showToast('Conta ClickPay criada e gravada com sucesso!');
@@ -369,9 +366,11 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         localStorage.setItem('paytek_sub_expire', data.usuario?.next_billing_date || defaultExp);
         localStorage.setItem('paytek_company_name', data.usuario?.nome_empresa || cleanEmpresa);
+        localStorage.setItem('paytek_payments_locked', 'true');
         onSuccess({
           ...data.usuario,
-          subscription_plan: mappedPlan
+          subscription_plan: mappedPlan,
+          pagamentos_bloqueados: true
         });
         return;
       }
@@ -544,6 +543,16 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                   </h1>
                   <p className="text-xs font-medium text-slate-500 mt-1">
                     Registe a sua empresa e comece a gerir salários e faturação num só lugar.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-950 flex items-start gap-2.5">
+                <Lock size={15} className="text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Pagamentos Bloqueados — Apenas Facturação Ativa</p>
+                  <p className="text-amber-800 leading-relaxed mt-0.5">
+                    Ao solicitar o cadastro e após a ativação da conta, todos os módulos de pagamento (M-Pesa, e-Mola, cartões e liquidações) permanecem bloqueados. Trabalhará exclusivamente com Facturação e gestão documental.
                   </p>
                 </div>
               </div>
@@ -1276,17 +1285,17 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       onClick={() => setPaymentSubStep('PAYMENT')}
                       className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20 cursor-pointer"
                     >
-                      Prosseguir para Pagamento
+                      Continuar para Activação (Sem Pagamento)
                       <ArrowRight size={14} />
                     </button>
                   </div>
                 </div>
               ) : (
-                /* Step 2.2: Payment Screen (Image 7) */
+                /* Step 2.2: Pagamentos Bloqueados — Apenas Facturação */
                 <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6 max-w-2xl mx-auto">
                   <div>
-                    <h2 className="text-base font-black text-slate-900">Pagamento & Activação</h2>
-                    <p className="text-xs text-slate-500">Finalize a sua subscrição para começar a usar o ClickPay ERP.</p>
+                    <h2 className="text-base font-black text-slate-900">Activação da Conta · Apenas Facturação</h2>
+                    <p className="text-xs text-slate-500">Conclua o registo sem efetuar pagamentos online no sistema.</p>
                   </div>
 
                   {/* Summary Box */}
@@ -1302,94 +1311,34 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
                     <div className="text-right">
                       <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
-                        TOTAL A PAGAR
+                        PAGAMENTO NO SISTEMA
                       </span>
-                      <span className="text-base font-black text-blue-900">{getPlanPrice(selectedPlan)}</span>
+                      <span className="inline-flex items-center gap-1 text-xs font-black text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg">
+                        <Lock size={12} />
+                        Bloqueado ({getPlanPrice(selectedPlan)} suspenso)
+                      </span>
                     </div>
                   </div>
 
-                  {/* Payment Method Option */}
-                  <div className="space-y-3">
-                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                      MÉTODO DE PAGAMENTO
-                    </label>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Pagamento Online */}
-                      <div
-                        onClick={() => setMetodoPagamento('ONLINE')}
-                        className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
-                          metodoPagamento === 'ONLINE'
-                            ? 'border-blue-900 bg-blue-50/30 shadow-xs'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <CreditCard size={18} className="text-blue-900" />
-                          <span className="text-xs font-black text-slate-900">Pagamento Online</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500">M-Pesa, e-Mola, mKesh ou Cartão</p>
-
-                        <div className="flex items-center gap-2 pt-1">
-                          <span className="text-[9px] font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">m-pesa</span>
-                          <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">e-mola</span>
-                          <span className="text-[9px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">mKesh</span>
-                          <span className="text-[9px] font-bold bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">VISA</span>
-                        </div>
+                  {/* Locked Payment Notice */}
+                  <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
+                        <Lock size={18} />
                       </div>
-
-                      {/* Cupão / Voucher */}
-                      <div
-                        onClick={() => setMetodoPagamento('VOUCHER')}
-                        className={`p-4 rounded-2xl border-2 cursor-pointer transition-all space-y-2 ${
-                          metodoPagamento === 'VOUCHER'
-                            ? 'border-blue-900 bg-blue-50/30 shadow-xs'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Tag size={18} className="text-blue-900" />
-                          <span className="text-xs font-black text-slate-900">Cupão / Voucher</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500">Activar com código promocional</p>
+                      <div className="space-y-1">
+                        <h3 className="text-xs font-black text-rose-950 uppercase tracking-wide">
+                          Módulo de Pagamentos Bloqueado para Novos Cadastros
+                        </h3>
+                        <p className="text-xs text-rose-900 leading-relaxed">
+                          Todos os meios e operações de pagamento (<b>M-Pesa, e-Mola, mKesh, Cartão VISA e transferências</b>) encontram-se bloqueados durante a solicitação de cadastro e após a entrada no sistema.
+                        </p>
+                        <p className="text-[11px] text-slate-700 font-semibold pt-1">
+                          A sua empresa terá acesso imediato apenas ao módulo de <b>Facturação &amp; Vendas</b> (emissão de faturas A4 e gestão documental).
+                        </p>
                       </div>
                     </div>
                   </div>
-
-                  {/* Input depending on method */}
-                  {metodoPagamento === 'ONLINE' ? (
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        NÚMERO DA CARTEIRA MÓVEL (M-PESA / E-MOLA)
-                      </label>
-                      <div className="flex gap-2">
-                        <span className="px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-black text-slate-700 flex items-center justify-center shrink-0">
-                          +258
-                        </span>
-                        <input
-                          type="tel"
-                          value={carteiraNumero}
-                          onChange={(e) => setCarteiraNumero(e.target.value)}
-                          placeholder="841234567"
-                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-400">Receberá um pedido de confirmação com código PIN no seu telemóvel.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        CÓDIGO DO CUPÃO / VOUCHER
-                      </label>
-                      <input
-                        type="text"
-                        value={voucherCode}
-                        onChange={(e) => setVoucherCode(e.target.value)}
-                        placeholder="EX: CLICKPAY2026"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                      />
-                    </div>
-                  )}
 
                   <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                     <button
@@ -1402,36 +1351,10 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
                     <button
                       type="button"
-                      disabled={isPayingPlan}
-                      onClick={async () => {
-                        if (metodoPagamento === 'ONLINE' && carteiraNumero.trim()) {
-                          setIsPayingPlan(true);
-                          const amountNum = getPlanFeeMzn(selectedPlan, billingCycle);
-                          try {
-                            const res = await fetch('/api/payments/c2b/collect', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                phone: carteiraNumero.trim(),
-                                amount: amountNum,
-                                description: `Plano ${getPlanSpec(selectedPlan).name} (${billingCycle}) ClickPay ERP`
-                              })
-                            });
-                            const payData = await res.json().catch(() => null);
-                            if (payData?.transaction?.responseMessage) {
-                              showToast(payData.transaction.responseMessage);
-                            }
-                          } catch {
-                            // Continua para configuração de armazém mesmo em modo offline
-                          } finally {
-                            setIsPayingPlan(false);
-                          }
-                        }
-                        setCurrentStep(3);
-                      }}
-                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
+                      onClick={() => setCurrentStep(3)}
+                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
                     >
-                      {isPayingPlan ? 'A processar carteira móvel...' : 'Finalizar e Activar Conta'}
+                      Confirmar Activação (Apenas Facturação)
                       <ArrowRight size={14} />
                     </button>
                   </div>

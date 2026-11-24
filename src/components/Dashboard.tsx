@@ -23,7 +23,8 @@ import {
   Wallet,
   X,
   Printer,
-  Trash2
+  Trash2,
+  Lock
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -48,7 +49,11 @@ import {
   getAvailablePeriods,
   calcularFolhaSalario
 } from '../db_tax';
-import { getAuthHeaders } from '../lib/authSession';
+import {
+  getAuthHeaders,
+  PAYMENTS_MODULE_LOCKED,
+  PAYMENTS_LOCKED_MESSAGE
+} from '../lib/authSession';
 import {
   downloadOrFallbackPdf,
   downloadOrFallbackCsv,
@@ -369,6 +374,10 @@ export default function Dashboard({
   const [autopilotLogs, setAutopilotLogs] = useState<string[]>([]);
 
   const carregarCarteira = async () => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      setSaldoCarteira(0);
+      return;
+    }
     setLoadingCarteira(true);
     try {
       const res = await fetch('/api/fintech/carteira', {
@@ -386,6 +395,10 @@ export default function Dashboard({
   };
 
   const dispararAutopilot = async () => {
+    if (PAYMENTS_MODULE_LOCKED) {
+      setAutopilotError(PAYMENTS_LOCKED_MESSAGE);
+      return;
+    }
     setAutopilotRunning(true);
     setAutopilotError(null);
     setAutopilotResult(null);
@@ -431,7 +444,9 @@ export default function Dashboard({
   };
 
   useEffect(() => {
-    carregarCarteira();
+    if (!PAYMENTS_MODULE_LOCKED) {
+      carregarCarteira();
+    }
   }, [summary, employees]);
 
   const [loadingAviso, setLoadingAviso] = useState<string | null>(null);
@@ -1014,8 +1029,36 @@ export default function Dashboard({
         )}
       </AnimatePresence>
 
-      {/* 3. Processamento Salarial & Liquidação Móvel */}
-      {userRole !== 'CLIENTE_EMPRESA' && (
+      {/* 3. Estado dos Pagamentos vs. Facturação */}
+      {PAYMENTS_MODULE_LOCKED ? (
+        <section className="bg-white rounded-xl border border-rose-200 p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-[11px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Lock size={12} />
+                Pagamentos Bloqueados · Modo Exclusivo de Facturação
+              </p>
+              <h3 className="text-base font-semibold text-slate-950 tracking-tight">
+                Operações de Pagamento Desativadas no Sistema
+              </h3>
+              <p className="text-xs text-slate-600 max-w-2xl">
+                {PAYMENTS_LOCKED_MESSAGE} Utilize o módulo de <strong>Facturação &amp; Vendas</strong> para emitir faturas e gerir documentos fiscais.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => onNavigateTab && onNavigateTab('financial', 'vendas')}
+                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <span>Abrir Facturação &amp; Vendas</span>
+                <ArrowRight size={13} />
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : userRole !== 'CLIENTE_EMPRESA' && (
         <section className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">

@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { getFormattedCurrentDateLong } from '../db_tax';
-import { isFounderUser } from '../lib/authSession';
+import { isFounderUser, PAYMENTS_MODULE_LOCKED } from '../lib/authSession';
 
 export interface LeftModuleNavProps {
   activeTab: string;
@@ -349,14 +349,19 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
                   onSelectTab('fintech');
                   onCloseMobile();
                 }}
+                title={PAYMENTS_MODULE_LOCKED ? 'Pagamentos bloqueados — apenas Facturação ativa' : undefined}
                 className={`text-[11px] px-2.5 py-1.5 rounded-md text-left transition-colors cursor-pointer flex items-center justify-between ${
                   activeTab === 'fintech'
                     ? 'bg-slate-100 text-blue-900 font-semibold'
+                    : PAYMENTS_MODULE_LOCKED
+                    ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-50 font-medium'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-medium'
                 }`}
               >
                 <span>Vales &amp; Carteira Móvel</span>
-                {isBronze && <Lock size={10} className="text-amber-600" />}
+                {(PAYMENTS_MODULE_LOCKED || isBronze) && (
+                  <Lock size={10} className={PAYMENTS_MODULE_LOCKED ? 'text-rose-600' : 'text-amber-600'} />
+                )}
               </button>
               <button
                 type="button"

@@ -38,6 +38,7 @@ import {
 import { CompanyData } from '../types';
 import { useToast, useConfirm } from '../context/ToastContext';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
+import { updateLocalVaultPassword, syncUpdatedCredentialsToFirestore } from '../lib/firebase';
 
 interface AccessCredentialManagementProps {
   company: CompanyData;
@@ -50,6 +51,7 @@ interface SystemUser {
   name: string;
   email: string;
   passwordMasked: string;
+  passwordConfigured?: boolean;
   rawPassword?: string;
   role: string;
   roleLabel: string;
@@ -128,13 +130,32 @@ export default function AccessCredentialManagement({
   const [tokenScopes, setTokenScopes] = useState<string[]>(['payroll:read', 'invoicing:write']);
   const [creatingToken, setCreatingToken] = useState<boolean>(false);
 
-  // 6. Modal de Atualização / Rotação de Credenciais de Acesso
+  // 6. Modal de Atualização / Rotação de Credenciais & Permissões de Acesso
   const [showUpdateCredModal, setShowUpdateCredModal] = useState<boolean>(false);
+  const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [updateTargetEmail, setUpdateTargetEmail] = useState<string>('gersonjcumbane@gmail.com');
+  const [editName, setEditName] = useState<string>('');
+  const [editRole, setEditRole] = useState<string>('CLIENTE_EMPRESA');
+  const [editPlan, setEditPlan] = useState<string>('Bronze');
+  const [editPhone, setEditPhone] = useState<string>('');
+  const [editCompanyName, setEditCompanyName] = useState<string>('');
+  const [editStatus, setEditStatus] = useState<'ativo' | 'inativo'>('ativo');
   const [updateNewPassword, setUpdateNewPassword] = useState<string>('');
   const [updateConfirmPassword, setUpdateConfirmPassword] = useState<string>('');
   const [showNewPwd, setShowNewPwd] = useState<boolean>(false);
   const [updatingCreds, setUpdatingCreds] = useState<boolean>(false);
+
+  // Segredos de Visualização Única (One-time Secrets emitidos na sessão)
+  const [oneTimePasswords, setOneTimePasswords] = useState<Record<string, string>>({});
+  const [oneTimeTokenModal, setOneTimeTokenModal] = useState<{
+    name: string;
+    token: string;
+    tokenPrefix: string;
+    isRotated: boolean;
+  } | null>(null);
+  const [rotatedUserModal, setRotatedUserModal] = useState<any | null>(null);
+  const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
+  const [rotatingTokenId, setRotatingTokenId] = useState<string | null>(null);
 
   // 7. Clipboard Feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -157,6 +178,10 @@ export default function AccessCredentialManagement({
       const res = await fetch('/api/access/overview', {
         headers: getAuthHeaders()
       });
+      if (res.status === 401) {
+        showError('Sessão expirada ou sem permissão. Termine sessão e volte a entrar.');
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.users) setUsers(data.users);
@@ -169,6 +194,9 @@ export default function AccessCredentialManagement({
           if (data.nuitNuel.nuit) setNuit(data.nuitNuel.nuit);
           if (data.nuitNuel.nuel) setNuel(data.nuitNuel.nuel);
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showError(errData.erro || 'Não foi possível carregar os dados de acesso.');
       }
     } catch (err) {
       console.warn('Erro ao carregar visão geral de acessos:', err);
@@ -303,6 +331,18 @@ export default function AccessCredentialManagement({
       });
       const data = await res.json();
       if (data.sucesso) {
+        if (data.usuario?.email && data.usuario?.rawPassword) {
+          const emailKey = String(data.usuario.email).toLowerCase().trim();
+          setOneTimePasswords(prev => ({ ...prev, [emailKey]: data.usuario.rawPassword }));
+          updateLocalVaultPassword(emailKey, data.usuario.rawPassword, data.usuario.companyName).catch(() => {});
+          syncUpdatedCredentialsToFirestore({
+            email: emailKey,
+            newPassword: data.usuario.rawPassword,
+            companyName: data.usuario.companyName,
+            plan: data.usuario.plan,
+            status: 'ativo'
+          }).catch(() => {});
+        }
         setGeneratedResult(data.usuario);
         showSuccess(`Credenciais geradas e Fundador (${founderEmail}) notificado com sucesso!`);
         setGenNome('');
@@ -340,6 +380,14 @@ export default function AccessCredentialManagement({
         showSuccess(`Token "${tokenName}" gerado com sucesso!`);
         setShowTokenModal(false);
         setTokenName('');
+        if (data.token?.fullToken) {
+          setOneTimeTokenModal({
+            name: data.token.name || tokenName.trim(),
+            token: data.token.fullToken,
+            tokenPrefix: data.token.tokenPrefix,
+            isRotated: false
+          });
+        }
         loadData();
       } else {
         showError(data.erro || 'Falha ao criar token.');
@@ -351,8 +399,55 @@ export default function AccessCredentialManagement({
     }
   };
 
-  const openUpdateCredentialsFor = (targetEmail: string) => {
-    setUpdateTargetEmail(targetEmail);
+  const handleRotateToken = async (tokenObj: ApiToken) => {
+    const confirmed = await confirmAction({
+      title: 'Rodar Chave de API',
+      message: `Gerar uma nova chave criptográfica para "${tokenObj.name}"? A chave anterior deixará de ser válida imediatamente.`,
+      confirmText: 'Rodar Chave',
+      variant: 'warning'
+    });
+    if (!confirmed) return;
+
+    setRotatingTokenId(tokenObj.id);
+    try {
+      const res = await fetch(`/api/access/tokens/${tokenObj.id}/rotate`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+      });
+      const data = await res.json();
+      if (res.ok && data.sucesso && data.token?.fullToken) {
+        setOneTimeTokenModal({
+          name: data.token.name || tokenObj.name,
+          token: data.token.fullToken,
+          tokenPrefix: data.token.tokenPrefix,
+          isRotated: true
+        });
+        showSuccess(data.mensagem || 'Chave de API rodada com sucesso!');
+        loadData();
+      } else {
+        showError(data.erro || 'Não foi possível rodar o token de API.');
+      }
+    } catch {
+      showError('Erro de conexão ao rodar chave de API.');
+    } finally {
+      setRotatingTokenId(null);
+    }
+  };
+
+  const openUpdateCredentialsFor = (userOrEmail: SystemUser | string) => {
+    const targetUser =
+      typeof userOrEmail === 'string'
+        ? users.find(u => u.email.toLowerCase().trim() === userOrEmail.toLowerCase().trim()) || null
+        : userOrEmail;
+
+    setEditingUser(targetUser);
+    setUpdateTargetEmail(targetUser ? targetUser.email : String(userOrEmail));
+    setEditName(targetUser?.name || '');
+    setEditRole(targetUser?.role || 'CLIENTE_EMPRESA');
+    setEditPlan(targetUser?.plan || 'Bronze');
+    setEditPhone(targetUser?.phone || '');
+    setEditCompanyName(targetUser?.companyName || company.nome || '');
+    setEditStatus(targetUser?.status || 'ativo');
     setUpdateNewPassword('');
     setUpdateConfirmPassword('');
     setShowNewPwd(false);
@@ -372,37 +467,133 @@ export default function AccessCredentialManagement({
     setShowNewPwd(true);
   };
 
+  const handleRotateUserPassword = async (u: SystemUser) => {
+    const confirmed = await confirmAction({
+      title: 'Rodar Palavra-Passe do Utilizador',
+      message: `Gerar e activar imediatamente uma nova palavra-passe aleatória para ${u.name} (${u.email})? A senha anterior deixará de funcionar.`,
+      confirmText: 'Gerar Nova Senha',
+      variant: 'warning'
+    });
+    if (!confirmed) return;
+
+    setRotatingUserId(u.id);
+    try {
+      const res = await fetch(`/api/access/users/${u.id}/rotate-password`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+      });
+      const data = await res.json();
+      if (res.ok && data.sucesso && data.rawPassword) {
+        const emailKey = String(data.email || u.email).toLowerCase().trim();
+        setOneTimePasswords(prev => ({ ...prev, [emailKey]: data.rawPassword }));
+        await updateLocalVaultPassword(emailKey, data.rawPassword, data.companyName).catch(() => {});
+        await syncUpdatedCredentialsToFirestore({
+          email: emailKey,
+          newPassword: data.rawPassword,
+          companyName: data.companyName || u.companyName,
+          plan: data.plan || u.plan,
+          status: u.status
+        }).catch(() => {});
+        setRotatedUserModal(data);
+        showSuccess(data.mensagem || `Palavra-passe rodada para ${emailKey}!`);
+        loadData();
+      } else {
+        showError(data.erro || 'Não foi possível rodar a palavra-passe.');
+      }
+    } catch {
+      showError('Erro de conexão ao rodar palavra-passe.');
+    } finally {
+      setRotatingUserId(null);
+    }
+  };
+
   const handleUpdateCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanEmail = updateTargetEmail.trim().toLowerCase();
     const cleanPwd = updateNewPassword.trim();
-    if (cleanPwd.length < 8) {
+    if (!cleanEmail) {
+      showError('O e-mail alvo é obrigatório.');
+      return;
+    }
+    if (cleanPwd.length > 0 && cleanPwd.length < 8) {
       showError('A nova palavra-passe deve ter pelo menos 8 caracteres.');
       return;
     }
-    if (cleanPwd !== updateConfirmPassword.trim()) {
+    if (cleanPwd && cleanPwd !== updateConfirmPassword.trim()) {
       showError('As palavras-passe digitadas não coincidem.');
       return;
     }
+    if (!editingUser && !cleanPwd) {
+      showError('Introduza a nova palavra-passe (mínimo 8 caracteres).');
+      return;
+    }
+
     setUpdatingCreds(true);
     try {
-      const res = await fetch('/api/access/update-credentials', {
-        method: 'POST',
-        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          targetEmail: updateTargetEmail.trim(),
-          newPassword: cleanPwd
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.sucesso) {
-        showSuccess(data.mensagem || 'Credenciais atualizadas com sucesso!');
-        setShowUpdateCredModal(false);
-        setUpdateNewPassword('');
-        setUpdateConfirmPassword('');
-        loadData();
-      } else {
-        showError(data.erro || 'Não foi possível atualizar as credenciais.');
+      if (editingUser) {
+        const patchRes = await fetch(`/api/access/users/${editingUser.id}`, {
+          method: 'PATCH',
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            name: editName.trim(),
+            email: cleanEmail,
+            role: editRole,
+            plan: editPlan,
+            phone: editPhone.trim(),
+            companyName: editCompanyName.trim(),
+            status: editStatus
+          })
+        });
+        const patchData = await patchRes.json().catch(() => ({}));
+        if (!patchRes.ok || !patchData.sucesso) {
+          showError(patchData.erro || 'Não foi possível actualizar o perfil do utilizador.');
+          return;
+        }
       }
+
+      if (cleanPwd) {
+        const res = await fetch('/api/access/update-credentials', {
+          method: 'POST',
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            targetEmail: cleanEmail,
+            newPassword: cleanPwd
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.sucesso) {
+          showError(data.erro || 'Não foi possível atualizar a palavra-passe.');
+          return;
+        }
+        setOneTimePasswords(prev => ({ ...prev, [cleanEmail]: cleanPwd }));
+        await updateLocalVaultPassword(cleanEmail, cleanPwd, editCompanyName || undefined).catch(() => {});
+        await syncUpdatedCredentialsToFirestore({
+          email: editingUser?.email || cleanEmail,
+          newEmail: cleanEmail,
+          newPassword: cleanPwd,
+          status: editStatus,
+          companyName: editCompanyName || undefined,
+          plan: editPlan || undefined
+        }).catch(() => {});
+      } else if (editingUser) {
+        await syncUpdatedCredentialsToFirestore({
+          email: editingUser.email,
+          newEmail: cleanEmail,
+          status: editStatus,
+          companyName: editCompanyName || undefined,
+          plan: editPlan || undefined
+        }).catch(() => {});
+      }
+
+      showSuccess(
+        cleanPwd
+          ? `Credenciais e palavra-passe de ${cleanEmail} actualizadas com sucesso!`
+          : `Permissões e dados de ${cleanEmail} actualizados com sucesso!`
+      );
+      setShowUpdateCredModal(false);
+      setUpdateNewPassword('');
+      setUpdateConfirmPassword('');
+      loadData();
     } catch {
       showError('Erro de conexão ao atualizar credenciais.');
     } finally {
@@ -440,12 +631,14 @@ export default function AccessCredentialManagement({
 
   // Descarregar ficha de credenciais
   const downloadCredentialsTxt = (user: any) => {
+    const emailKey = String(user.email || '').toLowerCase().trim();
+    const oneTimePwd = user.rawPassword || oneTimePasswords[emailKey];
     const content = `=====================================================
 CLICKPAY MOÇAMBIQUE - FICHA DE ACESSO AO SISTEMA ERP
 =====================================================
 Utilizador: ${user.name}
 E-mail de Acesso: ${user.email}
-Palavra-Passe Inicial: ${user.rawPassword || '••••••••'}
+Palavra-Passe: ${oneTimePwd || '(Encriptada — utilize Rodar Senha no painel para emitir nova)'}
 Nível de Acesso: ${user.roleLabel || user.role}
 Plano Atribuído: ${user.plan}
 Empresa: ${user.companyName || company.nome}
@@ -461,7 +654,8 @@ Data de Emissão: ${new Date().toLocaleDateString('pt-MZ')}
 
 AVISO DE SEGURANÇA:
 Por motivos de conformidade legal e segurança cibernética,
-todos os acessos são auditados e protegidos por OTP (2FA).
+todas as palavras-passe são armazenadas em hash PBKDF2-SHA256
+e todos os acessos são auditados com OTP (2FA).
 O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
 =====================================================`;
 
@@ -852,19 +1046,36 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                       <p className="text-[11px] text-slate-500">{u.phone}</p>
                     </td>
                     <td className="py-3.5 px-4">
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        Ativo
-                      </span>
+                      <div className="space-y-1">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          u.status === 'inativo'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${u.status === 'inativo' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                          {u.status === 'inativo' ? 'Inativo' : 'Ativo'}
+                        </span>
+                        <p className={`text-[10px] font-semibold ${u.passwordConfigured === false ? 'text-amber-700' : 'text-slate-400'}`}>
+                          {u.passwordConfigured === false ? 'Aguarda definição de senha' : 'Hash PBKDF2 activo'}
+                        </p>
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
-                          onClick={() => openUpdateCredentialsFor(u.email)}
+                          onClick={() => openUpdateCredentialsFor(u)}
                           className="p-1.5 text-blue-900 hover:text-blue-950 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Actualizar palavra-passe deste utilizador"
+                          title="Editar permissões e actualizar palavra-passe"
                         >
                           <KeyRound size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleRotateUserPassword(u)}
+                          disabled={rotatingUserId === u.id}
+                          className="p-1.5 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                          title="Rodar palavra-passe instantaneamente (1 clique)"
+                        >
+                          <RefreshCw size={14} className={rotatingUserId === u.id ? 'animate-spin' : ''} />
                         </button>
                         <button
                           onClick={() => copyToClipboard(u.email, `email_${u.id}`, 'E-mail')}
@@ -901,7 +1112,7 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Chaves de integração segura para o SISSMO do INSS, gateways de pagamento Fintech (M-Pesa e e-Mola) e POS.
+              Chaves de integração segura para o SISSMO do INSS, facturação e POS (integrações de pagamento bloqueadas).
             </p>
           </div>
 
@@ -961,21 +1172,39 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                   </td>
                   <td className="py-3.5 px-4 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => copyToClipboard(t.fullToken || t.tokenPrefix, `token_${t.id}`, 'Token')}
-                        className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                        title="Copiar Chave do Token"
-                      >
-                        {copiedKey === `token_${t.id}` ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                      </button>
-                      {t.status === 'ativo' && (
-                        <button
-                          onClick={() => handleRevokeToken(t.id, t.name)}
-                          className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                          title="Revogar Token"
+                      {t.status === 'ativo' ? (
+                        <>
+                          <button
+                            onClick={() => handleRotateToken(t)}
+                            disabled={rotatingTokenId === t.id}
+                            className="p-1.5 text-blue-900 hover:text-blue-950 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                            title="Rodar chave de API (emite nova chave única)"
+                          >
+                            <RefreshCw size={14} className={rotatingTokenId === t.id ? 'animate-spin' : ''} />
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(t.tokenPrefix, `token_${t.id}`, 'Prefixo do Token')}
+                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            title="Copiar prefixo identificador (a chave completa é visível apenas na emissão/rotação)"
+                          >
+                            {copiedKey === `token_${t.id}` ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                          </button>
+                          <button
+                            onClick={() => handleRevokeToken(t.id, t.name)}
+                            className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            title="Revogar Token"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold text-slate-400 bg-slate-100 rounded-lg"
+                          title={t.id === 'tok_fintech_mpesa_gw' ? 'Chave de pagamento revogada (sistema em modo Apenas Facturação)' : 'Token revogado'}
                         >
-                          <Trash2 size={14} />
-                        </button>
+                          <Lock size={12} />
+                          <span>Bloqueado</span>
+                        </span>
                       )}
                     </div>
                   </td>
@@ -1354,33 +1583,37 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                   <label className="text-xs font-bold text-slate-800">Escopos de Permissão</label>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {[
-                      { key: 'payroll:read', label: 'Consultar Folha (RH)' },
-                      { key: 'payroll:write', label: 'Emitir Salários' },
-                      { key: 'invoicing:write', label: 'Emitir Faturas (POS)' },
-                      { key: 'sissmo:export', label: 'Exportar SISSMO INSS' },
-                      { key: 'reports:read', label: 'Relatórios Fiscais PGC' },
-                      { key: 'fintech:payout', label: 'Pagamentos Carteira Móvel' }
+                      { key: 'payroll:read', label: 'Consultar Folha (RH)', disabled: false },
+                      { key: 'payroll:write', label: 'Emitir Recibos (RH)', disabled: false },
+                      { key: 'invoicing:write', label: 'Emitir Faturas (Facturação)', disabled: false },
+                      { key: 'sissmo:export', label: 'Exportar SISSMO INSS', disabled: false },
+                      { key: 'reports:read', label: 'Relatórios Fiscais PGC', disabled: false },
+                      { key: 'fintech:payout', label: 'Pagamentos (Bloqueado)', disabled: true }
                     ].map((scope) => {
-                      const isSelected = tokenScopes.includes(scope.key);
+                      const isSelected = !scope.disabled && tokenScopes.includes(scope.key);
                       return (
                         <label
                           key={scope.key}
                           onClick={() => {
+                            if (scope.disabled) return;
                             if (isSelected) {
                               setTokenScopes(tokenScopes.filter(s => s !== scope.key));
                             } else {
                               setTokenScopes([...tokenScopes, scope.key]);
                             }
                           }}
-                          className={`p-2.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-colors ${
-                            isSelected 
-                              ? 'bg-blue-50/80 border-blue-300 text-blue-950 font-semibold' 
-                              : 'bg-slate-50 border-slate-200 text-slate-600'
+                          className={`p-2.5 rounded-lg border flex items-center gap-2 transition-colors ${
+                            scope.disabled
+                              ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-75'
+                              : isSelected
+                              ? 'bg-blue-50/80 border-blue-300 text-blue-950 font-semibold cursor-pointer'
+                              : 'bg-slate-50 border-slate-200 text-slate-600 cursor-pointer'
                           }`}
                         >
                           <input
                             type="checkbox"
                             checked={isSelected}
+                            disabled={scope.disabled}
                             readOnly
                             className="rounded text-blue-900 pointer-events-none"
                           />
@@ -1414,7 +1647,7 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
         )}
       </AnimatePresence>
 
-      {/* MODAL: Actualizar Credenciais de Acesso */}
+      {/* MODAL: Actualizar Credenciais & Permissões de Acesso */}
       <AnimatePresence>
         {showUpdateCredModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs">
@@ -1422,7 +1655,7 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-5"
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-5 max-h-[92vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-2.5">
@@ -1431,10 +1664,10 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                   </div>
                   <div>
                     <h3 className="text-base font-black text-slate-950">
-                      Actualizar Credenciais de Acesso
+                      Actualizar Credenciais &amp; Permissões
                     </h3>
                     <p className="text-xs text-slate-500">
-                      Define uma nova palavra-passe sincronizada com o servidor e Firebase Auth.
+                      Edite o perfil, função, estado ou redefina a palavra-passe com hash seguro.
                     </p>
                   </div>
                 </div>
@@ -1447,8 +1680,74 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
               </div>
 
               <form onSubmit={handleUpdateCredentials} className="space-y-4">
+                {editingUser && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200/80 rounded-xl">
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-[11px] font-bold text-slate-700">Nome Completo / Titular</label>
+                      <input
+                        type="text"
+                        required
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700">Função / Nível de Acesso</label>
+                      <select
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        disabled={editingUser.role === 'SUPER_ADMIN_PAYROLL'}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900 disabled:bg-slate-100"
+                      >
+                        {editingUser.role === 'SUPER_ADMIN_PAYROLL' && (
+                          <option value="SUPER_ADMIN_PAYROLL">Super Admin (Fundador)</option>
+                        )}
+                        <option value="GESTOR_RH">Gestor de RH &amp; Folha</option>
+                        <option value="CONTABILISTA">Contabilista Certificado</option>
+                        <option value="OPERADOR_VENDAS">Operador de Facturação</option>
+                        <option value="CLIENTE_EMPRESA">Cliente Empresa</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700">Estado da Conta</label>
+                      <select
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value as 'ativo' | 'inativo')}
+                        disabled={editingUser.email.toLowerCase() === 'gersonjcumbane@gmail.com'}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900 disabled:bg-slate-100"
+                      >
+                        <option value="ativo">Ativo</option>
+                        <option value="inativo">Inativo (Bloqueado)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700">Plano ERP</label>
+                      <select
+                        value={editPlan}
+                        onChange={(e) => setEditPlan(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
+                      >
+                        <option value="Bronze">Bronze (Starter)</option>
+                        <option value="Silver">Silver (Profissional)</option>
+                        <option value="Gold">Gold (Empresarial)</option>
+                        <option value="Platinum">Platinum / Mestre</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700">Contacto / Telemóvel</label>
+                      <input
+                        type="text"
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-800">Conta / E-mail Alvo</label>
+                  <label className="text-xs font-bold text-slate-800">Conta / E-mail de Acesso</label>
                   <input
                     type="email"
                     required
@@ -1460,7 +1759,9 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-800">Nova Palavra-Passe</label>
+                    <label className="text-xs font-bold text-slate-800">
+                      Nova Palavra-Passe {editingUser ? '(opcional se editar apenas dados)' : ''}
+                    </label>
                     <button
                       type="button"
                       onClick={generateStrongPassword}
@@ -1472,11 +1773,11 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                   <div className="relative">
                     <input
                       type={showNewPwd ? 'text' : 'password'}
-                      required
-                      minLength={8}
+                      required={!editingUser}
+                      minLength={updateNewPassword ? 8 : undefined}
                       value={updateNewPassword}
                       onChange={(e) => setUpdateNewPassword(e.target.value)}
-                      placeholder="Mínimo 8 caracteres"
+                      placeholder={editingUser ? 'Deixe em branco para manter a senha actual' : 'Mínimo 8 caracteres'}
                       className="w-full px-3.5 py-2 pr-10 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
                     />
                     <button
@@ -1489,18 +1790,20 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-800">Confirmar Nova Palavra-Passe</label>
-                  <input
-                    type={showNewPwd ? 'text' : 'password'}
-                    required
-                    minLength={8}
-                    value={updateConfirmPassword}
-                    onChange={(e) => setUpdateConfirmPassword(e.target.value)}
-                    placeholder="Repita a nova palavra-passe"
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
-                  />
-                </div>
+                {(updateNewPassword || !editingUser) && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-800">Confirmar Nova Palavra-Passe</label>
+                    <input
+                      type={showNewPwd ? 'text' : 'password'}
+                      required={Boolean(updateNewPassword) || !editingUser}
+                      minLength={8}
+                      value={updateConfirmPassword}
+                      onChange={(e) => setUpdateConfirmPassword(e.target.value)}
+                      placeholder="Repita a nova palavra-passe"
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900"
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
                   <button
@@ -1516,10 +1819,141 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                     className="py-2.5 px-5 bg-blue-900 hover:bg-blue-950 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-60"
                   >
                     {updatingCreds ? <RefreshCw size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
-                    <span>Guardar Nova Senha</span>
+                    <span>Guardar Alterações</span>
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL: Visualização Única da Nova Palavra-Passe Rodada */}
+      <AnimatePresence>
+        {rotatedUserModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-emerald-600 text-white rounded-xl">
+                    <KeyRound size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-950">Nova Palavra-Passe Emitida</h3>
+                    <p className="text-[11px] text-slate-500">Visível apenas agora — guarde antes de fechar.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setRotatedUserModal(null)}
+                  className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Conta:</span>
+                  <span className="font-mono font-bold text-slate-900">{rotatedUserModal.email}</span>
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-slate-500">Nova Senha:</span>
+                  <div className="flex items-center gap-1.5">
+                    <code className="font-mono font-black text-blue-900 bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
+                      {rotatedUserModal.rawPassword}
+                    </code>
+                    <button
+                      onClick={() => copyToClipboard(rotatedUserModal.rawPassword, 'rot_pwd', 'Nova Palavra-passe')}
+                      className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-600 cursor-pointer"
+                      title="Copiar Palavra-passe"
+                    >
+                      {copiedKey === 'rot_pwd' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  onClick={() => downloadCredentialsTxt(rotatedUserModal)}
+                  className="py-2 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download size={14} />
+                  <span>Descarregar Ficha .txt</span>
+                </button>
+                <button
+                  onClick={() => setRotatedUserModal(null)}
+                  className="py-2 px-4 bg-blue-900 hover:bg-blue-950 text-white text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  Concluir
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL: Visualização Única da Chave de API (Emissão / Rotação) */}
+      <AnimatePresence>
+        {oneTimeTokenModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-slate-900 text-white rounded-xl">
+                    <Server size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-950">
+                      {oneTimeTokenModal.isRotated ? 'Nova Chave de API Rodada' : 'Nova Chave de API Criada'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Por segurança, esta chave completa não será exibida novamente após fechar.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setOneTimeTokenModal(null)}
+                  className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2.5 text-xs">
+                <p className="font-bold text-slate-900">{oneTimeTokenModal.name}</p>
+                <div className="flex items-center justify-between gap-2 bg-white p-2.5 rounded-lg border border-amber-200">
+                  <code className="font-mono text-[11px] font-bold text-slate-900 break-all">
+                    {oneTimeTokenModal.token}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(oneTimeTokenModal.token, 'ot_token', 'Chave de API')}
+                    className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 cursor-pointer shrink-0"
+                    title="Copiar chave completa"
+                  >
+                    {copiedKey === 'ot_token' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setOneTimeTokenModal(null)}
+                  className="py-2 px-4 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  Já Guardei a Chave
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

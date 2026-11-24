@@ -4,7 +4,11 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signInWithCredential,
+  signOut
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -244,6 +248,93 @@ function getAccountFromLocalVault(email: string): LocalVaultAccount | null {
     return list.find((a) => String(a.email || '').toLowerCase().trim() === emailNorm) || null;
   } catch {
     return null;
+  }
+}
+
+export async function updateLocalVaultPassword(
+  email: string,
+  newPassword: string,
+  companyName?: string,
+  clientId?: string
+): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
+  const emailNorm = String(email || '').toLowerCase().trim();
+  const cleanPwd = String(newPassword || '').trim();
+  if (!emailNorm || !cleanPwd) return false;
+  try {
+    const existing = getAccountFromLocalVault(emailNorm);
+    return await saveAccountToLocalVault({
+      id: existing?.id || clientId || `cli_acc_${Date.now()}`,
+      email: emailNorm,
+      companyName: existing?.companyName || companyName || `Empresa ${emailNorm.split('@')[0].toUpperCase()}`,
+      nuit: existing?.nuit || '',
+      password: cleanPwd,
+      plan: existing?.plan || 'Bronze'
+    });
+  } catch {
+    return false;
+  }
+}
+
+export async function syncUpdatedCredentialsToFirestore(params: {
+  email: string;
+  newEmail?: string;
+  newPassword?: string;
+  status?: 'ativo' | 'inativo' | 'suspenso';
+  companyName?: string;
+  plan?: string;
+}): Promise<{ ok: boolean; updatedDocs: number }> {
+  const emailNorm = String(params.email || '').toLowerCase().trim();
+  const nextEmail = params.newEmail ? String(params.newEmail).toLowerCase().trim() : emailNorm;
+  if (!emailNorm || !auth.currentUser) {
+    return { ok: false, updatedDocs: 0 };
+  }
+
+  let updatedDocs = 0;
+  const now = new Date().toISOString();
+  const hashedPass = params.newPassword ? await hashPassword(String(params.newPassword).trim()) : '';
+
+  try {
+    const qSaas = query(collection(db, 'saas_clients'), where('email', '==', emailNorm));
+    const snapSaas = await getDocs(qSaas);
+    for (const d of snapSaas.docs) {
+      const payload: Record<string, any> = {
+        email: nextEmail,
+        updatedAt: now
+      };
+      if (hashedPass) payload.adminPassword = hashedPass.substring(0, 256);
+      if (params.status) {
+        payload.status = params.status === 'ativo' ? 'Ativo' : 'Suspenso';
+      }
+      if (params.companyName) payload.companyName = String(params.companyName).substring(0, 256);
+      if (params.plan) payload.plan = String(params.plan).substring(0, 64);
+
+      await setDoc(doc(db, 'saas_clients', d.id), payload, { merge: true });
+      updatedDocs += 1;
+    }
+
+    const qErp = query(collection(db, 'erp_clients'), where('email', '==', emailNorm));
+    const snapErp = await getDocs(qErp);
+    for (const d of snapErp.docs) {
+      const payload: Record<string, any> = {
+        email: nextEmail,
+        updatedAt: now
+      };
+      if (hashedPass) payload.passwordHash = hashedPass.substring(0, 256);
+      if (params.status) {
+        payload.subscription_status = params.status === 'ativo' ? 'ativo' : 'suspenso';
+      }
+      if (params.companyName) payload.nome = String(params.companyName).substring(0, 256);
+      if (params.plan) payload.subscription_plan = String(params.plan).substring(0, 64);
+
+      await setDoc(doc(db, 'erp_clients', d.id), payload, { merge: true });
+      updatedDocs += 1;
+    }
+
+    return { ok: true, updatedDocs };
+  } catch (err) {
+    console.warn('Firestore credential sync warning:', err instanceof Error ? err.message : String(err));
+    return { ok: false, updatedDocs };
   }
 }
 
@@ -552,6 +643,7 @@ async function signInViaGoogleIdentityServices(): Promise<{
   ok: boolean;
   cancelled?: boolean;
   googleAccessToken?: string;
+  idToken?: string;
   email?: string;
   emailVerified?: boolean;
   displayName?: string;
@@ -570,10 +662,15 @@ async function signInViaGoogleIdentityServices(): Promise<{
 
   return new Promise((resolve) => {
     let settled = false;
+    const timeoutId = setTimeout(() => {
+      finish({ ok: false });
+    }, 90000);
+
     const finish = (val: {
       ok: boolean;
       cancelled?: boolean;
       googleAccessToken?: string;
+      idToken?: string;
       email?: string;
       emailVerified?: boolean;
       displayName?: string;
@@ -581,6 +678,7 @@ async function signInViaGoogleIdentityServices(): Promise<{
     }) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeoutId);
       resolve(val);
     };
 
@@ -613,9 +711,26 @@ async function signInViaGoogleIdentityServices(): Promise<{
               finish({ ok: false });
               return;
             }
+
+            // Sincronizar silenciosamente sessão cloud para habilitar leitura/escrita Firestore sem expor UI externa
+            let idToken: string | undefined;
+            try {
+              const cred = GoogleAuthProvider.credential(null, tokenResponse.access_token);
+              const fbSign = await Promise.race([
+                signInWithCredential(auth, cred),
+                new Promise<null>((resTimeout) => setTimeout(() => resTimeout(null), 4000))
+              ]);
+              if (fbSign && 'user' in fbSign && fbSign.user) {
+                idToken = await fbSign.user.getIdToken().catch(() => undefined);
+              }
+            } catch {
+              // Se o domínio não estiver autorizado no provedor secundário, continua apenas com googleAccessToken
+            }
+
             finish({
               ok: true,
               googleAccessToken: tokenResponse.access_token,
+              idToken,
               email: String(info.email).toLowerCase().trim(),
               emailVerified: Boolean(info.email_verified),
               displayName: String(info.name || '')
@@ -645,34 +760,40 @@ async function signInViaGoogleIdentityServices(): Promise<{
   });
 }
 
-export async function signInWithGoogleAccount(): Promise<{
+export interface GoogleAuthResult {
   ok: boolean;
+  cancelled?: boolean;
+  redirected?: boolean;
   googleAccessToken?: string;
   idToken?: string;
   email?: string;
   emailVerified?: boolean;
   displayName?: string;
   error?: string;
-}> {
-  // 1. Tentar primeiro via Google Identity Services direto (sem redirecionar para domínio Firebase)
+}
+
+export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
+  // 1. Tentar primeiro via Google Identity Services direto (sem mostrar domínio técnico ao utilizador)
   const gisRes = await signInViaGoogleIdentityServices();
   if (gisRes.ok && gisRes.googleAccessToken && gisRes.email) {
     return {
       ok: true,
       googleAccessToken: gisRes.googleAccessToken,
+      idToken: gisRes.idToken,
       email: gisRes.email,
       emailVerified: gisRes.emailVerified,
       displayName: gisRes.displayName
     };
   }
   if (gisRes.cancelled) {
-    return { ok: false, error: gisRes.error || 'Autenticação Gmail cancelada.' };
+    return { ok: false, cancelled: true, error: gisRes.error || 'Autenticação Gmail cancelada.' };
   }
 
-  // 2. Fallback silencioso caso o domínio ainda não esteja registado no cliente OAuth direto
+  // 2. Fallback silencioso via popup ou redirect se necessário
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+
   try {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
     const idToken = await user.getIdToken();
@@ -686,13 +807,18 @@ export async function signInWithGoogleAccount(): Promise<{
   } catch (err: any) {
     const code = err?.code || '';
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return { ok: false, error: 'Janela de autenticação Gmail fechada antes de concluir.' };
+      return { ok: false, cancelled: true, error: 'Janela de autenticação Gmail fechada antes de concluir.' };
     }
-    if (code === 'auth/popup-blocked') {
-      return {
-        ok: false,
-        error: 'O navegador bloqueou a janela do Google. Permita popups para este site ou autentique-se com e-mail e palavra-passe.'
-      };
+    if (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment') {
+      try {
+        await signInWithRedirect(auth, provider);
+        return { ok: false, redirected: true };
+      } catch {
+        return {
+          ok: false,
+          error: 'O navegador bloqueou a janela do Google. Permita popups para este site ou autentique-se com e-mail e palavra-passe.'
+        };
+      }
     }
     if (code === 'auth/unauthorized-domain') {
       return {
@@ -710,6 +836,31 @@ export async function signInWithGoogleAccount(): Promise<{
       ok: false,
       error: 'Não foi possível concluir a autenticação com a sua conta Gmail. Utilize e-mail e palavra-passe.'
     };
+  }
+}
+
+export async function consumeGoogleRedirectResult(): Promise<GoogleAuthResult | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (!result?.user) return null;
+    const idToken = await result.user.getIdToken();
+    return {
+      ok: true,
+      idToken,
+      email: (result.user.email || '').toLowerCase().trim(),
+      emailVerified: Boolean(result.user.emailVerified),
+      displayName: result.user.displayName || ''
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function signOutGoogleSession(): Promise<void> {
+  try {
+    await signOut(auth);
+  } catch {
+    // ignore
   }
 }
 
@@ -801,6 +952,71 @@ export async function lookupClientByEmailInCloud(email: string): Promise<{
 }
 
 export const lookupClientByEmailInFirebase = lookupClientByEmailInCloud;
+
+function deterministicGoogleTenantId(email: string): string {
+  const clean = String(email || '').toLowerCase().trim();
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  }
+  const slug = clean.replace(/[^a-z0-9]/g, '_').slice(0, 14);
+  return `cli_google_${slug}_${hash.toString(16)}`;
+}
+
+export async function provisionOrLookupGoogleClientInCloud(params: {
+  email: string;
+  displayName?: string;
+}): Promise<{
+  id: string;
+  email: string;
+  companyName: string;
+  plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+  status: 'ativo' | 'suspenso';
+}> {
+  const emailNorm = String(params.email || '').toLowerCase().trim();
+  const existing = await lookupClientByEmailInCloud(emailNorm);
+  if (existing.found && existing.client) {
+    return existing.client;
+  }
+
+  const companyName = params.displayName
+    ? `${params.displayName} (ClickPay ERP)`
+    : `Empresa ${emailNorm.split('@')[0].toUpperCase()}`;
+  const clientId = deterministicGoogleTenantId(emailNorm);
+  const randomSeedPass = Array.from(crypto.getRandomValues(new Uint8Array(12)))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  await saveAccountToLocalVault({
+    id: clientId,
+    email: emailNorm,
+    companyName,
+    nuit: '400000000',
+    password: randomSeedPass,
+    plan: 'Bronze'
+  });
+
+  if (auth.currentUser) {
+    await syncRegisteredAccountToFirestore({
+      clientId,
+      nomeEmpresa: companyName,
+      email: emailNorm,
+      nuit: '400000000',
+      password: randomSeedPass,
+      plano: 'Starter',
+      feeBase: getPlanFeeMzn('Starter'),
+      isUpdate: false
+    }).catch(() => {});
+  }
+
+  return {
+    id: clientId,
+    email: emailNorm,
+    companyName,
+    plan: 'Bronze',
+    status: 'ativo'
+  };
+}
 
 // Test Connection to Firestore as per requirements
 async function testConnection() {

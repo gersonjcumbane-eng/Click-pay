@@ -94,16 +94,17 @@ export default function LandingPage({
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="max-w-3xl space-y-6">
             <p className="text-[12px] font-medium text-blue-900">
-              ClickPay Moçambique · Gestão Empresarial e Pagamentos
+              ClickPay Moçambique · Facturação &amp; Gestão Empresarial
             </p>
 
             <h1 className="text-[clamp(2.25rem,4vw,3.4rem)] font-semibold text-slate-950 tracking-tight leading-[1.1] text-balance">
-              Gestão salarial, faturação e pagamentos móveis num único sistema.
+              Facturação em Meticais, gestão salarial e conformidade fiscal num único sistema.
             </h1>
 
             <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-2xl">
-              Automatize salários com IRPS e INSS, emita faturas em Meticais e liquide pagamentos
-              via M-Pesa e e-Mola numa plataforma concebida para empresas em Moçambique.
+              Emita faturas A4 em Meticais, calcule salários com IRPS e INSS e gerencie a sua
+              contabilidade numa plataforma concebida para empresas em Moçambique. As operações de
+              pagamento encontram-se bloqueadas; o sistema opera em modo exclusivo de facturação.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -137,7 +138,7 @@ export default function LandingPage({
               Escolha o plano adequado à sua empresa
             </h2>
             <p className="text-sm text-slate-600">
-              Preços competitivos para o mercado moçambicano com pagamento via M-Pesa, e-Mola ou transferência bancária.
+              Preços competitivos em Meticais para o mercado moçambicano. Activação dedicada à Facturação e Gestão (módulos de pagamento bloqueados para novos cadastros e contas ativas).
             </p>
           </div>
 
@@ -285,10 +286,10 @@ export default function LandingPage({
                 ClickPay Moçambique
               </h2>
               <p className="text-sm text-slate-600 leading-relaxed max-w-2xl">
-                Desenvolvemos tecnologia de gestão empresarial e pagamentos digitais concebida para a
-                realidade fiscal e laboral de Moçambique. A nossa plataforma reúne processamento de
-                salários com cálculo de IRPS e INSS, faturação em Meticais, contabilidade e
-                liquidações diretas via M-Pesa e e-Mola.
+                Desenvolvemos tecnologia de faturação eletrónica e gestão empresarial concebida para a
+                realidade fiscal e laboral de Moçambique. A nossa plataforma reúne emissão de
+                faturas A4 em Meticais, processamento documental de salários com IRPS e INSS e
+                contabilidade PGC-NIRF.
               </p>
             </div>
 
@@ -330,7 +331,7 @@ export default function LandingPage({
                 <p className="text-xs font-semibold text-slate-950">Visão</p>
               </div>
               <p className="text-[13px] text-slate-600 leading-relaxed">
-                Ser a plataforma de referência em gestão empresarial e pagamentos digitais em
+                Ser a plataforma de referência em faturação eletrónica e gestão empresarial em
                 Moçambique, reconhecida pela fiabilidade e conformidade contínua.
               </p>
             </div>
@@ -346,7 +347,7 @@ export default function LandingPage({
                 <li>• Rigor na conformidade fiscal e laboral</li>
                 <li>• Transparência de preços em Meticais</li>
                 <li>• Segurança e integridade da informação</li>
-                <li>• Inovação prática em carteiras móveis</li>
+                <li>• Excelência documental em faturação A4</li>
               </ul>
             </div>
           </div>

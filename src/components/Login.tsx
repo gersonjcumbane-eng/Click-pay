@@ -3,13 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, Phone, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, Send, MessageCircle, Eye, EyeOff } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, MessageCircle, Eye, EyeOff, X } from 'lucide-react';
 import {
+  auth,
   authenticateClientInFirebase,
   signInWithGoogleAccount,
-  lookupClientByEmailInCloud
+  consumeGoogleRedirectResult,
+  provisionOrLookupGoogleClientInCloud,
+  updateLocalVaultPassword,
+  syncUpdatedCredentialsToFirestore,
+  GoogleAuthResult
 } from '../lib/firebase';
 import SupportTicketModal, {
   buildSupportMailtoUrl,
@@ -48,6 +53,14 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
 
   const [showPassword, setShowPassword] = useState(false);
 
+  // Modal de Actualização / Redefinição de Palavra-Passe via Conta Google Verificada
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [showResetPwd, setShowResetPwd] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
   // Estados para Verificação de 2 Fatores (OTP)
   const [otpStep, setOtpStep] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -58,6 +71,25 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [resendingOtp, setResendingOtp] = useState(false);
   const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
   const [pendingFallbackSession, setPendingFallbackSession] = useState<FallbackSession | null>(null);
+
+  // Estado de Configuração Inicial do Fundador (quando nenhuma senha está definida)
+  const [founderBootstrapRequired, setFounderBootstrapRequired] = useState(false);
+  const [bootstrapModalOpen, setBootstrapModalOpen] = useState(false);
+  const [bootstrapEmail, setBootstrapEmail] = useState('gersonjcumbane@gmail.com');
+  const [bootstrapPassword, setBootstrapPassword] = useState('');
+  const [bootstrapConfirmPassword, setBootstrapConfirmPassword] = useState('');
+  const [showBootstrapPwd, setShowBootstrapPwd] = useState(false);
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+
+  const generateClientOtp = () => {
+    if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+      const arr = new Uint32Array(1);
+      window.crypto.getRandomValues(arr);
+      return String(100000 + (arr[0] % 900000));
+    }
+    return '000000';
+  };
 
   const persistUserSession = (token: string, usuario: any, fallbackEmail: string) => {
     const resolvedEmail = String(usuario?.email || fallbackEmail || '').toLowerCase().trim();
@@ -78,6 +110,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     localStorage.setItem('paytek_sub_expire', usuario?.next_billing_date || defaultExp);
     localStorage.setItem('paytek_company_name', usuario?.nome_empresa || '');
+    localStorage.setItem('paytek_payments_locked', 'true');
   };
 
   const isJsonResponse = (res: Response | null) =>
@@ -117,7 +150,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     const triggerFallbackAuth = async () => {
       const session = await authenticateViaCloudFallback(cleanEmail, cleanPassword);
       if (session) {
-        const otp = String(Math.floor(100000 + Math.random() * 900000));
+        const otp = generateClientOtp();
         setPendingFallbackSession(session);
         setOtpStep(true);
         setTentativaId(`otp_cloud_${Date.now()}`);
@@ -129,10 +162,17 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     };
 
     try {
+      const firebaseIdToken = auth.currentUser
+        ? await auth.currentUser.getIdToken().catch(() => undefined)
+        : undefined;
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password: cleanPassword })
+        body: JSON.stringify({
+          email: cleanEmail,
+          password: cleanPassword,
+          ...(firebaseIdToken ? { firebaseIdToken } : {})
+        })
       });
 
       const isJson = isJsonResponse(response);
@@ -177,6 +217,12 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         }
       } else {
         const errData = await response.json().catch(() => ({}));
+        if (response.status === 403 && errData.code === 'FOUNDER_BOOTSTRAP_REQUIRED') {
+          setFounderBootstrapRequired(true);
+          setBootstrapEmail(cleanEmail || 'gersonjcumbane@gmail.com');
+          setBootstrapError(null);
+          setBootstrapModalOpen(true);
+        }
         setError(errData.erro || 'Dados de início de sessão incorretos. Verifique o e-mail e a palavra-passe.');
       }
     } catch (err: any) {
@@ -260,7 +306,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     setError(null);
     setResendingOtp(true);
     const generateLocalOtp = () => {
-      const nextOtp = String(Math.floor(100000 + Math.random() * 900000));
+      const nextOtp = generateClientOtp();
       setDebugOtpCode(nextOtp);
       setOtpSuccessMessage('Novo código OTP de 6 dígitos gerado!');
       setTimeout(() => setOtpSuccessMessage(null), 4000);
@@ -299,85 +345,313 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     }
   };
 
+  const completeGoogleAuthWithResult = async (gRes: GoogleAuthResult) => {
+    if (gRes.redirected) {
+      return;
+    }
+    if (!gRes.ok || (!gRes.googleAccessToken && !gRes.idToken) || !gRes.email) {
+      setError(gRes.error || 'Falha na autenticação com Gmail.');
+      return;
+    }
+
+    const ensureIsolatedTenantSnapshot = (client: { id: string; companyName: string; email: string; plan: string; status: string }) => {
+      try {
+        const key = `clickpay_tenant_${client.id}`;
+        if (!localStorage.getItem(key)) {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              company: {
+                nome: client.companyName,
+                nuit: '400000000',
+                endereco: 'Maputo, Moçambique',
+                email: client.email,
+                subscription_status: client.status,
+                subscription_plan: client.plan
+              },
+              employees: [],
+              logs: [],
+              contracts: [],
+              vales: [],
+              deletedIds: []
+            })
+          );
+        }
+      } catch {
+        // ignore storage warning
+      }
+    };
+
+    const completeStaticGoogleFallback = async (): Promise<boolean> => {
+      if (isFounderEmail(gRes.email) && gRes.emailVerified) {
+        persistUserSession(
+          `token_google_${Date.now()}`,
+          {
+            email: gRes.email,
+            funcao: 'SUPER_ADMIN_PAYROLL',
+            empresa_id: 'cli_founders',
+            nome_empresa: 'ClickPay Moçambique Lda',
+            subscription_status: 'ativo',
+            subscription_plan: 'Platinum'
+          },
+          gRes.email
+        );
+        onLoginSuccess();
+        return true;
+      }
+      const client = await provisionOrLookupGoogleClientInCloud({
+        email: gRes.email!,
+        displayName: gRes.displayName
+      });
+      ensureIsolatedTenantSnapshot(client);
+      persistUserSession(
+        `token_google_${client.id}`,
+        {
+          email: client.email,
+          funcao: 'CLIENTE_EMPRESA',
+          empresa_id: client.id,
+          nome_empresa: client.companyName,
+          subscription_status: client.status,
+          subscription_plan: client.plan
+        },
+        gRes.email!
+      );
+      onLoginSuccess();
+      return true;
+    };
+
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          googleAccessToken: gRes.googleAccessToken,
+          idToken: gRes.idToken
+        })
+      });
+      const isJson = isJsonResponse(res);
+      if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
+        const ok = await completeStaticGoogleFallback();
+        if (!ok) {
+          setError(`Não foi possível autenticar a conta Gmail (${gRes.email}).`);
+        }
+        return;
+      }
+      const data = await res.json();
+      if (res.ok && data.sucesso) {
+        persistUserSession(data.token, data.usuario, gRes.email);
+        onLoginSuccess();
+        return;
+      }
+      setError(data.erro || 'Conta Gmail não autorizada neste portal.');
+    } catch {
+      const ok = await completeStaticGoogleFallback();
+      if (!ok) {
+        setError(`Não foi possível autenticar a conta Gmail (${gRes.email}).`);
+      }
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    consumeGoogleRedirectResult().then(async (redirectRes) => {
+      if (!active || !redirectRes) return;
+      setGoogleLoading(true);
+      try {
+        await completeGoogleAuthWithResult(redirectRes);
+      } finally {
+        if (active) setGoogleLoading(false);
+      }
+    });
+
+    fetch('/api/auth/bootstrap-status')
+      .then(async (res) => {
+        if (!active || !res.ok || !isJsonResponse(res)) return;
+        const data = await res.json().catch(() => null);
+        if (active && data && data.founderConfigured === false) {
+          setFounderBootstrapRequired(true);
+          if (data.founderEmail) setBootstrapEmail(data.founderEmail);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleClaimFounderBootstrap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBootstrapError(null);
+    const cleanPwd = bootstrapPassword.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    const cleanConfirm = bootstrapConfirmPassword.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    if (cleanPwd.length < 8) {
+      setBootstrapError('A palavra-passe inicial deve ter pelo menos 8 caracteres.');
+      return;
+    }
+    if (cleanPwd !== cleanConfirm) {
+      setBootstrapError('As palavras-passe introduzidas não coincidem.');
+      return;
+    }
+
+    setBootstrapLoading(true);
+    try {
+      const res = await fetch('/api/auth/bootstrap-claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: bootstrapEmail.trim().toLowerCase(),
+          newPassword: cleanPwd
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBootstrapError(data.erro || 'Não foi possível activar as credenciais iniciais do Fundador.');
+        return;
+      }
+
+      await updateLocalVaultPassword(
+        bootstrapEmail,
+        cleanPwd,
+        'ClickPay Moçambique Lda',
+        'cli_founders'
+      ).catch(() => {});
+      await syncUpdatedCredentialsToFirestore({
+        email: bootstrapEmail,
+        newPassword: cleanPwd,
+        status: 'ativo',
+        companyName: 'ClickPay Moçambique Lda',
+        plan: 'Platinum'
+      }).catch(() => {});
+
+      setFounderBootstrapRequired(false);
+      setBootstrapModalOpen(false);
+      setBootstrapPassword('');
+      setBootstrapConfirmPassword('');
+      setError(null);
+
+      if (data.otpRequired) {
+        setEmail(bootstrapEmail);
+        setPendingFallbackSession(null);
+        setOtpStep(true);
+        setTentativaId(data.tentativaId || '');
+        setDebugOtpCode(data.debugOtpCode || '');
+        setNotifiedEmail(data.notificadoEmail || bootstrapEmail);
+        setOtpSuccessMessage('Credenciais do Fundador definidas! Confirme o código OTP para entrar.');
+        return;
+      }
+
+      if (data.sucesso) {
+        persistUserSession(data.token, data.usuario, bootstrapEmail);
+        onLoginSuccess();
+      }
+    } catch {
+      setBootstrapError('Erro de ligação ao configurar a palavra-passe inicial.');
+    } finally {
+      setBootstrapLoading(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setError(null);
     setGoogleLoading(true);
     try {
       const gRes = await signInWithGoogleAccount();
+      await completeGoogleAuthWithResult(gRes);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleResetPasswordWithGoogle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError(null);
+    const cleanPwd = resetPassword.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    if (cleanPwd.length < 8) {
+      setResetError('A nova palavra-passe deve ter pelo menos 8 caracteres.');
+      return;
+    }
+    if (cleanPwd !== resetConfirmPassword.replace(/[\u200B-\u200D\uFEFF]/g, '').trim()) {
+      setResetError('As palavras-passe introduzidas não coincidem.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const gRes = await signInWithGoogleAccount();
+      if (gRes.redirected) {
+        return;
+      }
       if (!gRes.ok || (!gRes.googleAccessToken && !gRes.idToken) || !gRes.email) {
-        setError(gRes.error || 'Falha na autenticação com Gmail.');
+        setResetError(gRes.error || 'Confirme a sua identidade com a conta Google para atualizar a senha.');
         return;
       }
 
-      const completeStaticGoogleFallback = async (): Promise<boolean> => {
-        if (isFounderEmail(gRes.email) && gRes.emailVerified) {
-          persistUserSession(
-            `token_google_${Date.now()}`,
-            {
-              email: gRes.email,
-              funcao: 'SUPER_ADMIN_PAYROLL',
-              empresa_id: 'cli_founders',
-              nome_empresa: 'ClickPay Moçambique Lda',
-              subscription_status: 'ativo',
-              subscription_plan: 'Platinum'
-            },
-            gRes.email
-          );
-          onLoginSuccess();
-          return true;
-        }
-        const lookup = await lookupClientByEmailInCloud(gRes.email!);
-        if (lookup.found && lookup.client) {
-          persistUserSession(
-            `token_google_${lookup.client.id}`,
-            {
-              email: lookup.client.email,
-              funcao: 'CLIENTE_EMPRESA',
-              empresa_id: lookup.client.id,
-              nome_empresa: lookup.client.companyName,
-              subscription_status: lookup.client.status,
-              subscription_plan: lookup.client.plan
-            },
-            gRes.email!
-          );
-          onLoginSuccess();
-          return true;
-        }
-        return false;
-      };
+      const res = await fetch('/api/auth/reset-password-via-google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          googleAccessToken: gRes.googleAccessToken,
+          idToken: gRes.idToken,
+          newPassword: cleanPwd
+        })
+      }).catch(() => null);
 
-      try {
-        const res = await fetch('/api/auth/google', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            googleAccessToken: gRes.googleAccessToken,
-            idToken: gRes.idToken
-          })
-        });
-        const isJson = isJsonResponse(res);
-        if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
-          const ok = await completeStaticGoogleFallback();
-          if (!ok) {
-            setError(`O e-mail Gmail (${gRes.email}) não está associado a nenhuma empresa registada no sistema.`);
-          }
-          return;
-        }
-        const data = await res.json();
+      const isJson = isJsonResponse(res);
+      if (res && isJson) {
+        const data = await res.json().catch(() => ({}));
         if (res.ok && data.sucesso) {
+          await updateLocalVaultPassword(
+            gRes.email,
+            cleanPwd,
+            data?.usuario?.nome_empresa,
+            data?.usuario?.empresa_id
+          );
+          await syncUpdatedCredentialsToFirestore({
+            email: gRes.email,
+            newPassword: cleanPwd,
+            status: data?.usuario?.subscription_status,
+            companyName: data?.usuario?.nome_empresa,
+            plan: data?.usuario?.subscription_plan
+          }).catch(() => {});
           persistUserSession(data.token, data.usuario, gRes.email);
+          setResetModalOpen(false);
+          setResetPassword('');
+          setResetConfirmPassword('');
           onLoginSuccess();
           return;
         }
-        setError(data.erro || 'Conta Gmail não autorizada neste portal.');
-      } catch {
-        const ok = await completeStaticGoogleFallback();
-        if (!ok) {
-          setError(`Não foi possível autenticar a conta Gmail (${gRes.email}).`);
-        }
+        setResetError(data.erro || 'Não foi possível atualizar a palavra-passe.');
+        return;
       }
+
+      // Modo estático sem backend disponível
+      if (!isFounderEmail(gRes.email) && gRes.emailVerified) {
+        const client = await provisionOrLookupGoogleClientInCloud({
+          email: gRes.email,
+          displayName: gRes.displayName
+        });
+        await updateLocalVaultPassword(gRes.email, cleanPwd, client.companyName, client.id);
+        persistUserSession(
+          `token_google_${client.id}`,
+          {
+            email: client.email,
+            funcao: 'CLIENTE_EMPRESA',
+            empresa_id: client.id,
+            nome_empresa: client.companyName,
+            subscription_status: client.status,
+            subscription_plan: client.plan
+          },
+          gRes.email
+        );
+        setResetModalOpen(false);
+        onLoginSuccess();
+        return;
+      }
+
+      setResetError('Servidor de atualização indisponível neste endereço. Aceda à versão principal para redefinir a senha do Fundador.');
     } finally {
-      setGoogleLoading(false);
+      setResetLoading(false);
     }
   };
 
@@ -431,6 +705,29 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
               <CheckCircle2 size={16} className="shrink-0" />
               <span>{otpSuccessMessage}</span>
             </motion.div>
+          )}
+
+          {founderBootstrapRequired && !otpStep && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs">
+              <div className="flex items-center gap-2 font-bold text-amber-950">
+                <KeyRound size={15} className="text-amber-700 shrink-0" />
+                <span>Primeiro Acesso do Fundador: Defina a Sua Senha</span>
+              </div>
+              <p className="text-[11px] text-amber-900 leading-relaxed">
+                Por segurança, nenhuma senha padrão está activa. Configure a palavra-passe inicial de{' '}
+                <strong className="font-mono">{bootstrapEmail}</strong> ou entre directamente com a sua Conta Google.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setBootstrapError(null);
+                  setBootstrapModalOpen(true);
+                }}
+                className="w-full py-2 px-3 bg-slate-900 hover:bg-black text-white font-bold rounded-lg text-[11px] transition-colors cursor-pointer"
+              >
+                Configurar Senha Inicial do Fundador
+              </button>
+            </div>
           )}
 
           {/* =========================================================================
@@ -556,10 +853,22 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                  <Lock size={13} className="text-slate-400" />
-                  Palavra-passe / Senha
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Lock size={13} className="text-slate-400" />
+                    Palavra-passe / Senha
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetError(null);
+                      setResetModalOpen(true);
+                    }}
+                    className="text-[11px] font-bold text-blue-900 hover:text-blue-950 hover:underline cursor-pointer"
+                  >
+                    Esqueceu ou quer actualizar a senha?
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -762,6 +1071,220 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         defaultEmail={email}
         defaultAssunto="Recuperação de Acesso / Suporte Técnico"
       />
+
+      {resetModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-blue-900 text-white">
+                  <KeyRound size={18} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-950">
+                    Actualizar Palavra-Passe com Segurança
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Defina a sua nova palavra-passe e confirme com a sua conta Gmail verificada.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {resetError && (
+              <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />
+                <span>{resetError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleResetPasswordWithGoogle} className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">Nova Palavra-passe (mín. 8 caracteres)</label>
+                <div className="relative">
+                  <input
+                    type={showResetPwd ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="Ex: NovaSenha@2026!"
+                    className="w-full px-3.5 py-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPwd((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showResetPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">Confirmar Nova Palavra-passe</label>
+                <input
+                  type={showResetPwd ? 'text' : 'password'}
+                  required
+                  minLength={8}
+                  value={resetConfirmPassword}
+                  onChange={(e) => setResetConfirmPassword(e.target.value)}
+                  placeholder="Repita a nova palavra-passe"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetLoading}
+                  className="px-4 py-2 rounded-xl bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white text-xs font-bold flex items-center gap-2 cursor-pointer"
+                >
+                  {resetLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>A confirmar com Google...</span>
+                    </>
+                  ) : (
+                    <span>Confirmar com Conta Google &amp; Actualizar Senha</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {bootstrapModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-slate-900 text-white">
+                  <ShieldCheck size={18} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-950">
+                    Activar Credenciais do Fundador
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Defina uma palavra-passe forte e exclusiva para {bootstrapEmail}.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBootstrapModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {bootstrapError && (
+              <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />
+                <span>{bootstrapError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleClaimFounderBootstrap} className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">E-mail do Fundador</label>
+                <input
+                  type="email"
+                  value={bootstrapEmail}
+                  readOnly
+                  className="w-full px-3.5 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono font-semibold text-slate-700"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">Nova Palavra-passe (mín. 8 caracteres)</label>
+                <div className="relative">
+                  <input
+                    type={showBootstrapPwd ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    value={bootstrapPassword}
+                    onChange={(e) => setBootstrapPassword(e.target.value)}
+                    placeholder="Defina uma senha forte"
+                    className="w-full px-3.5 py-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowBootstrapPwd((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showBootstrapPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">Confirmar Palavra-passe</label>
+                <input
+                  type={showBootstrapPwd ? 'text' : 'password'}
+                  required
+                  minLength={8}
+                  value={bootstrapConfirmPassword}
+                  onChange={(e) => setBootstrapConfirmPassword(e.target.value)}
+                  placeholder="Repita a palavra-passe"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setBootstrapModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={bootstrapLoading}
+                  className="px-4 py-2 rounded-xl bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white text-xs font-bold flex items-center gap-2 cursor-pointer"
+                >
+                  {bootstrapLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>A activar...</span>
+                    </>
+                  ) : (
+                    <span>Guardar &amp; Activar Acesso</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
 
       {/* Regulatory Footer */}
       <div className="mt-8 text-center text-[10px] text-slate-400 max-w-sm px-4">
