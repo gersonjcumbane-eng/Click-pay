@@ -12,6 +12,16 @@ export const FOUNDER_EMAILS = [
   'click@payrolltech.co.mz'
 ] as const;
 
+let memoryFirebaseIdToken = '';
+
+export function setMemoryFirebaseToken(token?: string | null): void {
+  memoryFirebaseIdToken = typeof token === 'string' ? token.trim() : '';
+}
+
+export function getMemoryFirebaseToken(): string {
+  return memoryFirebaseIdToken;
+}
+
 export function getAuthToken(): string {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem('paytek_token') || '';
@@ -26,7 +36,8 @@ export function getAuthHeaders(extraHeaders?: Record<string, string>): Record<st
   const token = getAuthToken();
   return {
     ...(extraHeaders || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(memoryFirebaseIdToken ? { 'X-Firebase-Id-Token': memoryFirebaseIdToken } : {})
   };
 }
 

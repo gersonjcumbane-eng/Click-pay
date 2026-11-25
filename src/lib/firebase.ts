@@ -6,16 +6,32 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   getRedirectResult,
+  onIdTokenChanged,
   signOut
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { hashPassword, isHashedPassword, verifyPassword } from './security';
 import { getPlanFeeMzn } from './pricing';
+import { setMemoryFirebaseToken } from './authSession';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
+if (typeof window !== 'undefined') {
+  onIdTokenChanged(auth, async (user) => {
+    if (!user) {
+      setMemoryFirebaseToken('');
+      return;
+    }
+    try {
+      const idTok = await user.getIdToken();
+      setMemoryFirebaseToken(idTok);
+    } catch {
+      // ignore token refresh failure
+    }
+  });
+}
 export { doc, getDocFromServer, setDoc, getDocs, collection, deleteDoc, onSnapshot, query, where };
 
 export enum OperationType {
@@ -762,6 +778,7 @@ export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
     const idToken = await user.getIdToken();
+    setMemoryFirebaseToken(idToken);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     return {
       ok: true,
@@ -822,6 +839,7 @@ export async function consumeGoogleRedirectResult(): Promise<GoogleAuthResult | 
     const result = await getRedirectResult(auth);
     if (!result?.user) return null;
     const idToken = await result.user.getIdToken();
+    setMemoryFirebaseToken(idToken);
     return {
       ok: true,
       idToken,
@@ -835,6 +853,7 @@ export async function consumeGoogleRedirectResult(): Promise<GoogleAuthResult | 
 }
 
 export async function signOutGoogleSession(): Promise<void> {
+  setMemoryFirebaseToken('');
   try {
     await signOut(auth);
   } catch {

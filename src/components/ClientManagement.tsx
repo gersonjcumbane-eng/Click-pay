@@ -406,6 +406,59 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
       console.warn('Listener Firebase credential_requests:', e);
     }
 
+    let unsubProofs: (() => void) | undefined;
+    try {
+      unsubProofs = onSnapshot(collection(db, 'erp_credential_requests'), (snap) => {
+        const fsProofs: PaymentProofItem[] = [];
+        snap.forEach((d) => {
+          const item: any = d.data() || {};
+          if (item.metodoTransferencia || item.referenciaTransferencia || item.status === 'PENDENTE_PAGAMENTO') {
+            fsProofs.push({
+              id: String(item.id || d.id),
+              empresaId: `cli_pending_${item.id || d.id}`,
+              empresa: String(item.nomeEmpresa || 'Empresa ClickPay'),
+              responsavel: String(item.nomeResponsavel || item.nomeEmpresa || 'Responsável'),
+              email: String(item.email || ''),
+              telefone: String(item.telefone || ''),
+              nuit: String(item.nuit || ''),
+              planoEscolhido: String(item.planoEscolhido || 'Starter'),
+              planInternalCode: String(item.planoEscolhido || 'Bronze'),
+              billingCycle: item.cicloFaturacao === 'anual' ? 'anual' : 'mensal',
+              valorEsperado: Number(item.precoMensal) || 0,
+              feePorSlip: getPlanExtraSlipFeeMzn(item.planoEscolhido || 'Starter'),
+              metodoTransferencia: String(item.metodoTransferencia || 'Transferência'),
+              referenciaTransferencia: String(item.referenciaTransferencia || '—'),
+              valorTransferido: Number(item.valorTransferido) || Number(item.precoMensal) || 0,
+              dataTransferencia: String(item.dataTransferencia || item.dataSolicitacao || ''),
+              comprovativoNome: String(item.comprovativoNome || 'comprovativo'),
+              comprovativoMimeType: 'application/octet-stream',
+              comprovativoTamanhoBytes: 0,
+              hasProofFile: false,
+              status: (item.status as any) || 'PENDENTE_PAGAMENTO',
+              activationCodePrefix: item.activationCodePrefix || '',
+              motivoRejeicao: item.motivoRejeicao || '',
+              criadoEm: String(item.dataSolicitacao || ''),
+              aprovadoEm: item.aprovadoEm || ''
+            });
+          }
+        });
+        if (fsProofs.length > 0) {
+          setPaymentProofs((prev) => {
+            const combined = [...prev];
+            fsProofs.forEach((fp) => {
+              const idx = combined.findIndex((p) => p.id === fp.id);
+              if (idx === -1) combined.unshift(fp);
+            });
+            return combined;
+          });
+        }
+      }, (error) => {
+        console.warn('Listener Firebase erp_credential_requests:', error);
+      });
+    } catch (e) {
+      console.warn('Listener Firebase erp_credential_requests:', e);
+    }
+
     let unsubClients: (() => void) | undefined;
     try {
       unsubClients = onSnapshot(collection(db, 'saas_clients'), (snap) => {
@@ -468,6 +521,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
 
     return () => {
       if (unsubReq) unsubReq();
+      if (unsubProofs) unsubProofs();
       if (unsubClients) unsubClients();
     };
   }, [isSuperAdmin]);
@@ -813,10 +867,51 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({})
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.credentials) {
-        throw new Error(data?.erro || 'Erro ao confirmar pagamento.');
+      }).catch(() => null);
+
+      const isJson = !!res && (res.headers.get('content-type') || '').includes('application/json');
+      const isStaticHost = !res || !isJson || res.status === 404 || res.status === 405;
+
+      let data: any = null;
+      if (!isStaticHost && res) {
+        data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.credentials) {
+          throw new Error(data?.erro || 'Erro ao confirmar pagamento.');
+        }
+      } else {
+        const randBytes = new Uint8Array(6);
+        window.crypto.getRandomValues(randBytes);
+        const suffix = Array.from(randBytes).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase().slice(0, 8);
+        const planSlug = String(proof.planoEscolhido || 'STD').replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3) || 'STD';
+        const activationCode = `CP-${planSlug}-${suffix}`;
+        const issuedPassword = `Cp@${suffix.slice(0, 6)}!26`;
+        const billingDays = proof.billingCycle === 'anual' ? 365 : 30;
+        const nextBillingDate = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const plainBody = [
+          `Olá ${proof.responsavel} (${proof.empresa}),`,
+          ``,
+          `Confirmamos a receção da sua transferência no ClickPay ERP!`,
+          `Pacote Ativado: ${proof.planoEscolhido} (${proof.billingCycle === 'anual' ? 'Anual' : 'Mensal'})`,
+          `Código de Ativação: ${activationCode}`,
+          `E-mail de Acesso: ${proof.email}`,
+          `Palavra-passe: ${issuedPassword}`,
+          `Próxima Renovação: ${nextBillingDate}`
+        ].join('\n');
+        const phoneDigits = String(proof.telefone || '').replace(/[^0-9]/g, '');
+        data = {
+          request: { activationCodePrefix: `${activationCode.slice(0, 9)}••••` },
+          credentials: {
+            email: proof.email,
+            password: issuedPassword,
+            activationCode,
+            plano: proof.planoEscolhido,
+            billingCycle: proof.billingCycle,
+            feeBase: proof.valorEsperado,
+            nextBillingDate
+          },
+          mailtoUrl: `mailto:${proof.email}?subject=${encodeURIComponent(`Pagamento Confirmado ClickPay (${proof.planoEscolhido})`)}&body=${encodeURIComponent(plainBody)}`,
+          whatsappUrl: phoneDigits ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(plainBody)}` : ''
+        };
       }
 
       await syncPaymentApprovalToFirestore({
@@ -831,6 +926,14 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
         activationCodePrefix: data.request?.activationCodePrefix,
         approved: true
       }).catch(() => {});
+
+      setPaymentProofs((prev) =>
+        prev.map((p) =>
+          p.id === proof.id
+            ? { ...p, status: 'CREDENCIAIS_ENVIADAS', activationCodePrefix: data.request?.activationCodePrefix || p.activationCodePrefix }
+            : p
+        )
+      );
 
       setIssuedCredModal({
         empresa: proof.empresa,
@@ -847,7 +950,9 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
       });
 
       showSuccess(`Pagamento confirmado! Código e credenciais emitidos para ${proof.empresa}.`);
-      await Promise.all([fetchPaymentProofs(), fetchClients(), fetchFbUsers()]);
+      if (!isStaticHost) {
+        await Promise.all([fetchPaymentProofs(), fetchClients(), fetchFbUsers()]);
+      }
     } catch (err: any) {
       showError(err?.message || 'Erro ao confirmar recepção do pagamento.');
     } finally {
@@ -863,10 +968,16 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ motivo })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.erro || 'Erro ao recusar comprovativo.');
+      }).catch(() => null);
+
+      const isJson = !!res && (res.headers.get('content-type') || '').includes('application/json');
+      const isStaticHost = !res || !isJson || res.status === 404 || res.status === 405;
+
+      if (!isStaticHost && res) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.erro || 'Erro ao recusar comprovativo.');
+        }
       }
 
       await syncPaymentApprovalToFirestore({
@@ -877,10 +988,16 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
         motivoRejeicao: motivo
       }).catch(() => {});
 
+      setPaymentProofs((prev) =>
+        prev.map((p) => (p.id === proof.id ? { ...p, status: 'REJEITADO', motivoRejeicao: motivo } : p))
+      );
+
       setActiveRejectId(null);
       setRejectReasonText('');
       showSuccess(`Comprovativo de ${proof.empresa} marcado como recusado.`);
-      await Promise.all([fetchPaymentProofs(), fetchClients()]);
+      if (!isStaticHost) {
+        await Promise.all([fetchPaymentProofs(), fetchClients()]);
+      }
     } catch (err: any) {
       showError(err?.message || 'Erro ao recusar comprovativo.');
     } finally {

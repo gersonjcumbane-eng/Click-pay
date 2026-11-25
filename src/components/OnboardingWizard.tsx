@@ -334,16 +334,39 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
+      }).catch(() => null);
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.sucesso) {
-        setFormError(data?.erro || 'Não foi possível validar e enviar o comprovativo de transferência.');
-        setIsSubmitting(false);
-        return;
+      const isJson = !!res && (res.headers.get('content-type') || '').includes('application/json');
+      const isStaticHost = !res || !isJson || res.status === 404 || res.status === 405;
+
+      let data: any = {};
+      if (!isStaticHost && res) {
+        data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.sucesso) {
+          setFormError(data?.erro || 'Não foi possível validar e enviar o comprovativo de transferência.');
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       const reqId = data.requestId || `REQ-${Date.now()}`;
+      const plainSummary = [
+        `Novo pedido de activação ClickPay ERP`,
+        `Pedido: #${reqId}`,
+        `Empresa: ${cleanEmpresa} (NUIT: ${cleanNuit})`,
+        `E-mail: ${cleanEmail}`,
+        `Telefone: ${cleanTelefone}`,
+        `Pacote: ${selectedPlanSpec.name} (${billingCycle === 'anual' ? 'Anual' : 'Mensal'})`,
+        `Valor esperado: ${expectedFee.toLocaleString('pt-MZ')} MT`,
+        `Método: ${transferMethod.trim()} | Ref: ${transferReference.trim()}`,
+        `Valor transferido: ${numericTransferredAmount.toLocaleString('pt-MZ')} MT em ${transferDate.trim()}`,
+        `Comprovativo: ${transferProofName}`
+      ].join('\n');
+
+      const fallbackMailto = `mailto:gersonjcumbane@gmail.com?subject=${encodeURIComponent(
+        `Comprovativo ClickPay #${reqId} - ${cleanEmpresa} (${selectedPlanSpec.name})`
+      )}&body=${encodeURIComponent(plainSummary)}`;
+      const fallbackWhatsapp = `https://wa.me/258842014173?text=${encodeURIComponent(plainSummary)}`;
 
       // Sincronizar pedido pendente com Firestore (status pendente/PENDENTE_PAGAMENTO)
       await syncRegisteredAccountToFirestore({
@@ -386,13 +409,13 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         dataTransferencia: transferDate.trim(),
         comprovativoNome: transferProofName,
         status: data.status || 'PENDENTE_PAGAMENTO',
-        mailtoUrl: data.mailtoUrl,
-        whatsappUrl: data.whatsappUrl,
-        emailGateway: data.emailDelivery?.gateway
+        mailtoUrl: data.mailtoUrl || fallbackMailto,
+        whatsappUrl: data.whatsappUrl || fallbackWhatsapp,
+        emailGateway: data.emailDelivery?.gateway || (isStaticHost ? 'Firestore + E-mail/WhatsApp Directo' : undefined)
       });
       setActivationEmailInput(cleanEmail);
       setStage('PENDING_PAYMENT');
-      showToast('Comprovativo enviado automaticamente para gersonjcumbane@gmail.com!');
+      showToast('Comprovativo registado para validação de gersonjcumbane@gmail.com!');
     } catch (err) {
       console.error(err);
       setFormError('Erro de comunicação ao submeter o comprovativo. Tente novamente.');

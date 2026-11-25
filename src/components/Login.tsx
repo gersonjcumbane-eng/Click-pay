@@ -144,15 +144,16 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       return null;
     }
     if (fbAuth.ok && fbAuth.client) {
+      const founderMatch = isFounderEmail(cleanEmail);
       return {
         token: `token_cloud_${fbAuth.client.id}`,
         usuario: {
           email: fbAuth.client.email,
-          funcao: 'CLIENTE_EMPRESA',
-          empresa_id: fbAuth.client.id,
-          nome_empresa: fbAuth.client.companyName,
-          subscription_status: fbAuth.client.status === 'suspenso' ? 'suspenso' : 'ativo',
-          subscription_plan: fbAuth.client.plan,
+          funcao: founderMatch ? 'SUPER_ADMIN_PAYROLL' : 'CLIENTE_EMPRESA',
+          empresa_id: founderMatch ? 'cli_founders' : fbAuth.client.id,
+          nome_empresa: founderMatch ? 'ClickPay Moçambique Lda' : fbAuth.client.companyName,
+          subscription_status: founderMatch ? 'ativo' : fbAuth.client.status === 'suspenso' ? 'suspenso' : 'ativo',
+          subscription_plan: founderMatch ? 'Platinum' : fbAuth.client.plan,
           next_billing_date: defaultExp
         }
       };
@@ -201,15 +202,25 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       const isJson = isJsonResponse(response);
       // Em deploy estático, /api/* pode responder 200 HTML ou 404/405/500
       if (!isJson || response.status === 404 || response.status === 405 || response.status >= 500) {
+        const errBody = isJson ? await response.json().catch(() => null) : null;
         const ok = await triggerFallbackAuth();
         if (!ok) {
+          if (isFounderEmail(cleanEmail)) {
+            const stRes = await fetch('/api/auth/bootstrap-status').catch(() => null);
+            const stData = stRes && stRes.ok && isJsonResponse(stRes) ? await stRes.json().catch(() => null) : null;
+            if (stData && stData.founderConfigured === false) {
+              setFounderBootstrapRequired(true);
+              setBootstrapEmail(cleanEmail);
+            }
+          }
           if (response.status >= 500) {
             setError(
-              `O servidor de autenticação respondeu com erro interno (HTTP ${response.status}). Utilize "ENTRAR COM GMAIL / CONTA GOOGLE" ou contacte o suporte.`
+              errBody?.erro ||
+                `O servidor de autenticação respondeu com erro interno (HTTP ${response.status}). Utilize "ENTRAR COM GMAIL / CONTA GOOGLE" ou contacte o suporte.`
             );
           } else {
             setError(
-              `O serviço de autenticação backend não está disponível neste endereço (HTTP ${response.status}). Utilize "ENTRAR COM GMAIL / CONTA GOOGLE" ou aceda à versão publicada.`
+              'Ambiente estático (GitHub Pages / Cloud) ativo: clique em "ENTRAR COM GMAIL / CONTA GOOGLE" para aceder ao sistema.'
             );
           }
         }

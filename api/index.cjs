@@ -7,9 +7,10 @@ let cachedAppPromise = null;
 
 function resolveServerCreateApp() {
   const candidates = [
+    path.resolve(__dirname, '_server.cjs'),
+    path.join(process.cwd(), 'api', '_server.cjs'),
     path.join(process.cwd(), 'dist', 'server.cjs'),
-    path.resolve(__dirname, '..', 'dist', 'server.cjs'),
-    path.resolve(__dirname, 'server.cjs')
+    path.resolve(__dirname, '..', 'dist', 'server.cjs')
   ];
 
   for (const candidate of candidates) {
@@ -18,8 +19,8 @@ function resolveServerCreateApp() {
     }
   }
 
-  // Static fallback reference so Vercel @vercel/nft always traces dist/server.cjs
-  return require('../dist/server.cjs').createApp;
+  // Static fallback reference so Vercel @vercel/nft always traces api/_server.cjs
+  return require('./_server.cjs').createApp;
 }
 
 function getApp() {

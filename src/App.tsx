@@ -33,12 +33,15 @@ import {
 import { Employee, CompanyData, ConfigFiscal, PayrollSummary, PaymentLog } from './types';
 import {
   getAuthHeaders,
+  getAuthToken,
+  setMemoryFirebaseToken,
   isFounderUser,
   isFounderEmail,
   PAYMENTS_MODULE_LOCKED,
   PAYMENTS_LOCKED_MESSAGE
 } from './lib/authSession';
 import {
+  auth,
   consumeGoogleRedirectResult,
   provisionOrLookupGoogleClientInCloud,
   signOutGoogleSession
@@ -245,10 +248,16 @@ export default function App() {
       return;
     }
     try {
+      if (auth.currentUser) {
+        const freshTok = await auth.currentUser.getIdToken().catch(() => '');
+        if (freshTok) setMemoryFirebaseToken(freshTok);
+      }
       const res = await fetch('/api/clients', {
         headers: getAuthHeaders()
       });
-      if (res.status === 401) {
+      const currentTok = getAuthToken();
+      const isStaticFallbackTok = currentTok.startsWith('token_google_') || currentTok.startsWith('token_cloud_');
+      if (res.status === 401 && !isStaticFallbackTok) {
         handleSessionExpired();
         return;
       }
@@ -465,6 +474,10 @@ export default function App() {
   const loadData = async () => {
     try {
       const cid = resolveActiveTenantId();
+      if (auth.currentUser) {
+        const freshTok = await auth.currentUser.getIdToken().catch(() => '');
+        if (freshTok) setMemoryFirebaseToken(freshTok);
+      }
       const authHeaders = getAuthHeaders();
       const [empRes, configRes, summaryRes, logsRes] = await Promise.all([
         fetch('/api/employees', { headers: authHeaders }).catch(() => null),
@@ -473,7 +486,9 @@ export default function App() {
         fetch('/api/logs', { headers: authHeaders }).catch(() => null)
       ]);
 
-      if (empRes?.status === 401 || configRes?.status === 401 || summaryRes?.status === 401 || logsRes?.status === 401) {
+      const currentTok = getAuthToken();
+      const isStaticFallbackTok = currentTok.startsWith('token_google_') || currentTok.startsWith('token_cloud_');
+      if (!isStaticFallbackTok && (empRes?.status === 401 || configRes?.status === 401 || summaryRes?.status === 401 || logsRes?.status === 401)) {
         handleSessionExpired();
         return;
       }

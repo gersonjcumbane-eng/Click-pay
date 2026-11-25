@@ -1971,15 +1971,20 @@ export function selecionarClienteEmpresa(id: string): boolean {
     baseDadosClientes[activeIndex].logo = empresaAtual.logo || '';
     
     // Back up arrays
-    baseDadosClientes[activeIndex].employees = [...employees];
-    baseDadosClientes[activeIndex].contratos = [...baseDadosContratosGerais];
-    baseDadosClientes[activeIndex].paymentLogs = [...paymentLogs];
-    baseDadosClientes[activeIndex].vales = [...baseDadosVales];
+    baseDadosClientes[activeIndex].employees = Array.isArray(employees) ? [...employees] : [];
+    baseDadosClientes[activeIndex].contratos = Array.isArray(baseDadosContratosGerais) ? [...baseDadosContratosGerais] : [];
+    baseDadosClientes[activeIndex].paymentLogs = Array.isArray(paymentLogs) ? [...paymentLogs] : [];
+    baseDadosClientes[activeIndex].vales = Array.isArray(baseDadosVales) ? [...baseDadosVales] : [];
   }
 
   // Find the target company to activate
   const target = baseDadosClientes.find(c => c.id === id);
   if (!target) return false;
+
+  target.employees = Array.isArray(target.employees) ? target.employees : [];
+  target.contratos = Array.isArray(target.contratos) ? target.contratos : [];
+  target.paymentLogs = Array.isArray(target.paymentLogs) ? target.paymentLogs : [];
+  target.vales = Array.isArray(target.vales) ? target.vales : [];
 
   // Apply target company details to active references
   empresaAtual.nome = target.nome;

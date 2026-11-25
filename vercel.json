@@ -5,7 +5,7 @@
   "functions": {
     "api/index.cjs": {
       "maxDuration": 30,
-      "includeFiles": "firebase-applet-config.json,public/**,dist/server.cjs,node_modules/pdfkit/js/data/**"
+      "includeFiles": "{firebase-applet-config.json,public/**,api/_server.cjs,node_modules/pdfkit/js/data/**}"
     }
   },
   "rewrites": [
