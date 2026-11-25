@@ -621,6 +621,7 @@ export interface GoogleAuthResult {
 
 export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
   // Usar exclusivamente Firebase Authentication signInWithPopup (conforme Política OAuth 2.0 da Google)
+  auth.languageCode = 'pt';
   const provider = new GoogleAuthProvider();
   provider.addScope('email');
   provider.addScope('profile');
@@ -640,7 +641,8 @@ export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
       displayName: user.displayName || ''
     };
   } catch (err: any) {
-    const code = err?.code || '';
+    const code = String(err?.code || '');
+    console.warn('Google Auth popup notice:', code || err?.message || err);
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
       return { ok: false, cancelled: true, error: 'Janela de autenticação Google fechada antes de concluir.' };
     }
@@ -649,6 +651,13 @@ export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
         ok: false,
         error:
           'O navegador bloqueou a janela de início de sessão Google. Permita popups para este site, abra a aplicação num novo separador ou entre com e-mail e palavra-passe.'
+      };
+    }
+    if (code === 'auth/web-storage-unsupported') {
+      return {
+        ok: false,
+        error:
+          'O navegador bloqueou cookies/armazenamento de terceiros para a janela Google. Abra a aplicação num separador independente ou entre com e-mail e palavra-passe.'
       };
     }
     if (code === 'auth/unauthorized-domain') {
@@ -672,7 +681,7 @@ export async function signInWithGoogleAccount(): Promise<GoogleAuthResult> {
     }
     return {
       ok: false,
-      error: 'Não foi possível concluir a autenticação com a conta Google. Utilize e-mail e palavra-passe.'
+      error: `Não foi possível concluir a autenticação com a conta Google${code ? ` (${code})` : ''}. Utilize e-mail e palavra-passe.`
     };
   }
 }
