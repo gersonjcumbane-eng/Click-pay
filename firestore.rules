@@ -49,7 +49,7 @@ service cloud.firestore {
         && data.role in ['SUPER_ADMIN_PAYROLL', 'CLIENTE_EMPRESA']
         && (!('companyId' in data) || (data.companyId is string && data.companyId.size() <= 128))
         && data.createdAt is string && data.createdAt.size() <= 64
-        && data.status in ['ativo', 'suspenso'];
+        && data.status in ['ativo', 'suspenso', 'pendente'];
     }
 
     // ClientCompany validator (/erp_clients)
@@ -124,7 +124,13 @@ service cloud.firestore {
     // CredentialRequest validator (/erp_credential_requests)
     function isValidCredentialRequest(data) {
       return data.keys().hasAll(['id', 'nomeEmpresa', 'nomeResponsavel', 'email', 'telefone', 'planoEscolhido', 'precoMensal', 'status', 'dataSolicitacao'])
-        && data.keys().hasOnly(['id', 'nomeEmpresa', 'nomeResponsavel', 'email', 'telefone', 'nuit', 'planoEscolhido', 'precoMensal', 'status', 'dataSolicitacao'])
+        && data.keys().hasOnly([
+          'id', 'nomeEmpresa', 'nomeResponsavel', 'email', 'telefone', 'nuit',
+          'planoEscolhido', 'cicloFaturacao', 'precoMensal',
+          'metodoTransferencia', 'referenciaTransferencia', 'valorTransferido',
+          'dataTransferencia', 'comprovativoNome', 'activationCodePrefix',
+          'motivoRejeicao', 'aprovadoEm', 'status', 'dataSolicitacao'
+        ])
         && data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && data.nomeEmpresa is string && data.nomeEmpresa.size() <= 256
         && data.nomeResponsavel is string && data.nomeResponsavel.size() <= 256
@@ -132,15 +138,29 @@ service cloud.firestore {
         && data.telefone is string && data.telefone.size() <= 64
         && (!('nuit' in data) || (data.nuit is string && data.nuit.size() <= 32))
         && data.planoEscolhido is string && data.planoEscolhido.size() <= 64
+        && (!('cicloFaturacao' in data) || data.cicloFaturacao in ['mensal', 'anual'])
         && data.precoMensal is number && data.precoMensal >= 0 && data.precoMensal <= 1000000
-        && data.status in ['PENDENTE', 'APROVADO', 'CREDENCIAIS_ENVIADAS']
+        && (!('metodoTransferencia' in data) || (data.metodoTransferencia is string && data.metodoTransferencia.size() <= 64))
+        && (!('referenciaTransferencia' in data) || (data.referenciaTransferencia is string && data.referenciaTransferencia.size() <= 128))
+        && (!('valorTransferido' in data) || (data.valorTransferido is number && data.valorTransferido >= 0 && data.valorTransferido <= 10000000))
+        && (!('dataTransferencia' in data) || (data.dataTransferencia is string && data.dataTransferencia.size() <= 64))
+        && (!('comprovativoNome' in data) || (data.comprovativoNome is string && data.comprovativoNome.size() <= 256))
+        && (!('activationCodePrefix' in data) || (data.activationCodePrefix is string && data.activationCodePrefix.size() <= 32))
+        && (!('motivoRejeicao' in data) || (data.motivoRejeicao is string && data.motivoRejeicao.size() <= 512))
+        && (!('aprovadoEm' in data) || (data.aprovadoEm is string && data.aprovadoEm.size() <= 64))
+        && data.status in ['PENDENTE', 'PENDENTE_PAGAMENTO', 'APROVADO', 'CREDENCIAIS_ENVIADAS', 'REJEITADO']
         && data.dataSolicitacao is string && data.dataSolicitacao.size() <= 64;
     }
 
     // LandingCredentialRequest validator (/credential_requests)
     function isValidLandingCredentialRequest(data) {
       return data.keys().hasAll(['id', 'empresa', 'email', 'plano', 'status', 'createdAt'])
-        && data.keys().hasOnly(['id', 'empresa', 'responsavel', 'nuit', 'email', 'telefone', 'plano', 'status', 'createdAt'])
+        && data.keys().hasOnly([
+          'id', 'empresa', 'responsavel', 'nuit', 'email', 'telefone', 'plano',
+          'cicloFaturacao', 'metodoTransferencia', 'referenciaTransferencia',
+          'valorTransferido', 'dataTransferencia', 'comprovativoNome',
+          'activationCodePrefix', 'motivoRejeicao', 'status', 'createdAt'
+        ])
         && data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && data.empresa is string && data.empresa.size() <= 256
         && (!('responsavel' in data) || (data.responsavel is string && data.responsavel.size() <= 256))
@@ -148,7 +168,15 @@ service cloud.firestore {
         && data.email is string && data.email.size() <= 256
         && (!('telefone' in data) || (data.telefone is string && data.telefone.size() <= 64))
         && data.plano is string && data.plano.size() <= 64
-        && data.status in ['PENDENTE', 'APROVADO', 'REGISTADO_ONLINE', 'CREDENCIAIS_ENVIADAS']
+        && (!('cicloFaturacao' in data) || data.cicloFaturacao in ['mensal', 'anual'])
+        && (!('metodoTransferencia' in data) || (data.metodoTransferencia is string && data.metodoTransferencia.size() <= 64))
+        && (!('referenciaTransferencia' in data) || (data.referenciaTransferencia is string && data.referenciaTransferencia.size() <= 128))
+        && (!('valorTransferido' in data) || (data.valorTransferido is number && data.valorTransferido >= 0 && data.valorTransferido <= 10000000))
+        && (!('dataTransferencia' in data) || (data.dataTransferencia is string && data.dataTransferencia.size() <= 64))
+        && (!('comprovativoNome' in data) || (data.comprovativoNome is string && data.comprovativoNome.size() <= 256))
+        && (!('activationCodePrefix' in data) || (data.activationCodePrefix is string && data.activationCodePrefix.size() <= 32))
+        && (!('motivoRejeicao' in data) || (data.motivoRejeicao is string && data.motivoRejeicao.size() <= 512))
+        && data.status in ['PENDENTE', 'PENDENTE_PAGAMENTO', 'APROVADO', 'REGISTADO_ONLINE', 'CREDENCIAIS_ENVIADAS', 'REJEITADO']
         && data.createdAt is string && data.createdAt.size() <= 64;
     }
 
@@ -212,7 +240,8 @@ service cloud.firestore {
         && userId == request.auth.uid
         && isValidUser(incoming())
         && incoming().uid == request.auth.uid
-        && incoming().role == 'CLIENTE_EMPRESA';
+        && incoming().role == 'CLIENTE_EMPRESA'
+        && incoming().status == 'pendente';
 
       allow update: if isSignedIn()
         && isValidId(userId)
@@ -222,7 +251,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && (
           isSuperAdmin() ||
-          (incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['status']))
+          (incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['companyId']))
         );
 
       allow delete: if isSuperAdmin();
@@ -232,8 +261,12 @@ service cloud.firestore {
     match /erp_clients/{clientId} {
       allow get: if isValidId(clientId) && (isSuperAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
       allow list: if isVerifiedFounder() || (isSignedIn() && resource.data.email == request.auth.token.email);
-      allow create: if isValidId(clientId) && isValidClientCompany(incoming()) && incoming().id == clientId;
-      allow update: if isValidId(clientId) && isValidClientCompany(incoming()) && (isSuperAdmin() || (isSignedIn() && existing().email == request.auth.token.email)) && incoming().id == existing().id;
+      allow create: if isValidId(clientId) && isValidClientCompany(incoming()) && incoming().id == clientId
+        && (isSuperAdmin() || incoming().subscription_status == 'pendente');
+      allow update: if isValidId(clientId) && isValidClientCompany(incoming()) && incoming().id == existing().id && (
+        isSuperAdmin() ||
+        (isSignedIn() && existing().email == request.auth.token.email && incoming().subscription_status == existing().subscription_status && incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'nuit', 'telefone', 'passwordHash', 'updatedAt']))
+      );
       allow delete: if isSuperAdmin();
     }
 
@@ -241,8 +274,12 @@ service cloud.firestore {
     match /saas_clients/{clientId} {
       allow get: if isValidId(clientId) && (isSuperAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
       allow list: if isVerifiedFounder() || (isSignedIn() && resource.data.email == request.auth.token.email);
-      allow create: if isValidId(clientId) && isValidSaasClient(incoming());
-      allow update: if isValidId(clientId) && isValidSaasClient(incoming()) && (isSuperAdmin() || (isSignedIn() && existing().email == request.auth.token.email));
+      allow create: if isValidId(clientId) && isValidSaasClient(incoming())
+        && (isSuperAdmin() || !('status' in incoming()) || incoming().status in ['Pendente', 'pendente']);
+      allow update: if isValidId(clientId) && isValidSaasClient(incoming()) && (
+        isSuperAdmin() ||
+        (isSignedIn() && existing().email == request.auth.token.email && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'tradeName', 'nuit', 'phone', 'address', 'adminName', 'adminPassword', 'updatedAt']))
+      );
       allow delete: if isSuperAdmin();
     }
 
@@ -266,11 +303,8 @@ service cloud.firestore {
     match /erp_credential_requests/{requestId} {
       allow get: if isValidId(requestId) && (isSuperAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
       allow list: if isVerifiedFounder() || (isSignedIn() && resource.data.email == request.auth.token.email);
-      allow create: if isValidId(requestId) && isValidCredentialRequest(incoming()) && incoming().status in ['PENDENTE', 'APROVADO'];
-      allow update: if isValidId(requestId) && isValidCredentialRequest(incoming()) && (
-        isSuperAdmin() ||
-        (isSignedIn() && existing().status == 'PENDENTE' && existing().email == request.auth.token.email && incoming().diff(existing()).affectedKeys().hasOnly(['status']))
-      );
+      allow create: if isValidId(requestId) && isValidCredentialRequest(incoming()) && incoming().status in ['PENDENTE', 'PENDENTE_PAGAMENTO'];
+      allow update: if isValidId(requestId) && isValidCredentialRequest(incoming()) && isSuperAdmin();
       allow delete: if isSuperAdmin();
     }
 
@@ -278,11 +312,8 @@ service cloud.firestore {
     match /credential_requests/{requestId} {
       allow get: if isValidId(requestId) && (isSuperAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
       allow list: if isVerifiedFounder() || (isSignedIn() && resource.data.email == request.auth.token.email);
-      allow create: if isValidId(requestId) && isValidLandingCredentialRequest(incoming()) && incoming().status in ['PENDENTE', 'REGISTADO_ONLINE'];
-      allow update: if isValidId(requestId) && isValidLandingCredentialRequest(incoming()) && (
-        isSuperAdmin() ||
-        (isSignedIn() && existing().status == 'PENDENTE' && existing().email == request.auth.token.email && incoming().diff(existing()).affectedKeys().hasOnly(['status']))
-      );
+      allow create: if isValidId(requestId) && isValidLandingCredentialRequest(incoming()) && incoming().status in ['PENDENTE', 'PENDENTE_PAGAMENTO'];
+      allow update: if isValidId(requestId) && isValidLandingCredentialRequest(incoming()) && isSuperAdmin();
       allow delete: if isSuperAdmin();
     }
 
@@ -290,8 +321,12 @@ service cloud.firestore {
     match /companies/{companyId} {
       allow get: if isValidId(companyId) && (isSuperAdmin() || (isSignedIn() && resource.data.email == request.auth.token.email));
       allow list: if isVerifiedFounder() || (isSignedIn() && resource.data.email == request.auth.token.email);
-      allow create: if isValidId(companyId) && isValidCompanyProfile(incoming());
-      allow update: if isValidId(companyId) && isValidCompanyProfile(incoming()) && (isSuperAdmin() || (isSignedIn() && existing().email == request.auth.token.email));
+      allow create: if isValidId(companyId) && isValidCompanyProfile(incoming())
+        && (isSuperAdmin() || !('status' in incoming()) || incoming().status == 'pendente');
+      allow update: if isValidId(companyId) && isValidCompanyProfile(incoming()) && (
+        isSuperAdmin() ||
+        (isSignedIn() && existing().email == request.auth.token.email && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'nuit', 'endereco', 'pais', 'provincia', 'distrito', 'regime_iva', 'nuel', 'telefone', 'updatedAt']))
+      );
       allow delete: if isSuperAdmin();
     }
 

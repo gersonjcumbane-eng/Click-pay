@@ -23,19 +23,80 @@ import {
   ArrowUpRight,
   Bell,
   Cloud,
-  Download
+  Download,
+  Eye,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Copy,
+  ExternalLink,
+  MessageCircle,
+  CreditCard,
+  Send,
+  X
 } from 'lucide-react';
 import { useToast, useConfirm } from '../context/ToastContext';
-import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
+import { db, doc, setDoc, collection, onSnapshot, syncPaymentApprovalToFirestore } from '../lib/firebase';
 import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
 import { hashPassword } from '../lib/security';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
-import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from '../lib/pricing';
+import { formatMzn, getPlanExtraSlipFeeMzn, getPlanFeeMzn } from '../lib/pricing';
 import {
   computeDocumentHashCode,
   CLICKPAY_COMPUTER_NOTE
 } from '../utils/documentUtils';
 import { downloadBlobAsFile, generateA4CommercialDocPdfBlob } from '../lib/clientPdf';
+
+interface PaymentProofItem {
+  id: string;
+  empresaId: string;
+  empresa: string;
+  responsavel: string;
+  nuit: string;
+  email: string;
+  telefone: string;
+  planoEscolhido: string;
+  planInternalCode: string;
+  billingCycle: 'mensal' | 'anual';
+  valorEsperado: number;
+  feePorSlip: number;
+  metodoTransferencia: string;
+  referenciaTransferencia: string;
+  valorTransferido: number;
+  dataTransferencia: string;
+  comprovativoNome: string;
+  comprovativoMimeType: string;
+  comprovativoTamanhoBytes: number;
+  hasProofFile?: boolean;
+  status: 'PENDENTE_PAGAMENTO' | 'CREDENCIAIS_ENVIADAS' | 'REJEITADO';
+  motivoRejeicao?: string;
+  activationCodePrefix?: string;
+  criadoEm: string;
+  aprovadoEm?: string;
+  ativadoEm?: string;
+}
+
+interface IssuedCredModalState {
+  empresa: string;
+  email: string;
+  password: string;
+  activationCode: string;
+  plano: string;
+  billingCycle: 'mensal' | 'anual';
+  feeBase: number;
+  nextBillingDate: string;
+  mailtoUrl: string;
+  whatsappUrl: string;
+  emailDelivery?: { sucesso?: boolean; gateway?: string; erro?: string };
+}
+
+interface PreviewProofModalState {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  base64: string;
+  sizeBytes: number;
+}
 
 interface ClientCompany {
   id: string;
@@ -184,6 +245,17 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
   const [credentialRequests, setCredentialRequests] = useState<any[]>([]);
   const [firebaseSynced, setFirebaseSynced] = useState<boolean>(true);
 
+  // Validação de Comprovativos de Transferência (Pré-Ativação)
+  const [paymentProofs, setPaymentProofs] = useState<PaymentProofItem[]>([]);
+  const [loadingProofs, setLoadingProofs] = useState(false);
+  const [confirmingProofId, setConfirmingProofId] = useState<string | null>(null);
+  const [rejectingProofId, setRejectingProofId] = useState<string | null>(null);
+  const [activeRejectId, setActiveRejectId] = useState<string | null>(null);
+  const [rejectReasonText, setRejectReasonText] = useState('');
+  const [issuedCredModal, setIssuedCredModal] = useState<IssuedCredModalState | null>(null);
+  const [previewProofModal, setPreviewProofModal] = useState<PreviewProofModalState | null>(null);
+  const [loadingProofFileId, setLoadingProofFileId] = useState<string | null>(null);
+
   // Estados para Gestão Dinâmica de Logins Firebase
   const [fbUsers, setFbUsers] = useState<any[]>([]);
   const [loadingFbUsers, setLoadingFbUsers] = useState(false);
@@ -282,6 +354,24 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
     }
   };
 
+  const fetchPaymentProofs = async () => {
+    if (!isSuperAdmin) return;
+    try {
+      setLoadingProofs(true);
+      const res = await fetch('/api/admin/payment-proofs', { headers: getAuthHeaders() });
+      if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setPaymentProofs(data);
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar comprovativos de transferência:', e);
+    } finally {
+      setLoadingProofs(false);
+    }
+  };
+
   useEffect(() => {
     if (!isSuperAdmin) {
       setLoading(false);
@@ -290,6 +380,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
     fetchClients();
     fetchFbUsers();
     fetchCredentialRequests();
+    fetchPaymentProofs();
 
     let unsubReq: (() => void) | undefined;
     try {
@@ -340,7 +431,12 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             email: String(data.email || ''),
             telefone: String(data.phone || data.telefone || '+258 84 000 0000'),
             logo: '/clickpay-logo.png',
-            subscription_status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo',
+            subscription_status: (() => {
+              const rawSt = String(data.status || 'ativo').toLowerCase();
+              if (rawSt.includes('suspens')) return 'suspenso';
+              if (rawSt.includes('pendent')) return 'pendente';
+              return 'ativo';
+            })(),
             subscription_plan: normalizedPlan,
             fee_base: Number(data.monthlyFee) || fallbackFee,
             fee_por_slip: getPlanExtraSlipFeeMzn(normalizedPlan),
@@ -664,6 +760,170 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
     window.print();
   };
 
+  const handlePreviewProofFile = async (proofId: string) => {
+    try {
+      setLoadingProofFileId(proofId);
+      const res = await fetch(`/api/admin/payment-proofs/${encodeURIComponent(proofId)}/file`, {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.base64) {
+        throw new Error(data?.erro || 'Não foi possível carregar o ficheiro do comprovativo.');
+      }
+      setPreviewProofModal({
+        id: proofId,
+        fileName: data.fileName || 'comprovativo',
+        mimeType: data.mimeType || 'application/octet-stream',
+        base64: data.base64,
+        sizeBytes: Number(data.sizeBytes) || 0
+      });
+    } catch (err: any) {
+      showError(err?.message || 'Erro ao abrir comprovativo.');
+    } finally {
+      setLoadingProofFileId(null);
+    }
+  };
+
+  const handleDownloadPreviewedFile = (file: PreviewProofModalState) => {
+    try {
+      const bin = atob(file.base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: file.mimeType || 'application/octet-stream' });
+      downloadBlobAsFile(blob, file.fileName || `comprovativo_${file.id}`);
+    } catch {
+      showError('Não foi possível descarregar o comprovativo.');
+    }
+  };
+
+  const handleConfirmPaymentProof = async (proof: PaymentProofItem) => {
+    const confirmed = await confirmAction({
+      title: 'Confirmar Recepção do Pagamento',
+      message: `Confirma que recebeu ${formatMzn(proof.valorTransferido)} (ref. ${proof.referenciaTransferencia}) de "${proof.empresa}"? O pacote ${proof.planoEscolhido} será activado e será emitido o código + credenciais de acesso.`,
+      confirmText: 'Confirmar & Emitir Credenciais',
+      variant: 'info'
+    });
+    if (!confirmed) return;
+
+    try {
+      setConfirmingProofId(proof.id);
+      const res = await fetch(`/api/admin/payment-proofs/${encodeURIComponent(proof.id)}/confirm`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.credentials) {
+        throw new Error(data?.erro || 'Erro ao confirmar pagamento.');
+      }
+
+      await syncPaymentApprovalToFirestore({
+        requestId: proof.id,
+        companyId: proof.empresaId,
+        email: proof.email,
+        nomeEmpresa: proof.empresa,
+        plan: proof.planoEscolhido,
+        feeBase: proof.valorEsperado,
+        nextBillingDate: data.credentials.nextBillingDate,
+        newPassword: data.credentials.password,
+        activationCodePrefix: data.request?.activationCodePrefix,
+        approved: true
+      }).catch(() => {});
+
+      setIssuedCredModal({
+        empresa: proof.empresa,
+        email: data.credentials.email,
+        password: data.credentials.password,
+        activationCode: data.credentials.activationCode,
+        plano: data.credentials.plano,
+        billingCycle: data.credentials.billingCycle || proof.billingCycle,
+        feeBase: Number(data.credentials.feeBase) || proof.valorEsperado,
+        nextBillingDate: data.credentials.nextBillingDate,
+        mailtoUrl: data.mailtoUrl || '',
+        whatsappUrl: data.whatsappUrl || '',
+        emailDelivery: data.emailDelivery
+      });
+
+      showSuccess(`Pagamento confirmado! Código e credenciais emitidos para ${proof.empresa}.`);
+      await Promise.all([fetchPaymentProofs(), fetchClients(), fetchFbUsers()]);
+    } catch (err: any) {
+      showError(err?.message || 'Erro ao confirmar recepção do pagamento.');
+    } finally {
+      setConfirmingProofId(null);
+    }
+  };
+
+  const handleRejectPaymentProof = async (proof: PaymentProofItem) => {
+    const motivo = rejectReasonText.trim() || 'Comprovativo não validado na conta bancária/móvel. Por favor envie um novo comprovativo legível.';
+    try {
+      setRejectingProofId(proof.id);
+      const res = await fetch(`/api/admin/payment-proofs/${encodeURIComponent(proof.id)}/reject`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ motivo })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.erro || 'Erro ao recusar comprovativo.');
+      }
+
+      await syncPaymentApprovalToFirestore({
+        requestId: proof.id,
+        companyId: proof.empresaId,
+        email: proof.email,
+        approved: false,
+        motivoRejeicao: motivo
+      }).catch(() => {});
+
+      setActiveRejectId(null);
+      setRejectReasonText('');
+      showSuccess(`Comprovativo de ${proof.empresa} marcado como recusado.`);
+      await Promise.all([fetchPaymentProofs(), fetchClients()]);
+    } catch (err: any) {
+      showError(err?.message || 'Erro ao recusar comprovativo.');
+    } finally {
+      setRejectingProofId(null);
+    }
+  };
+
+  const handleCopyIssuedCredentials = async (modal: IssuedCredModalState) => {
+    const text = [
+      `ClickPay ERP — Credenciais & Código de Ativação`,
+      `Empresa: ${modal.empresa}`,
+      `Pacote: ${modal.plano} (${modal.billingCycle === 'anual' ? 'Anual' : 'Mensal'})`,
+      `Código de Ativação: ${modal.activationCode}`,
+      `E-mail de Acesso: ${modal.email}`,
+      `Palavra-passe: ${modal.password}`,
+      `Próxima Renovação: ${modal.nextBillingDate}`
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      showSuccess('Código e credenciais copiados para a área de transferência!');
+    } catch {
+      showError('Não foi possível copiar automaticamente.');
+    }
+  };
+
+  const handleDownloadIssuedTxt = (modal: IssuedCredModalState) => {
+    const text = [
+      `CLICKPAY ERP MOÇAMBIQUE — FICHA DE ATIVAÇÃO`,
+      `==========================================`,
+      `Empresa: ${modal.empresa}`,
+      `Pacote Contratado: ${modal.plano} (${modal.billingCycle === 'anual' ? 'Anual' : 'Mensal'})`,
+      `Mensalidade/Anuidade Base: ${formatMzn(modal.feeBase)}`,
+      `Próxima Renovação: ${modal.nextBillingDate}`,
+      ``,
+      `Código de Ativação: ${modal.activationCode}`,
+      `E-mail de Acesso: ${modal.email}`,
+      `Palavra-passe Emitida: ${modal.password}`,
+      `==========================================`
+    ].join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    downloadBlobAsFile(blob, `Credenciais_${modal.empresa.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`);
+  };
+
   if (!isSuperAdmin) {
     return (
       <div className="max-w-xl mx-auto my-12 bg-white border border-rose-200 rounded-2xl p-8 text-center space-y-3 shadow-xs">
@@ -708,6 +968,234 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             {showAddForm ? 'Fechar Formulário' : 'Novo Cliente Outsourcing'}
           </button>
         </div>
+      </div>
+
+      {/* Painel de Validação de Transferências & Ativação de Contas */}
+      <div className="bg-white border border-blue-200 rounded-2xl p-6 shadow-sm space-y-4 print:hidden" id="payment-proofs-validation-panel">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 bg-blue-900 text-white rounded-xl shrink-0">
+              <CreditCard size={18} />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-black text-slate-950 uppercase tracking-wider">
+                  Validação de Transferências &amp; Ativação de Contas
+                </h3>
+                {(() => {
+                  const pendentes = paymentProofs.filter((p) => p.status === 'PENDENTE_PAGAMENTO').length;
+                  return (
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                      pendentes > 0
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        : 'bg-emerald-100 text-emerald-900 border border-emerald-200'
+                    }`}>
+                      {pendentes} {pendentes === 1 ? 'Pendente de Confirmação' : 'Pendentes de Confirmação'}
+                    </span>
+                  );
+                })()}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Nenhuma conta recém-criada avança para o ERP antes de validar o comprovativo e confirmar a recepção do valor. Ao confirmar, o cliente recebe o código de ativação e as credenciais do pacote escolhido.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchPaymentProofs}
+            disabled={loadingProofs}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-[11px] font-bold transition-colors cursor-pointer self-start sm:self-auto"
+          >
+            <RefreshCw size={13} className={loadingProofs ? 'animate-spin' : ''} />
+            Actualizar Comprovativos
+          </button>
+        </div>
+
+        {loadingProofs && paymentProofs.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-500">
+            A carregar pedidos e comprovativos de transferência...
+          </div>
+        ) : paymentProofs.length === 0 ? (
+          <div className="py-6 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-500">
+            Ainda não existem pedidos pendentes de validação de transferência. Quando um cliente submeter um comprovativo no registo, aparecerá aqui e será enviado para <b>gersonjcumbane@gmail.com</b>.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {paymentProofs.map((proof) => {
+              const isPending = proof.status === 'PENDENTE_PAGAMENTO';
+              const isApproved = proof.status === 'CREDENCIAIS_ENVIADAS';
+              const isRejected = proof.status === 'REJEITADO';
+              const amountMatch = Number(proof.valorTransferido) >= Number(proof.valorEsperado);
+
+              return (
+                <div
+                  key={proof.id}
+                  className={`rounded-2xl p-4 border transition-all space-y-3 ${
+                    isPending
+                      ? 'bg-amber-50/40 border-amber-200'
+                      : isApproved
+                      ? 'bg-emerald-50/30 border-emerald-200'
+                      : 'bg-rose-50/30 border-rose-200'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-xs font-black text-slate-950">{proof.empresa}</h4>
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-900 rounded text-[9px] font-black uppercase">
+                          {proof.planoEscolhido} · {proof.billingCycle === 'anual' ? 'Anual' : 'Mensal'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        <b>Resp.:</b> {proof.responsavel} · <b>NUIT:</b> <span className="font-mono">{proof.nuit}</span>
+                      </p>
+                      <p className="text-[11px] text-blue-900 font-mono font-bold">
+                        {proof.email} <span className="text-slate-400">|</span> <span className="text-emerald-700">{proof.telefone}</span>
+                      </p>
+                    </div>
+
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                      isPending
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        : isApproved
+                        ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                        : 'bg-rose-100 text-rose-900 border border-rose-300'
+                    }`}>
+                      {isPending && <Clock size={11} />}
+                      {isApproved && <CheckCircle2 size={11} />}
+                      {isRejected && <XCircle size={11} />}
+                      {isPending ? 'Aguardando Confirmação' : isApproved ? 'Confirmado & Emitido' : 'Recusado'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white/90 border border-slate-200/80 rounded-xl p-2.5 text-[10px]">
+                    <div>
+                      <span className="text-slate-400 font-bold uppercase block text-[9px]">Canal</span>
+                      <span className="font-extrabold text-slate-800">{proof.metodoTransferencia}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold uppercase block text-[9px]">Referência</span>
+                      <span className="font-mono font-extrabold text-slate-900 select-all">{proof.referenciaTransferencia}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold uppercase block text-[9px]">Data Transf.</span>
+                      <span className="font-mono font-bold text-slate-800">{proof.dataTransferencia}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold uppercase block text-[9px]">Valor Transferido</span>
+                      <span className={`font-mono font-black ${amountMatch ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {formatMzn(proof.valorTransferido)}
+                      </span>
+                      <span className="block text-[8.5px] text-slate-400 font-mono">
+                        Pacote: {formatMzn(proof.valorEsperado)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {proof.comprovativoNome && (
+                    <div className="flex items-center justify-between text-[10px] bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                      <span className="text-slate-600 font-semibold truncate">
+                        📎 <b>Comprovativo:</b> {proof.comprovativoNome}
+                        {proof.comprovativoTamanhoBytes ? ` (${Math.max(1, Math.round(proof.comprovativoTamanhoBytes / 1024))} KB)` : ''}
+                      </span>
+                      {proof.hasProofFile && (
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewProofFile(proof.id)}
+                          disabled={loadingProofFileId === proof.id}
+                          className="inline-flex items-center gap-1 text-blue-900 hover:text-blue-700 font-black uppercase text-[9.5px] shrink-0 ml-2 cursor-pointer"
+                        >
+                          <Eye size={12} />
+                          {loadingProofFileId === proof.id ? 'A abrir...' : 'Ver Comprovativo'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {isApproved && proof.activationCodePrefix && (
+                    <div className="text-[10px] bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 text-emerald-900 font-medium flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        🔑 Código emitido: <b className="font-mono">{proof.activationCodePrefix}</b>
+                        {proof.ativadoEm ? ' · Conta já activada pelo cliente' : ' · Aguardando activação do cliente'}
+                      </span>
+                    </div>
+                  )}
+
+                  {isRejected && proof.motivoRejeicao && (
+                    <div className="text-[10px] bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 text-rose-900">
+                      <b>Motivo da recusa:</b> {proof.motivoRejeicao}
+                    </div>
+                  )}
+
+                  {activeRejectId === proof.id ? (
+                    <div className="bg-white border border-rose-200 rounded-xl p-3 space-y-2">
+                      <label className="text-[10px] font-bold text-rose-900 block">
+                        Motivo da recusa do comprovativo (enviado ao cliente):
+                      </label>
+                      <input
+                        type="text"
+                        value={rejectReasonText}
+                        onChange={(e) => setRejectReasonText(e.target.value)}
+                        placeholder="Ex: Referência não localizada no extracto bancário."
+                        className="w-full px-2.5 py-1.5 bg-rose-50/40 border border-rose-200 rounded-lg text-xs focus:outline-none focus:border-rose-500"
+                      />
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveRejectId(null);
+                            setRejectReasonText('');
+                          }}
+                          className="px-3 py-1 text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectPaymentProof(proof)}
+                          disabled={rejectingProofId === proof.id}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white rounded-lg text-[10px] font-extrabold uppercase cursor-pointer"
+                        >
+                          {rejectingProofId === proof.id ? 'A recusar...' : 'Confirmar Recusa'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                      {!isApproved && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveRejectId(proof.id);
+                            setRejectReasonText('');
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-[10px] font-extrabold uppercase cursor-pointer transition-colors"
+                        >
+                          <XCircle size={13} />
+                          Recusar
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmPaymentProof(proof)}
+                        disabled={confirmingProofId === proof.id}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white rounded-xl text-[10px] font-extrabold uppercase cursor-pointer shadow-xs transition-colors"
+                      >
+                        <CheckCircle2 size={13} />
+                        {confirmingProofId === proof.id
+                          ? 'A confirmar...'
+                          : isApproved
+                          ? 'Reemitir Código & Credenciais'
+                          : 'Confirmar Pagamento & Emitir Código/Credenciais'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Painel de Notificações de Solicitação de Credenciais em Tempo Real */}
@@ -1936,6 +2424,176 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
 
         </div>
       </div>
+
+      {/* Modal: Visualização do Comprovativo Submetido */}
+      {previewProofModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 shadow-2xl">
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                  Comprovativo de Transferência
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  {previewProofModal.fileName} ({Math.max(1, Math.round(previewProofModal.sizeBytes / 1024))} KB)
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPreviewedFile(previewProofModal)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                >
+                  <Download size={12} />
+                  Descarregar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewProofModal(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                  aria-label="Fechar pré-visualização"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="p-4 overflow-auto flex-1 bg-slate-100 flex items-center justify-center min-h-[360px]">
+              {previewProofModal.mimeType === 'application/pdf' ? (
+                <iframe
+                  title={previewProofModal.fileName}
+                  src={`data:application/pdf;base64,${previewProofModal.base64}`}
+                  className="w-full h-[65vh] rounded-xl border border-slate-300 bg-white"
+                />
+              ) : previewProofModal.mimeType.startsWith('image/') ? (
+                <img
+                  src={`data:${previewProofModal.mimeType};base64,${previewProofModal.base64}`}
+                  alt={previewProofModal.fileName}
+                  className="max-w-full max-h-[65vh] rounded-xl shadow-md object-contain"
+                />
+              ) : (
+                <div className="text-center space-y-3 p-6">
+                  <FileText size={32} className="mx-auto text-slate-400" />
+                  <p className="text-xs text-slate-600">Pré-visualização não suportada para este tipo de ficheiro.</p>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadPreviewedFile(previewProofModal)}
+                    className="px-4 py-2 bg-blue-900 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    Descarregar Ficheiro
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Código de Ativação e Credenciais Emitidos após Confirmação */}
+      {issuedCredModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 print:hidden">
+          <div className="bg-white rounded-2xl max-w-lg w-full overflow-hidden border border-emerald-200 shadow-2xl">
+            <div className="bg-emerald-800 text-white px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 size={20} className="text-emerald-200" />
+                <div>
+                  <h4 className="text-sm font-black">Pagamento Confirmado · Credenciais Emitidas</h4>
+                  <p className="text-[11px] text-emerald-100">{issuedCredModal.empresa}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIssuedCredModal(null)}
+                className="p-1 text-emerald-100 hover:text-white cursor-pointer"
+                aria-label="Fechar janela"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-800 font-bold">Pacote Activado:</span>
+                  <span className="font-black text-slate-950">
+                    {issuedCredModal.plano} ({issuedCredModal.billingCycle === 'anual' ? 'Anual' : 'Mensal'}) · {formatMzn(issuedCredModal.feeBase)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-t border-emerald-200/70 pt-2">
+                  <span className="text-emerald-800 font-bold">Código de Ativação:</span>
+                  <span className="font-mono font-black text-sm text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 select-all">
+                    {issuedCredModal.activationCode}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-800 font-bold">E-mail de Acesso:</span>
+                  <span className="font-mono font-bold text-slate-900 select-all">{issuedCredModal.email}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-800 font-bold">Palavra-passe Emitida:</span>
+                  <span className="font-mono font-black text-slate-950 bg-white px-2 py-0.5 rounded border border-emerald-200 select-all">
+                    {issuedCredModal.password}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-emerald-800 font-bold">Próxima Renovação:</span>
+                  <span className="font-mono font-bold text-slate-800">{issuedCredModal.nextBillingDate}</span>
+                </div>
+              </div>
+
+              <div className={`p-3 rounded-xl border text-[11px] ${
+                issuedCredModal.emailDelivery?.sucesso
+                  ? 'bg-blue-50 border-blue-200 text-blue-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}>
+                {issuedCredModal.emailDelivery?.sucesso
+                  ? `✅ E-mail automático enviado para ${issuedCredModal.email} (${issuedCredModal.emailDelivery.gateway}).`
+                  : `ℹ️ O servidor SMTP não está configurado ou falhou o envio direto. Use os botões abaixo para enviar o código e as credenciais ao cliente por E-mail ou WhatsApp.`}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopyIssuedCredentials(issuedCredModal)}
+                  className="inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-bold cursor-pointer"
+                >
+                  <Copy size={13} />
+                  Copiar Tudo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadIssuedTxt(issuedCredModal)}
+                  className="inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-900 rounded-xl text-[11px] font-bold cursor-pointer"
+                >
+                  <Download size={13} />
+                  Descarregar .TXT
+                </button>
+                {issuedCredModal.mailtoUrl && (
+                  <a
+                    href={issuedCredModal.mailtoUrl}
+                    className="inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-[11px] font-bold"
+                  >
+                    <Send size={13} />
+                    Enviar por E-mail
+                    <ExternalLink size={11} />
+                  </a>
+                )}
+                {issuedCredModal.whatsappUrl && (
+                  <a
+                    href={issuedCredModal.whatsappUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-bold"
+                  >
+                    <MessageCircle size={13} />
+                    Enviar via WhatsApp
+                    <ExternalLink size={11} />
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

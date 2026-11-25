@@ -5,24 +5,33 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Building2, 
-  Search, 
-  Upload, 
-  ArrowLeft, 
-  ArrowRight, 
-  CheckCircle2, 
-  Check, 
-  X, 
-  Mail, 
-  Lock, 
-  ShieldCheck, 
+import {
+  Building2,
+  Search,
+  Upload,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Check,
+  X,
+  Mail,
+  Lock,
+  ShieldCheck,
   ChevronRight,
   Warehouse,
   Tag,
   Eye,
   EyeOff,
-  FileText
+  FileText,
+  Clock,
+  RefreshCw,
+  Key,
+  AlertTriangle,
+  Send,
+  Phone,
+  CreditCard,
+  Calendar,
+  User
 } from 'lucide-react';
 import { syncRegisteredAccountToFirestore } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
@@ -41,30 +50,37 @@ interface OnboardingWizardProps {
   onSuccess: (userData: any) => void;
 }
 
+const TRANSFER_CHANNELS = [
+  'Millennium BIM (Transferência / NIB)',
+  'BCI Fomento (Transferência / NIB)',
+  'Standard Bank Moçambique',
+  'M-Pesa (+258 84 201 4173)',
+  'e-Mola (+258 86 139 0061)',
+  'Outro Banco Nacional (NIB)'
+];
+
 export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: OnboardingWizardProps) {
-  // Main view stage: 'ACCOUNT' (Register screen) | 'WIZARD' (optional configuration steps)
-  const [stage, setStage] = useState<'ACCOUNT' | 'WIZARD'>('ACCOUNT');
-  
-  // Core Account Form State (Nome da Empresa, E-mail corporativo, NUIT, Senha)
+  // Stage: 'ACCOUNT' -> 'WIZARD' -> 'PENDING_PAYMENT'
+  const [stage, setStage] = useState<'ACCOUNT' | 'WIZARD' | 'PENDING_PAYMENT'>('ACCOUNT');
+
+  // Core Account Form State
   const [nomeEmpresa, setNomeEmpresa] = useState('');
+  const [responsavelNome, setResponsavelNome] = useState('');
   const [email, setEmail] = useState('');
   const [nuit, setNuit] = useState('');
   const [senha, setSenha] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [legalModal, setLegalModal] = useState<'terms' | 'privacy' | null>(null);
-  const [createdCompanyId, setCreatedCompanyId] = useState<string | null>(null);
-  const [createdSessionData, setCreatedSessionData] = useState<any | null>(null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  
-  // Wizard Steps State
+
+  // Wizard Steps: Step 1 (Empresa) -> Step 2 (Armazém) -> Step 3 (Pacote & Validação de Transferência)
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [companySubStep, setCompanySubStep] = useState<'LOOKUP' | 'FORM'>('LOOKUP');
-  
+
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  
-  // Step 1: Additional Company Profile State
+
+  // Step 1: Company Profile State
   const [nuelSearch, setNuelSearch] = useState('');
   const [isSearchingNuel, setIsSearchingNuel] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string>('');
@@ -77,16 +93,52 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
   const [empresaTelefone, setEmpresaTelefone] = useState('');
   const [endereco, setEndereco] = useState('');
 
-  // Step 2: Subscription State (Pagamentos bloqueados — Apenas Facturação)
-  const [selectedPlan, setSelectedPlan] = useState<'Starter' | 'Growth' | 'Business' | 'Vitalicio'>('Starter');
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>('mensal');
-  const [paymentSubStep, setPaymentSubStep] = useState<'PLANS' | 'PAYMENT'>('PLANS');
-  const [metodoPagamento] = useState<string>('BLOQUEADO_APENAS_FACTURACAO');
-
-  // Step 3: Warehouse Initial State
+  // Step 2: Warehouse Initial State
   const [armazemNome, setArmazemNome] = useState('Armazém Principal');
   const [armazemCodigo, setArmazemCodigo] = useState('CPY1');
-  const [armazemEndereco, setArmazemEndereco] = useState('Endereço do armazém');
+  const [armazemEndereco, setArmazemEndereco] = useState('Maputo, Moçambique');
+
+  // Step 3: Subscription & Transfer Proof Validation State
+  const [selectedPlan, setSelectedPlan] = useState<'Starter' | 'Growth' | 'Business'>('Starter');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('mensal');
+  const [paymentSubStep, setPaymentSubStep] = useState<'PLANS' | 'PAYMENT'>('PLANS');
+
+  const [transferMethod, setTransferMethod] = useState<string>(TRANSFER_CHANNELS[0]);
+  const [transferReference, setTransferReference] = useState<string>('');
+  const [transferDate, setTransferDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [transferAmount, setTransferAmount] = useState<string>(() => String(getPlanFeeMzn('Starter', 'mensal')));
+  const [transferProofName, setTransferProofName] = useState<string>('');
+  const [transferProofMime, setTransferProofMime] = useState<string>('');
+  const [transferProofBase64, setTransferProofBase64] = useState<string>('');
+  const [transferProofSizeKb, setTransferProofSizeKb] = useState<number>(0);
+  const [transferProofVerified, setTransferProofVerified] = useState<boolean>(false);
+  const [transferProofError, setTransferProofError] = useState<string | null>(null);
+  const [confirmTransferHonesty, setConfirmTransferHonesty] = useState<boolean>(false);
+
+  // Pending Approval & Code Activation State
+  const [pendingInfo, setPendingInfo] = useState<{
+    requestId: string;
+    email: string;
+    empresa: string;
+    plano: string;
+    billingCycle: BillingCycle;
+    valorEsperado: number;
+    metodoTransferencia: string;
+    referenciaTransferencia: string;
+    valorTransferido: number;
+    dataTransferencia: string;
+    comprovativoNome: string;
+    status: string;
+    motivoRejeicao?: string;
+    mailtoUrl?: string;
+    whatsappUrl?: string;
+    emailGateway?: string;
+  } | null>(null);
+  const [activationCodeInput, setActivationCodeInput] = useState('');
+  const [activationEmailInput, setActivationEmailInput] = useState('');
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [isActivatingCode, setIsActivatingCode] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
 
   // Form Submission & Error State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -99,17 +151,32 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     }, 4500);
   };
 
-  // Criar conta imediatamente no servidor ClickPay e no Firebase Firestore
-  const handleAccountSubmit = async (e: React.FormEvent) => {
+  const expectedFee = getPlanFeeMzn(selectedPlan, billingCycle);
+  const selectedPlanSpec = getPlanSpec(selectedPlan);
+
+  const handlePlanChange = (planId: 'Starter' | 'Growth' | 'Business', cycle: BillingCycle = billingCycle) => {
+    setSelectedPlan(planId);
+    setBillingCycle(cycle);
+    const fee = getPlanFeeMzn(planId, cycle);
+    setTransferAmount(String(fee));
+  };
+
+  // Etapa inicial: valida apenas localmente e avança para o assistente (NÃO cria acesso ao ERP)
+  const handleAccountSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
     const cleanEmpresa = nomeEmpresa.trim();
     const cleanEmail = email.trim().toLowerCase();
-    const cleanNuit = nuit.replace(/\s+/g, '').trim();
+    const cleanNuit = nuit.replace(/\D/g, '').trim();
 
     if (!cleanEmpresa || !cleanEmail || !cleanNuit || !senha) {
       setFormError('Por favor preencha Nome da Empresa, E-mail corporativo, NUIT e Senha.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setFormError('Indique um endereço de e-mail corporativo válido.');
       return;
     }
 
@@ -128,115 +195,14 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       return;
     }
 
-    setIsCreatingAccount(true);
-    let clientId = `cli_reg_${Date.now()}`;
-    let serverData: any = null;
-
-    const isJsonRes = (r: Response | null) =>
-      !!r && (r.headers.get('content-type') || '').includes('application/json');
-
-    let serverCreated = false;
-    try {
-      const res = await fetch('/api/auth/register-onboarding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nomeEmpresa: cleanEmpresa,
-          email: cleanEmail,
-          nuit: cleanNuit,
-          password: senha,
-          plano: 'Starter',
-          billingCycle: 'mensal'
-        })
-      }).catch(() => null);
-
-      if (res && res.ok && isJsonRes(res)) {
-        serverData = await res.json().catch(() => null);
-        serverCreated = Boolean(serverData?.sucesso);
-        if (serverData?.usuario?.id || serverData?.usuario?.empresa_id) {
-          clientId = serverData.usuario.id || serverData.usuario.empresa_id;
-        }
-      } else if (res && !res.ok && isJsonRes(res) && res.status >= 400 && res.status < 500 && res.status !== 404 && res.status !== 405) {
-        const errData = await res.json().catch(() => ({}));
-        setFormError(errData.erro || 'Não foi possível criar a conta. Verifique os dados.');
-        setIsCreatingAccount(false);
-        return;
-      }
-
-      // Garantir gravação imediata na nuvem ClickPay e cofre local
-      const fbResult = await syncRegisteredAccountToFirestore({
-        clientId,
-        nomeEmpresa: cleanEmpresa,
-        email: cleanEmail,
-        nuit: cleanNuit,
-        password: senha,
-        plano: 'Starter',
-        feeBase: getPlanFeeMzn('Starter', 'mensal'),
-        isUpdate: false
-      });
-
-      if (!serverCreated && fbResult.syncedCollections.length === 0) {
-        setFormError('Não foi possível criar a conta neste momento. Verifique a ligação e tente novamente.');
-        setIsCreatingAccount(false);
-        return;
-      }
-
-      setCreatedCompanyId(clientId);
-      setCreatedSessionData(serverData);
-      setEmpresaEmail(cleanEmail);
-
-      // Inicializar espaço de trabalho limpo para a nova empresa (zero dados de outras empresas)
-      try {
-        localStorage.setItem(
-          `clickpay_tenant_${clientId}`,
-          JSON.stringify({
-            company: {
-              nome: cleanEmpresa,
-              nuit: cleanNuit,
-              endereco: endereco || 'Moçambique',
-              provincia: provincia || 'Maputo Cidade',
-              distrito: distrito || 'KaMpfumo',
-              regime_iva: regimeIva,
-              nuel: nuel || '',
-              email: cleanEmail,
-              telefone: empresaTelefone || '+258 84 000 0000',
-              logo: '/clickpay-logo.png',
-              subscription_status: 'ativo',
-              subscription_plan: 'Bronze'
-            },
-            employees: [],
-            logs: [],
-            contracts: [],
-            vales: [],
-            deletedIds: []
-          })
-        );
-      } catch {
-        // Ignore storage quota warning
-      }
-
-      // Persistir sessão básica para que o utilizador já fique registado
-      localStorage.setItem('paytek_auth', 'true');
-      localStorage.setItem('paytek_token', serverData?.token || `token_cliente_${clientId}`);
-      localStorage.setItem('paytek_user', cleanEmail);
-      localStorage.setItem('paytek_role', serverData?.usuario?.funcao || 'CLIENTE_EMPRESA');
-      localStorage.setItem('paytek_company_id', clientId);
-      localStorage.setItem('paytek_sub_status', 'ativo');
-      localStorage.setItem('paytek_sub_plan', 'Bronze');
-      localStorage.setItem('paytek_company_name', cleanEmpresa);
-      localStorage.setItem('paytek_payments_locked', 'true');
-
-      setStage('WIZARD');
-      showToast('Conta ClickPay criada e gravada com sucesso!');
-    } catch (err: any) {
-      console.error('Erro ao criar conta ClickPay:', err);
-      setFormError('Erro ao registar a conta. Tente novamente.');
-    } finally {
-      setIsCreatingAccount(false);
-    }
+    setEmpresaEmail(cleanEmail);
+    setActivationEmailInput(cleanEmail);
+    setStage('WIZARD');
+    setCurrentStep(1);
+    showToast('Dados iniciais validados. Complete os passos e envie o comprovativo de transferência no final.');
   };
 
-  // Handle NUEL Search
+  // Consultar NUEL
   const handleConsultarNuel = async () => {
     if (!nuelSearch.trim()) return;
     setIsSearchingNuel(true);
@@ -264,37 +230,102 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
     }
   };
 
-  // Handle Final Onboarding Registration / Update
-  const handleFinishOnboarding = async () => {
-    setIsSubmitting(true);
+  // Carregar e validar ficheiro comprovativo de transferência
+  const handleTransferProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    setTransferProofError(null);
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setTransferProofVerified(false);
+      setTransferProofBase64('');
+      setTransferProofError('O comprovativo excede o limite máximo de 2 MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const dataUrl = String(reader.result || '');
+      const base64Part = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+      const mime = file.type || 'application/pdf';
+
+      const avScan = await scanFileForMalware({
+        base64: base64Part,
+        mimeType: mime,
+        fileName: file.name,
+        maxBytes: 2 * 1024 * 1024
+      });
+
+      if (!avScan.safe) {
+        setTransferProofVerified(false);
+        setTransferProofBase64('');
+        setTransferProofError(avScan.reason || 'Ficheiro inválido ou bloqueado. Utilize PDF, PNG ou JPG legível.');
+        return;
+      }
+
+      setTransferProofName(file.name);
+      setTransferProofMime(mime);
+      setTransferProofBase64(base64Part);
+      setTransferProofSizeKb(Math.max(1, Math.round(file.size / 1024)));
+      setTransferProofVerified(true);
+      setTransferProofError(null);
+      showToast(`Comprovativo "${file.name}" validado com sucesso.`);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const numericTransferredAmount = Number(transferAmount || 0);
+  const isTransferProofValid =
+    transferMethod.trim().length >= 2 &&
+    transferReference.trim().length >= 4 &&
+    transferDate.trim().length >= 8 &&
+    Number.isFinite(numericTransferredAmount) &&
+    numericTransferredAmount >= expectedFee &&
+    transferProofVerified &&
+    Boolean(transferProofBase64) &&
+    confirmTransferHonesty;
+
+  // Submeter registo + comprovativo (BLOQUEADO até confirmação do pagamento pelo Fundador)
+  const handleSubmitTransferProof = async () => {
     setFormError(null);
 
+    if (!isTransferProofValid) {
+      setFormError(
+        `Complete todos os campos do comprovativo de transferência e anexe o recibo (valor mínimo: ${formatMzn(expectedFee)}) para prosseguir.`
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
     const cleanEmpresa = nomeEmpresa.trim();
     const cleanEmail = email.trim().toLowerCase();
-    const cleanNuit = nuit.replace(/\s+/g, '').trim();
-    const targetPlan = selectedPlan === 'Vitalicio' ? 'Business' : selectedPlan;
-    const feeBase = getPlanFeeMzn(targetPlan, billingCycle);
-    const mappedPlan = normalizePlanToInternal(targetPlan);
-    const billingDays = billingCycle === 'anual' ? 365 : 30;
+    const cleanNuit = nuit.replace(/\D/g, '').trim();
+    const cleanTelefone = empresaTelefone.trim() || '+258 84 000 0000';
 
     try {
       const payload = {
-        existingCompanyId: createdCompanyId,
+        nome: responsavelNome.trim() || cleanEmpresa,
         email: cleanEmail,
         password: senha,
-        contacto: empresaTelefone || '+258 84 000 0000',
+        contacto: cleanTelefone,
         nomeEmpresa: cleanEmpresa,
         nuit: cleanNuit,
         nuel,
-        endereco,
+        endereco: endereco || 'Maputo, Moçambique',
         provincia,
         distrito,
         regimeIva,
         logo: logoUrl,
-        plano: targetPlan,
+        plano: selectedPlan,
         billingCycle,
-        feeBase,
-        metodoPagamento,
+        feeBase: expectedFee,
+        transferMethod: transferMethod.trim(),
+        transferReference: transferReference.trim(),
+        transferDate: transferDate.trim(),
+        transferAmount: numericTransferredAmount,
+        transferProofName,
+        transferProofMimeType: transferProofMime,
+        transferProofBase64,
         armazemNome,
         armazemCodigo
       };
@@ -303,164 +334,186 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }).catch(() => null);
+      });
 
-      const isJson = !!res && (res.headers.get('content-type') || '').includes('application/json');
-
-      if (res && isJson && res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const clientId = createdCompanyId || data.usuario?.id || data.usuario?.empresa_id || `cli_reg_${Date.now()}`;
-        await syncRegisteredAccountToFirestore({
-          clientId,
-          nomeEmpresa: cleanEmpresa,
-          email: cleanEmail,
-          nuit: cleanNuit || '400000000',
-          password: senha,
-          plano: targetPlan,
-          feeBase,
-          telefone: empresaTelefone || '+258 84 000 0000',
-          endereco,
-          provincia,
-          isUpdate: Boolean(createdCompanyId)
-        });
-
-        try {
-          const tenantRaw = localStorage.getItem(`clickpay_tenant_${clientId}`);
-          const tenantObj = tenantRaw ? JSON.parse(tenantRaw) : {};
-          localStorage.setItem(
-            `clickpay_tenant_${clientId}`,
-            JSON.stringify({
-              employees: tenantObj.employees || [],
-              logs: tenantObj.logs || [],
-              contracts: tenantObj.contracts || [],
-              vales: tenantObj.vales || [],
-              deletedIds: tenantObj.deletedIds || [],
-              company: {
-                ...(tenantObj.company || {}),
-                nome: cleanEmpresa,
-                nuit: cleanNuit,
-                nuel,
-                endereco,
-                provincia,
-                distrito,
-                regime_iva: regimeIva,
-                email: cleanEmail,
-                telefone: empresaTelefone || '+258 84 000 0000',
-                logo: logoUrl || '/clickpay-logo.png',
-                subscription_status: 'ativo',
-                subscription_plan: mappedPlan
-              }
-            })
-          );
-        } catch {
-          // Ignore storage quota warning
-        }
-
-        localStorage.setItem('paytek_auth', 'true');
-        localStorage.setItem('paytek_token', data.token || `token_cliente_${clientId}`);
-        localStorage.setItem('paytek_user', cleanEmail);
-        localStorage.setItem('paytek_role', data.usuario?.funcao || 'CLIENTE_EMPRESA');
-        localStorage.setItem('paytek_company_id', clientId);
-        localStorage.setItem('paytek_sub_status', data.usuario?.subscription_status || 'ativo');
-        localStorage.setItem('paytek_sub_plan', mappedPlan);
-        const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        localStorage.setItem('paytek_sub_expire', data.usuario?.next_billing_date || defaultExp);
-        localStorage.setItem('paytek_company_name', data.usuario?.nome_empresa || cleanEmpresa);
-        localStorage.setItem('paytek_payments_locked', 'true');
-        onSuccess({
-          ...data.usuario,
-          subscription_plan: mappedPlan,
-          pagamentos_bloqueados: true
-        });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.sucesso) {
+        setFormError(data?.erro || 'Não foi possível validar e enviar o comprovativo de transferência.');
+        setIsSubmitting(false);
         return;
       }
 
-      // Modo nuvem / deploy estático: concluir diretamente e atualizar cofre local/empresa
-      const clientId = createdCompanyId || `cli_reg_${Date.now()}`;
+      const reqId = data.requestId || `REQ-${Date.now()}`;
+
+      // Sincronizar pedido pendente com Firestore (status pendente/PENDENTE_PAGAMENTO)
       await syncRegisteredAccountToFirestore({
-        clientId,
+        clientId: `cli_pending_${reqId}`,
+        requestId: reqId,
         nomeEmpresa: cleanEmpresa,
         email: cleanEmail,
-        nuit: cleanNuit || '400000000',
+        nuit: cleanNuit,
         password: senha,
-        plano: targetPlan,
-        feeBase,
-        telefone: empresaTelefone || '+258 84 000 0000',
+        plano: selectedPlanSpec.name,
+        billingCycle,
+        feeBase: expectedFee,
+        telefone: cleanTelefone,
         endereco,
         provincia,
-        isUpdate: Boolean(createdCompanyId)
-      });
+        transferMethod: transferMethod.trim(),
+        transferReference: transferReference.trim(),
+        transferAmount: numericTransferredAmount,
+        transferDate: transferDate.trim(),
+        comprovativoNome: transferProofName,
+        subscriptionStatus: 'pendente'
+      }).catch(() => null);
 
-      try {
-        const tenantRaw = localStorage.getItem(`clickpay_tenant_${clientId}`);
-        const tenantObj = tenantRaw ? JSON.parse(tenantRaw) : {};
-        localStorage.setItem(
-          `clickpay_tenant_${clientId}`,
-          JSON.stringify({
-            employees: tenantObj.employees || [],
-            logs: tenantObj.logs || [],
-            contracts: tenantObj.contracts || [],
-            vales: tenantObj.vales || [],
-            deletedIds: tenantObj.deletedIds || [],
-            company: {
-              ...(tenantObj.company || {}),
-              nome: cleanEmpresa,
-              nuit: cleanNuit,
-              nuel,
-              endereco,
-              provincia,
-              distrito,
-              regime_iva: regimeIva,
-              email: cleanEmail,
-              telefone: empresaTelefone || '+258 84 000 0000',
-              logo: logoUrl || '/clickpay-logo.png',
-              subscription_status: 'ativo',
-              subscription_plan: mappedPlan
-            }
-          })
-        );
-      } catch {
-        // Ignore storage quota warning
-      }
+      // Garantir que NÃO existe sessão ativa no navegador antes da confirmação do Fundador
+      localStorage.removeItem('paytek_auth');
+      localStorage.removeItem('paytek_token');
+      localStorage.setItem('paytek_pending_request_id', reqId);
+      localStorage.setItem('paytek_pending_email', cleanEmail);
 
-      const defaultExp = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const fallbackUser = {
-        id: clientId,
+      setPendingInfo({
+        requestId: reqId,
         email: cleanEmail,
-        funcao: 'CLIENTE_EMPRESA',
-        empresa_id: clientId,
-        nome_empresa: cleanEmpresa,
-        subscription_status: 'ativo',
-        subscription_plan: mappedPlan,
-        next_billing_date: defaultExp
-      };
-
-      localStorage.setItem('paytek_auth', 'true');
-      localStorage.setItem('paytek_token', `token_cliente_${clientId}`);
-      localStorage.setItem('paytek_user', cleanEmail);
-      localStorage.setItem('paytek_role', 'CLIENTE_EMPRESA');
-      localStorage.setItem('paytek_company_id', clientId);
-      localStorage.setItem('paytek_sub_status', 'ativo');
-      localStorage.setItem('paytek_sub_plan', mappedPlan);
-      localStorage.setItem('paytek_sub_expire', defaultExp);
-      localStorage.setItem('paytek_company_name', cleanEmpresa);
-      onSuccess(fallbackUser);
+        empresa: cleanEmpresa,
+        plano: selectedPlanSpec.name,
+        billingCycle,
+        valorEsperado: expectedFee,
+        metodoTransferencia: transferMethod.trim(),
+        referenciaTransferencia: transferReference.trim(),
+        valorTransferido: numericTransferredAmount,
+        dataTransferencia: transferDate.trim(),
+        comprovativoNome: transferProofName,
+        status: data.status || 'PENDENTE_PAGAMENTO',
+        mailtoUrl: data.mailtoUrl,
+        whatsappUrl: data.whatsappUrl,
+        emailGateway: data.emailDelivery?.gateway
+      });
+      setActivationEmailInput(cleanEmail);
+      setStage('PENDING_PAYMENT');
+      showToast('Comprovativo enviado automaticamente para gersonjcumbane@gmail.com!');
     } catch (err) {
       console.error(err);
-      setFormError('Erro ao concluir a configuração da conta. Tente novamente.');
+      setFormError('Erro de comunicação ao submeter o comprovativo. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Price formatting helper
-  const getPlanPrice = (plan: 'Starter' | 'Growth' | 'Business' | 'Vitalicio') => {
-    return formatMzn(getPlanFeeMzn(plan, billingCycle), { spaceGrouping: true });
+  // Atualizar estado do pagamento junto do servidor
+  const handleRefreshPaymentStatus = async () => {
+    const queryEmail = (pendingInfo?.email || activationEmailInput || email).trim().toLowerCase();
+    const queryReqId = pendingInfo?.requestId || '';
+    if (!queryEmail && !queryReqId) return;
+
+    setIsCheckingStatus(true);
+    setActivationError(null);
+    try {
+      const params = new URLSearchParams();
+      if (queryEmail) params.set('email', queryEmail);
+      if (queryReqId) params.set('requestId', queryReqId);
+      const res = await fetch(`/api/onboarding/status?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.found) {
+        setPendingInfo((prev) => ({
+          ...(prev || {
+            requestId: data.requestId,
+            email: data.email,
+            empresa: data.empresa,
+            plano: data.planoEscolhido,
+            billingCycle: data.billingCycle || 'mensal',
+            valorEsperado: data.valorEsperado,
+            metodoTransferencia: data.metodoTransferencia,
+            referenciaTransferencia: data.referenciaTransferencia,
+            valorTransferido: data.valorTransferido,
+            dataTransferencia: data.dataTransferencia,
+            comprovativoNome: data.comprovativoNome,
+            status: data.status
+          }),
+          status: data.status,
+          motivoRejeicao: data.motivoRejeicao || ''
+        }));
+
+        if (data.status === 'CREDENCIAIS_ENVIADAS' || data.status === 'APROVADO') {
+          showToast('Pagamento confirmado! Introduza o código recebido no seu e-mail para entrar.');
+        } else if (data.status === 'REJEITADO') {
+          setActivationError(
+            `Comprovativo recusado: ${data.motivoRejeicao || 'verifique os dados enviados.'}`
+          );
+        } else {
+          showToast('Ainda a aguardar confirmação do Fundador (gersonjcumbane@gmail.com).');
+        }
+      }
+    } catch {
+      setActivationError('Não foi possível consultar o estado do pedido.');
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  // Ativar conta com código recebido após confirmação de pagamento pelo Fundador
+  const handleActivateWithCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActivationError(null);
+    const cleanEmail = (activationEmailInput || pendingInfo?.email || email).trim().toLowerCase();
+    const cleanCode = activationCodeInput.trim().toUpperCase();
+
+    if (!cleanEmail || !cleanCode) {
+      setActivationError('Preencha o e-mail e o código de ativação enviado após confirmação do pagamento.');
+      return;
+    }
+
+    setIsActivatingCode(true);
+    try {
+      const res = await fetch('/api/onboarding/activate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          requestId: pendingInfo?.requestId,
+          activationCode: cleanCode
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.sucesso || !data?.token) {
+        setActivationError(data?.erro || 'Código inválido ou pagamento ainda não confirmado.');
+        setIsActivatingCode(false);
+        return;
+      }
+
+      const u = data.usuario || {};
+      const clientId = u.empresa_id || u.id || `cli_reg_${Date.now()}`;
+      const mappedPlan = normalizePlanToInternal(u.subscription_plan || selectedPlan);
+
+      localStorage.removeItem('paytek_pending_request_id');
+      localStorage.removeItem('paytek_pending_email');
+      localStorage.setItem('paytek_auth', 'true');
+      localStorage.setItem('paytek_token', data.token);
+      localStorage.setItem('paytek_user', cleanEmail);
+      localStorage.setItem('paytek_role', u.funcao || 'CLIENTE_EMPRESA');
+      localStorage.setItem('paytek_company_id', clientId);
+      localStorage.setItem('paytek_sub_status', 'ativo');
+      localStorage.setItem('paytek_sub_plan', mappedPlan);
+      localStorage.setItem('paytek_sub_expire', u.next_billing_date || '');
+      localStorage.setItem('paytek_company_name', u.nome_empresa || nomeEmpresa);
+      localStorage.setItem('paytek_payments_locked', 'true');
+
+      onSuccess({
+        ...u,
+        subscription_status: 'ativo',
+        subscription_plan: mappedPlan,
+        pagamentos_bloqueados: true
+      });
+    } catch {
+      setActivationError('Erro ao validar o código de ativação. Tente novamente.');
+    } finally {
+      setIsActivatingCode(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800 antialiased relative selection:bg-blue-600 selection:text-white">
-      
       {/* Toast Banner Top-Right */}
       <AnimatePresence>
         {toastMessage && (
@@ -510,6 +563,17 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
             </button>
             <button
               type="button"
+              onClick={() => {
+                setStage('PENDING_PAYMENT');
+                setActivationEmailInput(email.trim().toLowerCase());
+              }}
+              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <Key size={12} />
+              <span>Já tenho Código</span>
+            </button>
+            <button
+              type="button"
               onClick={onEnterLogin || onCancel}
               className="px-3.5 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs"
             >
@@ -519,7 +583,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         </div>
       </header>
 
-      {/* STAGE 1: FORMULÁRIO SIMPLIFICADO DE CRIAÇÃO DE CONTA CLICKPAY */}
+      {/* STAGE 1: DADOS INICIAIS DA CONTA CLICKPAY */}
       {stage === 'ACCOUNT' && (
         <div className="flex-1 flex flex-col items-center justify-center p-4 lg:p-8">
           <main className="w-full max-w-md">
@@ -542,17 +606,17 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                     Criar Conta ClickPay
                   </h1>
                   <p className="text-xs font-medium text-slate-500 mt-1">
-                    Registe a sua empresa e comece a gerir salários e faturação num só lugar.
+                    Preencha os dados da empresa, escolha o pacote e envie o comprovativo de transferência para ativação.
                   </p>
                 </div>
               </div>
 
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-950 flex items-start gap-2.5">
-                <Lock size={15} className="text-amber-700 shrink-0 mt-0.5" />
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-950 flex items-start gap-2.5">
+                <Lock size={15} className="text-blue-800 shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold">Pagamentos Bloqueados — Apenas Facturação Ativa</p>
-                  <p className="text-amber-800 leading-relaxed mt-0.5">
-                    Ao solicitar o cadastro e após a ativação da conta, todos os módulos de pagamento (M-Pesa, e-Mola, cartões e liquidações) permanecem bloqueados. Trabalhará exclusivamente com Facturação e gestão documental.
+                  <p className="font-bold">Ativação Mediante Comprovativo de Transferência</p>
+                  <p className="text-blue-800 leading-relaxed mt-0.5">
+                    O acesso ao ERP permanece bloqueado até enviar o comprovativo de transferência e o Fundador confirmar a recepção do valor, emitindo o seu código e credenciais.
                   </p>
                 </div>
               </div>
@@ -564,7 +628,6 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
               )}
 
               <form onSubmit={handleAccountSubmit} className="space-y-4">
-                {/* 1. Nome da Empresa */}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-700 block">
                     Nome da Empresa <span className="text-rose-500">*</span>
@@ -583,7 +646,39 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                   </div>
                 </div>
 
-                {/* 2. E-mail corporativo */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 block">
+                      Nome do Responsável
+                    </label>
+                    <div className="relative">
+                      <User size={14} className="absolute left-3 top-3 text-slate-400" />
+                      <input
+                        type="text"
+                        value={responsavelNome}
+                        onChange={(e) => setResponsavelNome(e.target.value)}
+                        placeholder="Ex: João Sitoe"
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 block">
+                      Telefone / WhatsApp
+                    </label>
+                    <div className="relative">
+                      <Phone size={14} className="absolute left-3 top-3 text-slate-400" />
+                      <input
+                        type="tel"
+                        value={empresaTelefone}
+                        onChange={(e) => setEmpresaTelefone(e.target.value)}
+                        placeholder="+258 84 000 0000"
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-700 block">
                     E-mail corporativo <span className="text-rose-500">*</span>
@@ -602,7 +697,6 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                   </div>
                 </div>
 
-                {/* 3. NUIT */}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-700 block">
                     NUIT <span className="text-rose-500">*</span>
@@ -622,10 +716,9 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                   </div>
                 </div>
 
-                {/* 4. Senha */}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-700 block">
-                    Senha <span className="text-rose-500">*</span>
+                    Senha Desejada <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <Lock size={14} className="absolute left-3 top-3 text-slate-400" />
@@ -652,7 +745,6 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                   </span>
                 </div>
 
-                {/* Aceitação dos Termos */}
                 <label className="flex items-start gap-2.5 pt-1 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -683,24 +775,14 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
                 <button
                   type="submit"
-                  disabled={isCreatingAccount}
-                  className="w-full py-3 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-400 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-900/15 cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-3 bg-blue-900 hover:bg-blue-950 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-900/15 cursor-pointer flex items-center justify-center gap-2"
                 >
-                  {isCreatingAccount ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>A criar conta ClickPay...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Criar Conta</span>
-                      <ChevronRight size={14} />
-                    </>
-                  )}
+                  <span>Prosseguir para Configuração &amp; Subscrição</span>
+                  <ChevronRight size={14} />
                 </button>
 
                 <div className="text-center pt-3 border-t border-slate-100">
-                  <span className="text-xs text-slate-500 font-medium">Já tem uma conta? </span>
+                  <span className="text-xs text-slate-500 font-medium">Já tem uma conta ativa? </span>
                   <button
                     type="button"
                     onClick={onEnterLogin || onCancel}
@@ -713,7 +795,6 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
             </motion.div>
           </main>
 
-          {/* Rodapé Discreto ClickPay */}
           <footer className="mt-8 text-center text-[10px] text-slate-400 max-w-md px-4 space-y-1">
             <p className="flex items-center justify-center gap-1 font-semibold text-slate-500">
               <ShieldCheck size={12} className="text-emerald-600" />
@@ -724,7 +805,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         </div>
       )}
 
-      {/* Modal Informativo de Termos / Privacidade */}
+      {/* Modal Termos / Privacidade */}
       {legalModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[9999]">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
@@ -744,11 +825,11 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
               {legalModal === 'terms' ? (
                 <>
                   <p>A plataforma <b>ClickPay Moçambique</b> (NUIT 402302399 · NUEL 105086659) disponibiliza ferramentas empresariais de gestão salarial, faturação eletrónica e contabilidade em conformidade com a legislação moçambicana vigente.</p>
-                  <p>Cada empresa é responsável pela veracidade dos dados fiscais, colaboradores e movimentações financeiras registadas na sua conta.</p>
+                  <p>O acesso ao sistema fica ativo após validação do comprovativo de transferência bancária ou móvel pela equipa ClickPay.</p>
                 </>
               ) : (
                 <>
-                  <p>Os seus dados pessoais e empresariais são protegidos por encriptação em trânsito e em repouso, sendo utilizados exclusivamente para autenticação, cumprimento fiscal e processamento autorizado dentro do ClickPay ERP.</p>
+                  <p>Os seus dados pessoais, fiscais e comprovativos de pagamento são protegidos por encriptação em trânsito e em repouso.</p>
                   <p>A ClickPay não partilha nem comercializa informações confidenciais com terceiros sem autorização legal ou expressa.</p>
                 </>
               )}
@@ -767,50 +848,25 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         </div>
       )}
 
-      {/* STAGE 2: 3-STEP ONBOARDING WIZARD (Configuração Opcional) */}
+      {/* STAGE 2: WIZARD DE CONFIGURAÇÃO + BLOQUEIO FINAL ATÉ COMPROVATIVO DE TRANSFERÊNCIA */}
       {stage === 'WIZARD' && (
         <main className="max-w-4xl mx-auto w-full px-4 py-8 flex-1">
-          <div className="mb-6 bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                <CheckCircle2 size={18} />
-              </div>
-              <div>
-                <p className="text-xs font-extrabold text-emerald-950">
-                  Conta ClickPay criada e sincronizada na nuvem ({nomeEmpresa})
-                </p>
-                <p className="text-[11px] text-emerald-800">
-                  Pode concluir a configuração fiscal/armazém abaixo ou aceder diretamente ao painel ERP.
-                </p>
-              </div>
+          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0">
+              <Lock size={17} />
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                const resolvedId = createdCompanyId || localStorage.getItem('paytek_company_id') || `cli_reg_${Date.now()}`;
-                onSuccess(
-                  createdSessionData?.usuario || {
-                    id: resolvedId,
-                    empresa_id: resolvedId,
-                    email: email.trim().toLowerCase(),
-                    funcao: 'CLIENTE_EMPRESA',
-                    nome_empresa: nomeEmpresa.trim(),
-                    subscription_status: 'ativo',
-                    subscription_plan: normalizePlanToInternal(selectedPlan)
-                  }
-                );
-              }}
-              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
-            >
-              <span>Entrar no ERP agora</span>
-              <ArrowRight size={13} />
-            </button>
+            <div>
+              <p className="text-xs font-extrabold text-amber-950">
+                Pré-registo em curso para {nomeEmpresa} ({email})
+              </p>
+              <p className="text-[11px] text-amber-800">
+                Conclua os dados da empresa e anexe o comprovativo de transferência no Passo 3. O acesso ao ERP só é desbloqueado após confirmação do pagamento pelo Fundador.
+              </p>
+            </div>
           </div>
-          
+
           {/* Stepper Header Bar */}
           <div className="flex items-center justify-center gap-4 sm:gap-8 mb-8 text-xs font-bold">
-            
-            {/* Step 1 Pill */}
             <div className={`flex items-center gap-2 ${currentStep === 1 ? 'text-blue-900 font-extrabold' : currentStep > 1 ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs ${currentStep === 1 ? 'bg-blue-900 text-white shadow-md shadow-blue-900/20' : currentStep > 1 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
                 {currentStep > 1 ? <Check size={14} /> : '1'}
@@ -818,29 +874,26 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
               <span>Empresa</span>
             </div>
 
-            <div className={`w-12 h-0.5 ${currentStep > 1 ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+            <div className={`w-10 h-0.5 ${currentStep > 1 ? 'bg-emerald-500' : 'bg-slate-200'}`} />
 
-            {/* Step 2 Pill */}
             <div className={`flex items-center gap-2 ${currentStep === 2 ? 'text-blue-900 font-extrabold' : currentStep > 2 ? 'text-emerald-600 font-bold' : 'text-slate-400'}`}>
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs ${currentStep === 2 ? 'bg-blue-900 text-white shadow-md shadow-blue-900/20' : currentStep > 2 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
                 {currentStep > 2 ? <Check size={14} /> : '2'}
               </div>
-              <span>Subscrição</span>
+              <span>Armazém</span>
             </div>
 
-            <div className={`w-12 h-0.5 ${currentStep > 2 ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+            <div className={`w-10 h-0.5 ${currentStep > 2 ? 'bg-emerald-500' : 'bg-slate-200'}`} />
 
-            {/* Step 3 Pill */}
             <div className={`flex items-center gap-2 ${currentStep === 3 ? 'text-blue-900 font-extrabold' : 'text-slate-400'}`}>
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs ${currentStep === 3 ? 'bg-blue-900 text-white shadow-md shadow-blue-900/20' : 'bg-slate-200 text-slate-600'}`}>
                 3
               </div>
-              <span>Configuração</span>
+              <span>Pacote &amp; Comprovativo</span>
             </div>
-
           </div>
 
-          {/* STEP 1: EMPRESA (Images 1, 4, 5) */}
+          {/* STEP 1: EMPRESA */}
           {currentStep === 1 && (
             <motion.div
               initial={{ opacity: 0, scale: 0.98 }}
@@ -848,28 +901,23 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
               className="bg-white rounded-2xl p-6 sm:p-10 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6 max-w-2xl mx-auto"
             >
               {companySubStep === 'LOOKUP' ? (
-                /* Step 1.1: NUEL Search (Image 1) */
                 <div className="space-y-6 text-center">
                   <div className="w-12 h-12 bg-blue-50 text-blue-900 rounded-2xl flex items-center justify-center mx-auto">
                     <Building2 size={24} />
                   </div>
-
                   <div>
                     <h2 className="text-xl font-black text-slate-900">
-                      Bem-vindo! Vamos configurar a sua empresa
+                      Dados Fiscais da Empresa
                     </h2>
                     <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto leading-relaxed">
-                      Se a sua empresa está registada em Moçambique, insira o NUEL para preencher automaticamente. Caso contrário, avance para o registo manual.
+                      Se a empresa está registada em Moçambique, insira o NUEL para preenchimento rápido ou confirme manualmente.
                     </p>
                   </div>
 
                   <div className="space-y-3 text-left max-w-md mx-auto">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        NUEL <span className="text-slate-400 font-normal">APENAS MOÇAMBIQUE</span>
-                      </label>
-                    </div>
-
+                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide block">
+                      NUEL <span className="text-slate-400 font-normal">MOÇAMBIQUE</span>
+                    </label>
                     <div className="relative">
                       <input
                         type="text"
@@ -880,8 +928,8 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       />
                       <Search size={16} className="absolute right-3 top-3.5 text-slate-400" />
                     </div>
-
                     <button
+                      type="button"
                       onClick={handleConsultarNuel}
                       disabled={isSearchingNuel}
                       className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all shadow-md shadow-indigo-600/20 cursor-pointer flex items-center justify-center gap-2"
@@ -889,12 +937,12 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       {isSearchingNuel ? (
                         <>
                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          A consultar base de dados do NUEL...
+                          A consultar NUEL...
                         </>
                       ) : (
                         <>
                           <Search size={14} />
-                          Procurar empresa (Moçambique)
+                          Procurar empresa (NUEL)
                         </>
                       )}
                     </button>
@@ -905,16 +953,25 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                     <div className="relative flex justify-center text-[10px] font-bold uppercase"><span className="bg-white px-3 text-slate-400">OU</span></div>
                   </div>
 
-                  <button
-                    onClick={() => setCompanySubStep('FORM')}
-                    className="w-full py-3 border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
-                  >
-                    Registar empresa manualmente (qualquer país)
-                  </button>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setStage('ACCOUNT')}
+                      className="px-4 py-3 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                    >
+                      Voltar aos dados iniciais
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompanySubStep('FORM')}
+                      className="flex-1 py-3 border border-slate-300 hover:bg-slate-50 text-slate-800 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                    >
+                      Confirmar dados manualmente
+                    </button>
+                  </div>
                 </div>
               ) : (
-                /* Step 1.2: Perfil da Empresa Form (Images 4 & 5) */
-                <div className="space-y-6">
+                <div className="space-y-5">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-indigo-50 text-indigo-700 rounded-xl flex items-center justify-center shrink-0">
                       <Building2 size={20} />
@@ -925,10 +982,9 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                     </div>
                   </div>
 
-                  {/* Logótipo */}
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                      LOGÓTIPO DA EMPRESA
+                      LOGÓTIPO DA EMPRESA (OPCIONAL)
                     </label>
                     <div className="flex items-center gap-4">
                       <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center overflow-hidden">
@@ -938,88 +994,61 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                           <Building2 className="text-slate-300" size={24} />
                         )}
                       </div>
-
-                      <div className="space-y-1">
-                        <label className="px-3.5 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold rounded-lg text-xs cursor-pointer inline-flex items-center gap-1.5 shadow-xs">
-                          <Upload size={13} />
-                          <span>Carregar</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                if (file.size > 2 * 1024 * 1024) {
-                                  showToast('O logótipo excede o limite máximo de 2MB.');
-                                  return;
-                                }
-                                const reader = new FileReader();
-                                reader.onloadend = async () => {
-                                  const result = reader.result as string;
-                                  const avScan = await scanFileForMalware({
-                                    base64: result.split(',')[1] || '',
-                                    mimeType: file.type || 'image/png',
-                                    fileName: file.name,
-                                    maxBytes: 2 * 1024 * 1024
-                                  });
-                                  if (!avScan.safe) {
-                                    showToast(`Ficheiro bloqueado por segurança: ${avScan.reason}`);
-                                    return;
-                                  }
-                                  setLogoUrl(result);
-                                };
-                                reader.readAsDataURL(file);
+                      <label className="px-3.5 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold rounded-lg text-xs cursor-pointer inline-flex items-center gap-1.5 shadow-xs">
+                        <Upload size={13} />
+                        <span>Carregar</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 2 * 1024 * 1024) {
+                              showToast('O logótipo excede o limite de 2 MB.');
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onloadend = async () => {
+                              const result = String(reader.result || '');
+                              const avScan = await scanFileForMalware({
+                                base64: result.split(',')[1] || '',
+                                mimeType: file.type || 'image/png',
+                                fileName: file.name,
+                                maxBytes: 2 * 1024 * 1024
+                              });
+                              if (!avScan.safe) {
+                                showToast(`Ficheiro bloqueado: ${avScan.reason}`);
+                                return;
                               }
-                            }}
-                          />
-                        </label>
-                        <p className="text-[10px] text-slate-400">PNG, JPG, WebP ou SVG. Máx. 2MB.</p>
-                      </div>
+                              setLogoUrl(result);
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
                     </div>
                   </div>
 
-                  {/* Nome da Empresa */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                      NOME DA EMPRESA <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={nomeEmpresa}
-                      onChange={(e) => setNomeEmpresa(e.target.value)}
-                      placeholder="Ex: Comercial Maputo Lda"
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                    />
-                  </div>
-
-                  {/* País */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                      PAÍS
-                    </label>
-                    <select
-                      value={empresaPais}
-                      onChange={(e) => setEmpresaPais(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all cursor-pointer"
-                    >
-                      <option value="Moçambique">Moçambique</option>
-                      <option value="África do Sul">África do Sul</option>
-                      <option value="Angola">Angola</option>
-                    </select>
-                  </div>
-
-                  {/* Província & Distrito */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        PROVÍNCIA / ESTADO
-                      </label>
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">PAÍS</label>
+                      <select
+                        value={empresaPais}
+                        onChange={(e) => setEmpresaPais(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15"
+                      >
+                        <option value="Moçambique">Moçambique</option>
+                        <option value="África do Sul">África do Sul</option>
+                        <option value="Angola">Angola</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">PROVÍNCIA</label>
                       <select
                         value={provincia}
                         onChange={(e) => setProvincia(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all cursor-pointer"
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15"
                       >
                         <option value="Maputo Cidade">Maputo Cidade</option>
                         <option value="Maputo Província">Maputo Província</option>
@@ -1034,129 +1063,71 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                         <option value="Niassa">Niassa</option>
                       </select>
                     </div>
+                  </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        DISTRITO / CIDADE
-                      </label>
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">DISTRITO / CIDADE</label>
                       <input
                         type="text"
                         value={distrito}
                         onChange={(e) => setDistrito(e.target.value)}
-                        placeholder="Distrito / Cidade"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
                       />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide flex items-center gap-1">
+                        <Tag size={12} className="text-indigo-600" />
+                        REGIME DE IVA
+                      </label>
+                      <select
+                        value={regimeIva}
+                        onChange={(e) => setRegimeIva(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800"
+                      >
+                        <option value="IVA Normal">IVA Normal (16%)</option>
+                        <option value="IVA Isento">IVA Isento (Art. 9º)</option>
+                        <option value="IVA Simplificado">IVA Simplificado (5%)</option>
+                      </select>
                     </div>
                   </div>
 
-                  {/* Regime de IVA */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide flex items-center gap-1">
-                      <Tag size={12} className="text-indigo-600" />
-                      REGIME DE IVA
-                    </label>
-                    <select
-                      value={regimeIva}
-                      onChange={(e) => setRegimeIva(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all cursor-pointer"
-                    >
-                      <option value="IVA Normal">IVA Normal (16%) — contabilidade completa</option>
-                      <option value="IVA Isento">IVA Isento — artigo 9º do Código do IVA</option>
-                      <option value="IVA Simplificado">IVA Simplificado (5%)</option>
-                    </select>
-                    <p className="text-[10px] text-slate-400">
-                      Regime normal de IVA (16%) — contabilidade completa. Iremos criar as taxas de imposto correspondentes automaticamente.
-                    </p>
-                  </div>
-
-                  {/* NUEL & NUIT */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        NUEL
-                      </label>
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">NUEL</label>
                       <input
                         type="text"
                         value={nuel}
                         onChange={(e) => setNuel(e.target.value)}
                         placeholder="100123456"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono"
                       />
                     </div>
-
                     <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        NUIT
-                      </label>
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">ENDEREÇO</label>
                       <input
                         type="text"
-                        value={nuit}
-                        onChange={(e) => setNuit(e.target.value)}
-                        placeholder="400123456"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
+                        value={endereco}
+                        onChange={(e) => setEndereco(e.target.value)}
+                        placeholder="Av. 25 de Setembro..."
+                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
                       />
                     </div>
                   </div>
 
-                  {/* Email & Telefone */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        EMAIL
-                      </label>
-                      <input
-                        type="email"
-                        value={empresaEmail}
-                        onChange={(e) => setEmpresaEmail(e.target.value)}
-                        placeholder="empresa@exemplo.com"
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                        TELEFONE
-                      </label>
-                      <input
-                        type="tel"
-                        value={empresaTelefone}
-                        onChange={(e) => setEmpresaTelefone(e.target.value)}
-                        placeholder="+258..."
-                        className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Endereço */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                      ENDEREÇO
-                    </label>
-                    <input
-                      type="text"
-                      value={endereco}
-                      onChange={(e) => setEndereco(e.target.value)}
-                      placeholder="Rua..."
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                    />
-                  </div>
-
-                  {/* Buttons */}
                   <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                     <button
+                      type="button"
                       onClick={() => setCompanySubStep('LOOKUP')}
-                      className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
                     >
                       <ArrowLeft size={14} />
                       Voltar
                     </button>
-
                     <button
-                      onClick={() => {
-                        showToast('Empresa criada!');
-                        setCurrentStep(2);
-                      }}
-                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
+                      type="button"
+                      onClick={() => setCurrentStep(2)}
+                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/15"
                     >
                       Continuar
                       <ArrowRight size={14} />
@@ -1167,28 +1138,102 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
             </motion.div>
           )}
 
-          {/* STEP 2: SUBSCRIÇÃO & PAGAMENTO (Images 6 & 7) */}
+          {/* STEP 2: ARMAZÉM INICIAL */}
           {currentStep === 2 && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white rounded-2xl p-6 sm:p-10 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6 max-w-2xl mx-auto"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-50 text-indigo-700 rounded-xl flex items-center justify-center shrink-0">
+                  <Warehouse size={20} />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900">Armazém / Unidade Inicial</h2>
+                  <p className="text-xs text-slate-500">Defina a unidade operacional principal antes de escolher o pacote.</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
+                    NOME DO ARMAZÉM
+                  </label>
+                  <input
+                    type="text"
+                    value={armazemNome}
+                    onChange={(e) => setArmazemNome(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">CÓDIGO</label>
+                    <input
+                      type="text"
+                      value={armazemCodigo}
+                      onChange={(e) => setArmazemCodigo(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">LOCALIZAÇÃO</label>
+                    <input
+                      type="text"
+                      value={armazemEndereco}
+                      onChange={(e) => setArmazemEndereco(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(1)}
+                  className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft size={14} />
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentStep(3);
+                    setPaymentSubStep('PLANS');
+                  }}
+                  className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/15"
+                >
+                  Escolher Pacote &amp; Transferência
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* STEP 3: ESCOLHA DO PACOTE + ENVIO E VALIDAÇÃO DE COMPROVATIVO DE TRANSFERÊNCIA (BLOQUEIO FINAL) */}
+          {currentStep === 3 && (
             <motion.div
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               className="space-y-6"
             >
               {paymentSubStep === 'PLANS' ? (
-                /* Step 2.1: Plan Selector (Image 6) */
                 <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                      <h2 className="text-lg font-black text-slate-900">Escolha o seu Plano</h2>
+                      <h2 className="text-lg font-black text-slate-900">Escolha o seu Pacote ClickPay</h2>
                       <p className="text-xs text-slate-500">
-                        Preços em Meticais adaptados ao mercado moçambicano. Poupe 20% na subscrição anual.
+                        As credenciais e o código de ativação serão emitidos exatamente para o pacote que selecionar abaixo.
                       </p>
                     </div>
 
                     <div className="inline-flex items-center bg-slate-100 rounded-xl p-1 self-start sm:self-auto shrink-0">
                       <button
                         type="button"
-                        onClick={() => setBillingCycle('mensal')}
+                        onClick={() => handlePlanChange(selectedPlan, 'mensal')}
                         className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                           billingCycle === 'mensal'
                             ? 'bg-blue-900 text-white shadow-xs'
@@ -1199,7 +1244,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       </button>
                       <button
                         type="button"
-                        onClick={() => setBillingCycle('anual')}
+                        onClick={() => handlePlanChange(selectedPlan, 'anual')}
                         className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                           billingCycle === 'anual'
                             ? 'bg-blue-900 text-white shadow-xs'
@@ -1222,7 +1267,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                       return (
                         <div
                           key={plan.id}
-                          onClick={() => setSelectedPlan(plan.id)}
+                          onClick={() => handlePlanChange(plan.id, billingCycle)}
                           className={`p-5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-4 relative ${
                             plan.recommended
                               ? isSelected
@@ -1250,7 +1295,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                               <span className="text-[10px] text-slate-400 font-bold">/mês</span>
                               {billingCycle === 'anual' && (
                                 <p className="text-[10px] font-bold text-emerald-700 mt-0.5">
-                                  Total anual: {formatMzn(plan.annualTotalMzn, { spaceGrouping: true })} (Poupe {formatMzn(plan.annualSavingsMzn, { spaceGrouping: true })})
+                                  Total anual a transferir: {formatMzn(plan.annualTotalMzn, { spaceGrouping: true })}
                                 </p>
                               )}
                             </div>
@@ -1274,76 +1319,9 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
                   <div className="flex items-center justify-between pt-4 border-t border-slate-100">
                     <button
-                      onClick={() => setCurrentStep(1)}
-                      className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <ArrowLeft size={14} />
-                      Voltar
-                    </button>
-
-                    <button
-                      onClick={() => setPaymentSubStep('PAYMENT')}
-                      className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-indigo-600/20 cursor-pointer"
-                    >
-                      Continuar para Activação (Sem Pagamento)
-                      <ArrowRight size={14} />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Step 2.2: Pagamentos Bloqueados — Apenas Facturação */
-                <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6 max-w-2xl mx-auto">
-                  <div>
-                    <h2 className="text-base font-black text-slate-900">Activação da Conta · Apenas Facturação</h2>
-                    <p className="text-xs text-slate-500">Conclua o registo sem efetuar pagamentos online no sistema.</p>
-                  </div>
-
-                  {/* Summary Box */}
-                  <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
-                        PLANO SELECCIONADO
-                      </span>
-                      <span className="text-sm font-black text-slate-900">
-                        {getPlanSpec(selectedPlan).name} · {billingCycle === 'anual' ? 'Anual (-20%)' : 'Mensal'}
-                      </span>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
-                        PAGAMENTO NO SISTEMA
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-xs font-black text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg">
-                        <Lock size={12} />
-                        Bloqueado ({getPlanPrice(selectedPlan)} suspenso)
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Locked Payment Notice */}
-                  <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-5 space-y-3">
-                    <div className="flex items-start gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
-                        <Lock size={18} />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="text-xs font-black text-rose-950 uppercase tracking-wide">
-                          Módulo de Pagamentos Bloqueado para Novos Cadastros
-                        </h3>
-                        <p className="text-xs text-rose-900 leading-relaxed">
-                          Todos os meios e operações de pagamento (<b>M-Pesa, e-Mola, mKesh, Cartão VISA e transferências</b>) encontram-se bloqueados durante a solicitação de cadastro e após a entrada no sistema.
-                        </p>
-                        <p className="text-[11px] text-slate-700 font-semibold pt-1">
-                          A sua empresa terá acesso imediato apenas ao módulo de <b>Facturação &amp; Vendas</b> (emissão de faturas A4 e gestão documental).
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                    <button
-                      onClick={() => setPaymentSubStep('PLANS')}
-                      className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                      type="button"
+                      onClick={() => setCurrentStep(2)}
+                      className="px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer"
                     >
                       <ArrowLeft size={14} />
                       Voltar
@@ -1351,118 +1329,457 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
 
                     <button
                       type="button"
-                      onClick={() => setCurrentStep(3)}
-                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
+                      onClick={() => {
+                        setTransferAmount(String(expectedFee));
+                        setPaymentSubStep('PAYMENT');
+                      }}
+                      className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-md shadow-blue-900/15"
                     >
-                      Confirmar Activação (Apenas Facturação)
+                      Continuar para Pagamento &amp; Comprovativo ({formatMzn(expectedFee)})
                       <ArrowRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Sub-step 3.2: Gate Obrigatório de Transferência + Upload & Validação de Comprovativo */
+                <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6 max-w-2xl mx-auto">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg mb-2">
+                        <Lock size={11} />
+                        Etapa Obrigatória de Confirmação
+                      </span>
+                      <h2 className="text-lg font-black text-slate-900">
+                        Pagamento por Transferência &amp; Validação de Comprovativo
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Não é possível finalizar nem entrar no ERP sem enviar um comprovativo válido do valor do pacote. O ficheiro será enviado automaticamente para <b>gersonjcumbane@gmail.com</b>.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Resumo do Pacote e Valor */}
+                  <div className="bg-slate-900 text-white rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block">
+                        PACOTE ESCOLHIDO
+                      </span>
+                      <span className="text-base font-black">
+                        {selectedPlanSpec.name} · {billingCycle === 'anual' ? 'Subscrição Anual (-20%)' : 'Subscrição Mensal'}
+                      </span>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        {selectedPlanSpec.includedUsersLabel} · Até {selectedPlanSpec.includedEmployees} colaboradores
+                      </p>
+                    </div>
+                    <div className="sm:text-right">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block">
+                        VALOR EXATO A TRANSFERIR
+                      </span>
+                      <span className="text-2xl font-black text-emerald-400 font-mono">
+                        {formatMzn(expectedFee)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Coordenadas Bancárias & Carteiras Móveis */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2.5">
+                    <p className="text-[11px] font-black text-slate-800 uppercase tracking-wider">
+                      Coordenadas Oficiais para Transferência (ClickPay Moçambique, Lda)
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px] font-mono">
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5">
+                        <span className="font-bold text-slate-900 block font-sans">Millennium BIM</span>
+                        <span>Conta: 9944-8833-MZ</span>
+                        <span className="block text-slate-500 text-[10px]">NIB: 0001 0000 9944 8833 01</span>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5">
+                        <span className="font-bold text-slate-900 block font-sans">BCI Fomento</span>
+                        <span>Conta: 1122-3344-MZ</span>
+                        <span className="block text-slate-500 text-[10px]">NIB: 0008 0000 1122 3344 02</span>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5">
+                        <span className="font-bold text-slate-900 block font-sans">M-Pesa / e-Mola</span>
+                        <span>84 201 4173 / 86 139 0061</span>
+                        <span className="block text-slate-500 text-[10px]">Titular: Gerson Cumbane</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {formError && (
+                    <div className="p-3.5 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold flex items-start gap-2">
+                      <AlertTriangle size={15} className="shrink-0 mt-0.5 text-rose-600" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
+
+                  {/* Campos Obrigatórios de Validação do Comprovativo */}
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide flex items-center gap-1">
+                          <CreditCard size={12} className="text-blue-900" />
+                          CANAL DA TRANSFERÊNCIA <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          value={transferMethod}
+                          onChange={(e) => setTransferMethod(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800"
+                        >
+                          {TRANSFER_CHANNELS.map((ch) => (
+                            <option key={ch} value={ch}>{ch}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide flex items-center gap-1">
+                          <Calendar size={12} className="text-blue-900" />
+                          DATA DA TRANSFERÊNCIA <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={transferDate}
+                          onChange={(e) => setTransferDate(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
+                          REFERÊNCIA / Nº TALÃO DA OPERAÇÃO <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={transferReference}
+                          onChange={(e) => setTransferReference(e.target.value)}
+                          placeholder="Ex: TRF-2026-88412 ou MP2611..."
+                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15"
+                        />
+                        {transferReference.trim().length > 0 && transferReference.trim().length < 4 && (
+                          <span className="text-[10px] text-rose-600 font-semibold block">
+                            Mínimo de 4 caracteres.
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
+                          VALOR TRANSFERIDO (MT) <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={expectedFee}
+                          step="1"
+                          required
+                          value={transferAmount}
+                          onChange={(e) => setTransferAmount(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15"
+                        />
+                        <span className={`text-[10px] font-bold block ${numericTransferredAmount >= expectedFee ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {numericTransferredAmount >= expectedFee
+                            ? `✓ Valor compatível com o pacote (${formatMzn(expectedFee)})`
+                            : `O valor transferido deve ser pelo menos ${formatMzn(expectedFee)}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Campo de Validação & Anexo do Comprovativo */}
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide block">
+                        ANEXAR COMPROVATIVO DE TRANSFERÊNCIA (PDF, PNG OU JPG · MÁX. 2 MB) <span className="text-rose-500">*</span>
+                      </label>
+                      <label
+                        className={`flex flex-col sm:flex-row items-center justify-between gap-3 p-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all ${
+                          transferProofVerified
+                            ? 'border-emerald-400 bg-emerald-50/70'
+                            : transferProofError
+                            ? 'border-rose-400 bg-rose-50/60'
+                            : 'border-slate-300 bg-slate-50 hover:border-blue-900 hover:bg-blue-50/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${transferProofVerified ? 'bg-emerald-600 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
+                            {transferProofVerified ? <CheckCircle2 size={20} /> : <Upload size={18} />}
+                          </div>
+                          <div>
+                            {transferProofVerified ? (
+                              <>
+                                <p className="text-xs font-extrabold text-emerald-950">
+                                  ✓ Comprovativo Validado: {transferProofName}
+                                </p>
+                                <p className="text-[11px] text-emerald-700">
+                                  {transferProofSizeKb} KB · Verificado e pronto para envio automático a gersonjcumbane@gmail.com
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-xs font-bold text-slate-800">
+                                  Clique aqui para selecionar o comprovativo da transferência
+                                </p>
+                                <p className="text-[10px] text-slate-500">
+                                  Aceita recibo bancário em PDF, captura de ecrã M-Pesa/e-Mola em PNG ou JPG
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="px-3.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 shrink-0 shadow-xs">
+                          {transferProofVerified ? 'Substituir' : 'Selecionar Ficheiro'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,application/pdf,image/png,image/jpeg,image/webp"
+                          onChange={handleTransferProofUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      {transferProofError && (
+                        <p className="text-[11px] font-bold text-rose-700">{transferProofError}</p>
+                      )}
+                    </div>
+
+                    <label className="flex items-start gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={confirmTransferHonesty}
+                        onChange={(e) => setConfirmTransferHonesty(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900 cursor-pointer"
+                      />
+                      <span className="text-[11px] text-slate-700 leading-relaxed">
+                        Confirmo que efetuei a transferência para o pacote <b>{selectedPlanSpec.name}</b> e autorizo o envio automático do comprovativo para <b>gersonjcumbane@gmail.com</b> para emissão do código de ativação e credenciais.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentSubStep('PLANS')}
+                      className="w-full sm:w-auto px-4 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <ArrowLeft size={14} />
+                      Alterar Pacote
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!isTransferProofValid || isSubmitting}
+                      onClick={handleSubmitTransferProof}
+                      className="w-full sm:w-auto px-6 py-3 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>A validar e enviar comprovativo...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send size={14} />
+                          <span>Enviar Comprovativo &amp; Solicitar Ativação</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
               )}
             </motion.div>
           )}
-
-          {/* STEP 3: CONFIGURAÇÃO INICIAL (ARMAZÉM) (Image 8) */}
-          {currentStep === 3 && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-white rounded-2xl p-6 sm:p-10 shadow-xl shadow-slate-200/50 border border-slate-100 space-y-6 max-w-2xl mx-auto"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-indigo-50 text-indigo-700 rounded-xl flex items-center justify-center shrink-0">
-                  <Warehouse size={20} />
-                </div>
-                <div>
-                  <h2 className="text-base font-black text-slate-900">Armazém Inicial</h2>
-                  <p className="text-xs text-slate-500">Crie o seu primeiro armazém — pode adicionar mais depois em Inventário.</p>
-                </div>
-              </div>
-
-              {formError && (
-                <div className="p-3.5 bg-rose-50 text-rose-800 border border-rose-100 rounded-xl text-xs font-semibold">
-                  {formError}
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                    NOME DO ARMAZÉM <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={armazemNome}
-                    onChange={(e) => setArmazemNome(e.target.value)}
-                    placeholder="Armazém Principal"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                    CÓDIGO
-                  </label>
-                  <input
-                    type="text"
-                    value={armazemCodigo}
-                    onChange={(e) => setArmazemCodigo(e.target.value)}
-                    placeholder="CPY1"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
-                    ENDEREÇO
-                  </label>
-                  <input
-                    type="text"
-                    value={armazemEndereco}
-                    onChange={(e) => setArmazemEndereco(e.target.value)}
-                    placeholder="Endereço do armazém"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-900/15 focus:border-blue-900 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleFinishOnboarding}
-                  disabled={isSubmitting}
-                  className="px-4 py-2.5 text-slate-500 hover:text-slate-800 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                >
-                  Saltar
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleFinishOnboarding}
-                  disabled={isSubmitting}
-                  className="px-6 py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-900/15 cursor-pointer"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      A configurar ERP...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={16} />
-                      Finalizar configuração
-                    </>
-                  )}
-                </button>
-              </div>
-            </motion.div>
-          )}
-
         </main>
       )}
 
+      {/* STAGE 3: CONTA BLOQUEADA A AGUARDAR CONFIRMAÇÃO + ATIVAÇÃO POR CÓDIGO */}
+      {stage === 'PENDING_PAYMENT' && (
+        <main className="max-w-2xl mx-auto w-full px-4 py-10 flex-1 space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/60 border border-slate-100 space-y-6"
+          >
+            <div className="flex items-start gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                pendingInfo?.status === 'CREDENCIAIS_ENVIADAS' || pendingInfo?.status === 'APROVADO'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : pendingInfo?.status === 'REJEITADO'
+                  ? 'bg-rose-100 text-rose-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}>
+                {pendingInfo?.status === 'CREDENCIAIS_ENVIADAS' || pendingInfo?.status === 'APROVADO' ? (
+                  <CheckCircle2 size={24} />
+                ) : pendingInfo?.status === 'REJEITADO' ? (
+                  <AlertTriangle size={24} />
+                ) : (
+                  <Clock size={24} />
+                )}
+              </div>
+              <div className="space-y-1">
+                <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-900 text-white">
+                  {pendingInfo?.status === 'CREDENCIAIS_ENVIADAS' || pendingInfo?.status === 'APROVADO'
+                    ? 'Pagamento Confirmado · Introduza o Código'
+                    : pendingInfo?.status === 'REJEITADO'
+                    ? 'Comprovativo Recusado'
+                    : 'Acesso Bloqueado · Aguardando Confirmação'}
+                </span>
+                <h1 className="text-xl font-black text-slate-950">
+                  {pendingInfo
+                    ? `Pedido #${pendingInfo.requestId} (${pendingInfo.plano})`
+                    : 'Ativar Conta com Código Confirmado'}
+                </h1>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {pendingInfo
+                    ? `O comprovativo de ${formatMzn(pendingInfo.valorTransferido)} (${pendingInfo.metodoTransferencia} · Ref: ${pendingInfo.referenciaTransferencia}) foi encaminhado para gersonjcumbane@gmail.com. Assim que o Fundador confirmar a recepção do valor, receberá o código de ativação e as credenciais do pacote ${pendingInfo.plano}.`
+                    : 'Se já enviou o seu comprovativo e o Fundador confirmou o pagamento, introduza o e-mail e o código de ativação recebido.'}
+                </p>
+              </div>
+            </div>
+
+            {pendingInfo && (
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Empresa</span>
+                    <span className="font-bold text-slate-900">{pendingInfo.empresa}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Pacote</span>
+                    <span className="font-bold text-blue-900">{pendingInfo.plano}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Transferido</span>
+                    <span className="font-mono font-bold text-emerald-700">{formatMzn(pendingInfo.valorTransferido)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Comprovativo</span>
+                    <span className="font-medium text-slate-700 truncate block">{pendingInfo.comprovativoNome}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={handleRefreshPaymentStatus}
+                    disabled={isCheckingStatus}
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw size={13} className={isCheckingStatus ? 'animate-spin' : ''} />
+                    {isCheckingStatus ? 'A verificar...' : 'Verificar Confirmação'}
+                  </button>
+
+                  {pendingInfo.mailtoUrl && (
+                    <a
+                      href={pendingInfo.mailtoUrl}
+                      className="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                    >
+                      <Mail size={13} />
+                      Enviar Cópia por E-mail
+                    </a>
+                  )}
+
+                  {pendingInfo.whatsappUrl && (
+                    <a
+                      href={pendingInfo.whatsappUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                    >
+                      <Phone size={13} />
+                      Notificar WhatsApp
+                    </a>
+                  )}
+
+                  {pendingInfo.status === 'REJEITADO' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStage('WIZARD');
+                        setCurrentStep(3);
+                        setPaymentSubStep('PAYMENT');
+                      }}
+                      className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      Reenviar Comprovativo
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Formulário de Ativação por Código */}
+            <form onSubmit={handleActivateWithCode} className="border-t border-slate-200 pt-5 space-y-4">
+              <div>
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <Key size={16} className="text-blue-900" />
+                  Já Recebi o Código de Ativação
+                </h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Após o Fundador confirmar o recebimento da transferência, introduza o código recebido para desbloquear o sistema no seu pacote.
+                </p>
+              </div>
+
+              {activationError && (
+                <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold">
+                  {activationError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 block">E-mail da Conta</label>
+                  <input
+                    type="email"
+                    required
+                    value={activationEmailInput}
+                    onChange={(e) => setActivationEmailInput(e.target.value)}
+                    placeholder="empresa@exemplo.co.mz"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-700 block">Código de Ativação</label>
+                  <input
+                    type="text"
+                    required
+                    value={activationCodeInput}
+                    onChange={(e) => setActivationCodeInput(e.target.value.toUpperCase())}
+                    placeholder="Ex: CP-PRO-9A4B2C1D"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="submit"
+                  disabled={isActivatingCode}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20"
+                >
+                  {isActivatingCode ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>A validar código...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={15} />
+                      <span>Validar Código &amp; Entrar no ERP</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={onEnterLogin || onCancel}
+                  className="px-5 py-3 border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  Ir para Login
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </main>
+      )}
     </div>
   );
 }

@@ -10,7 +10,7 @@
         "role": { "type": "string", "enum": ["SUPER_ADMIN_PAYROLL", "CLIENTE_EMPRESA"], "description": "Role of the user account" },
         "companyId": { "type": "string", "description": "ID of the associated client company", "maxLength": 128 },
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp", "maxLength": 64 },
-        "status": { "type": "string", "enum": ["ativo", "suspenso"], "description": "Whether the user account is active" }
+        "status": { "type": "string", "enum": ["ativo", "suspenso", "pendente"], "description": "Whether the user account is active or pending payment confirmation" }
       },
       "required": ["uid", "email", "role", "createdAt", "status"]
     },
@@ -104,7 +104,7 @@
     },
     "CredentialRequest": {
       "title": "CredentialRequest",
-      "description": "Access credential request submitted by prospective or existing clients",
+      "description": "Access credential and transfer proof request submitted by prospective clients awaiting Founder payment confirmation",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -114,15 +114,24 @@
         "telefone": { "type": "string", "maxLength": 64 },
         "nuit": { "type": "string", "maxLength": 32 },
         "planoEscolhido": { "type": "string", "maxLength": 64 },
+        "cicloFaturacao": { "type": "string", "enum": ["mensal", "anual"] },
         "precoMensal": { "type": "number" },
-        "status": { "type": "string", "enum": ["PENDENTE", "APROVADO", "CREDENCIAIS_ENVIADAS"] },
+        "metodoTransferencia": { "type": "string", "maxLength": 64 },
+        "referenciaTransferencia": { "type": "string", "maxLength": 128 },
+        "valorTransferido": { "type": "number" },
+        "dataTransferencia": { "type": "string", "maxLength": 64 },
+        "comprovativoNome": { "type": "string", "maxLength": 256 },
+        "activationCodePrefix": { "type": "string", "maxLength": 32 },
+        "motivoRejeicao": { "type": "string", "maxLength": 512 },
+        "aprovadoEm": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["PENDENTE", "PENDENTE_PAGAMENTO", "APROVADO", "CREDENCIAIS_ENVIADAS", "REJEITADO"] },
         "dataSolicitacao": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "nomeEmpresa", "nomeResponsavel", "email", "telefone", "planoEscolhido", "precoMensal", "status", "dataSolicitacao"]
     },
     "LandingCredentialRequest": {
       "title": "LandingCredentialRequest",
-      "description": "Onboarding credential request notification record",
+      "description": "Onboarding credential and payment proof notification record",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -132,7 +141,15 @@
         "email": { "type": "string", "maxLength": 256 },
         "telefone": { "type": "string", "maxLength": 64 },
         "plano": { "type": "string", "maxLength": 64 },
-        "status": { "type": "string", "enum": ["PENDENTE", "APROVADO", "REGISTADO_ONLINE", "CREDENCIAIS_ENVIADAS"] },
+        "cicloFaturacao": { "type": "string", "enum": ["mensal", "anual"] },
+        "metodoTransferencia": { "type": "string", "maxLength": 64 },
+        "referenciaTransferencia": { "type": "string", "maxLength": 128 },
+        "valorTransferido": { "type": "number" },
+        "dataTransferencia": { "type": "string", "maxLength": 64 },
+        "comprovativoNome": { "type": "string", "maxLength": 256 },
+        "activationCodePrefix": { "type": "string", "maxLength": 32 },
+        "motivoRejeicao": { "type": "string", "maxLength": 512 },
+        "status": { "type": "string", "enum": ["PENDENTE", "PENDENTE_PAGAMENTO", "APROVADO", "REGISTADO_ONLINE", "CREDENCIAIS_ENVIADAS", "REJEITADO"] },
         "createdAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "empresa", "email", "plano", "status", "createdAt"]

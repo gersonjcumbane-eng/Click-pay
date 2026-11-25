@@ -17,7 +17,7 @@ import {
   queryMobileTransactionStatus,
   processOperatorWebhook
 } from './src/services/mobileMoneyService';
-import { getPlanExtraSlipFeeMzn, getPlanFeeMzn } from './src/lib/pricing';
+import { formatMzn, getPlanExtraSlipFeeMzn, getPlanFeeMzn, getPlanSpec } from './src/lib/pricing';
 import { Employee } from './src/types';
 import { 
   employees, 
@@ -600,6 +600,49 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
   // Base de dados simulada de clientes que VOCÊS vão registar manualmente
   const clientesRegistadosPelosFounders: any[] = [];
+  const paymentProofRequests: any[] = [];
+  const credentialRequestsList: any[] = [];
+
+  function findPaymentProofForEmail(emailNorm: string) {
+    const clean = String(emailNorm || '').toLowerCase().trim();
+    if (!clean) return undefined;
+    return paymentProofRequests.find((r) => String(r.email || '').toLowerCase().trim() === clean);
+  }
+
+  function buildPendingPaymentResponsePayload(emailNorm: string, fallbackPlan?: string) {
+    const proof = findPaymentProofForEmail(emailNorm);
+    const comp = baseDadosClientes.find((c) => String(c.email || '').toLowerCase().trim() === emailNorm);
+    const status = proof?.status || (comp?.subscription_status === 'pendente' ? 'PENDENTE_PAGAMENTO' : 'PENDENTE_PAGAMENTO');
+    const isRejected = status === 'REJEITADO';
+    return {
+      code: 'PAYMENT_APPROVAL_PENDING',
+      erro: isRejected
+        ? `O seu comprovativo de transferência foi recusado (${proof?.motivoRejeicao || 'verifique os dados enviados'}). Reenvie o comprovativo na criação de conta ou contacte gersonjcumbane@gmail.com.`
+        : 'A sua conta aguarda confirmação do pagamento por transferência pelo Fundador (gersonjcumbane@gmail.com). Assim que confirmado, receberá o código de ativação e as credenciais do seu pacote.',
+      requestId: proof?.id || null,
+      plano: proof?.planoEscolhido || comp?.subscription_plan || fallbackPlan || 'Starter',
+      valorEsperado: proof?.valorEsperado || comp?.fee_base || 0,
+      status,
+      motivoRejeicao: proof?.motivoRejeicao || ''
+    };
+  }
+
+  function isAccountPendingPayment(emailNorm: string): boolean {
+    if (!emailNorm || isFounderEmail(emailNorm)) return false;
+    const proof = findPaymentProofForEmail(emailNorm);
+    if (proof && (proof.status === 'PENDENTE_PAGAMENTO' || proof.status === 'REJEITADO')) {
+      return true;
+    }
+    const comp = baseDadosClientes.find((c) => String(c.email || '').toLowerCase().trim() === emailNorm);
+    if (comp && String(comp.subscription_status || '').toLowerCase() === 'pendente') {
+      return true;
+    }
+    const sys = systemUsersList.find((u) => String(u.email || '').toLowerCase().trim() === emailNorm);
+    if (sys && sys.pendingPaymentApproval) {
+      return true;
+    }
+    return false;
+  }
 
   // Base de dados simulada de cópias de segurança (Backup) na Nuvem
   const baseDadosBackups: any[] = [];
@@ -1189,6 +1232,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         deletedSeedEmployeeIds: Array.from(deletedSeedEmployeeIds),
         clients: baseDadosClientes,
         registeredUsers: clientesRegistadosPelosFounders,
+        paymentProofRequests: paymentProofRequests.slice(0, 100),
+        credentialRequestsList: credentialRequestsList.slice(0, 100),
         systemUsers: sanitizedSystemUsers,
         apiTokens: sanitizedTokens,
         otpSecurityConfig,
@@ -1242,6 +1287,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       if (Array.isArray(parsed.registeredUsers)) {
         clientesRegistadosPelosFounders.length = 0;
         clientesRegistadosPelosFounders.push(...parsed.registeredUsers);
+      }
+      if (Array.isArray(parsed.paymentProofRequests)) {
+        paymentProofRequests.length = 0;
+        paymentProofRequests.push(...parsed.paymentProofRequests.slice(0, 100));
+      }
+      if (Array.isArray(parsed.credentialRequestsList)) {
+        credentialRequestsList.length = 0;
+        credentialRequestsList.push(...parsed.credentialRequestsList.slice(0, 100));
       }
       if (Array.isArray(parsed.systemUsers) && parsed.systemUsers.length > 0) {
         const mergedMap = new Map<string, any>();
@@ -1603,6 +1656,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     // 2. Verificar na lista global de utilizadores do sistema (RH, Contabilidade, utilizadores gerados automaticamente, etc.)
     const systemUser = systemUsersList.find(u => String(u.email || '').toLowerCase().trim() === emailNorm);
     if (systemUser) {
+      if (isAccountPendingPayment(emailNorm)) {
+        return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm, systemUser.plan));
+      }
       if (systemUser.status === 'inativo') {
         return res.status(403).json({ erro: 'Esta conta encontra-se desativada. Contacte o Administrador.' });
       }
@@ -1676,6 +1732,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       c => String(c.email || '').toLowerCase().trim() === emailNorm
     );
     if (clienteEncontrado) {
+      if (isAccountPendingPayment(emailNorm)) {
+        return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm));
+      }
       const storedRegPass = String(clienteEncontrado.password || '');
       const isCorrectPassword =
         matchesRotatedHash ||
@@ -1721,6 +1780,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     );
 
     if (clienteErp) {
+      if (isAccountPendingPayment(emailNorm)) {
+        return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm, clienteErp.subscription_plan));
+      }
       const storedClientPass = String(clienteErp.password || '');
       const matchesStoredClient = storedClientPass
         ? (await verifyPassword(passwordClean, storedClientPass)) || (await verifyPassword(passwordRaw, storedClientPass))
@@ -1797,7 +1859,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             const companyName = f.companyName?.stringValue || f.tradeName?.stringValue || 'Empresa ClickPay';
             const docPassword = f.adminPassword?.stringValue || '';
             const docPlan = f.plan?.stringValue || 'Starter';
-            const docStatus = String(f.status?.stringValue || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo';
+            const rawDocStatus = String(f.status?.stringValue || 'ativo').toLowerCase();
+            const docStatus = rawDocStatus === 'suspenso' ? 'suspenso' : rawDocStatus === 'pendente' ? 'pendente' : 'ativo';
             const docNuit = f.nuit?.stringValue || '400000000';
             const docFee = Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || getPlanFeeMzn(docPlan));
 
@@ -1806,6 +1869,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               (await verifyPassword(passwordClean, docPassword)) ||
               (await verifyPassword(passwordRaw, docPassword));
             if (passwordMatches) {
+              if (docStatus === 'pendente' || isAccountPendingPayment(emailNorm)) {
+                return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm, docPlan));
+              }
               const planMapped = normalizeSubscriptionPlan(docPlan);
 
               let restored = baseDadosClientes.find(c => c.id === docId || String(c.email || '').toLowerCase().trim() === emailNorm);
@@ -1862,6 +1928,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
     // 6. Fallback para contas autenticadas exclusivamente via Firebase Auth (cria espaço isolado limpo, nunca cli_bronze!)
     if (isFirebaseAuthed) {
+      if (isAccountPendingPayment(emailNorm)) {
+        return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm));
+      }
       let isolatedComp = baseDadosClientes.find(c => String(c.email || '').toLowerCase().trim() === emailNorm);
       if (!isolatedComp) {
         const isoId = `cli_fb_${crypto.createHash('md5').update(emailNorm).digest('hex').slice(0, 10)}`;
@@ -2259,6 +2328,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       // 2. Utilizador interno do sistema
       const sysUser = systemUsersList.find(u => String(u.email || '').toLowerCase().trim() === emailNorm);
       if (sysUser) {
+        if (isAccountPendingPayment(emailNorm)) {
+          return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm, sysUser.plan));
+        }
         if (sysUser.status === 'inativo') {
           return res.status(403).json({ erro: 'Esta conta encontra-se desativada.' });
         }
@@ -2294,6 +2366,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         u => String(u.email || '').toLowerCase().trim() === emailNorm
       );
       if (regUser) {
+        if (isAccountPendingPayment(emailNorm)) {
+          return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm));
+        }
         const regCompany = baseDadosClientes.find(c => c.id === regUser.empresa_id);
         return res.json({
           sucesso: true,
@@ -2351,7 +2426,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
               const f = matchedDoc.document.fields;
               const docId = f.id?.stringValue || matchedDoc.document.name?.split('/').pop() || `cli_fs_${Date.now()}`;
               const rawPlan = f.plan?.stringValue || f.subscription_plan?.stringValue || 'Bronze';
-              const rawStatus = f.status?.stringValue || f.subscription_status?.stringValue || 'ativo';
+              const rawStatusLower = String(f.status?.stringValue || f.subscription_status?.stringValue || 'ativo').toLowerCase();
+              const resolvedFsStatus = rawStatusLower === 'suspenso' ? 'suspenso' : rawStatusLower === 'pendente' ? 'pendente' : 'ativo';
               clienteErp = adicionarClienteEmpresa({
                 id: docId,
                 nome: f.companyName?.stringValue || f.tradeName?.stringValue || f.nome?.stringValue || 'Empresa ClickPay',
@@ -2365,7 +2441,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
                 telefone: f.phone?.stringValue || f.telefone?.stringValue || '+258 84 000 0000',
                 logo: '/clickpay-logo.png',
                 password: '',
-                subscription_status: (String(rawStatus).toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo') as any,
+                subscription_status: resolvedFsStatus as any,
                 subscription_plan: normalizeSubscriptionPlan(rawPlan),
                 next_billing_date: getDefaultNextBillingDate(),
                 fee_base: Number(f.monthlyFee?.integerValue || f.monthlyFee?.doubleValue || f.fee_base?.integerValue || f.fee_base?.doubleValue || getPlanFeeMzn(rawPlan)),
@@ -2376,6 +2452,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             }
           }
         }
+      }
+
+      if (isAccountPendingPayment(emailNorm) || clienteErp?.subscription_status === 'pendente') {
+        return res.status(403).json(buildPendingPaymentResponsePayload(emailNorm, clienteErp?.subscription_plan));
       }
 
       // 5. Auto-provisionamento seguro para qualquer conta Google verificada ainda sem empresa associada
@@ -3380,10 +3460,10 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     });
   });
 
-  // REGISTO COMPLETO VIA CRIAÇÃO DE CONTA / ONBOARDING CLICKPAY
+  // REGISTO COMPLETO VIA CRIAÇÃO DE CONTA / ONBOARDING CLICKPAY (BLOQUEADO ATÉ ENVIO E CONFIRMAÇÃO DE TRANSFERÊNCIA)
   app.post('/api/auth/register-onboarding', async (req: Request, res: Response) => {
+    const body = req.body || {};
     const {
-      existingCompanyId,
       nome,
       apelido,
       email,
@@ -3400,162 +3480,843 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       logo,
       plano,
       billingCycle,
-      feeBase: bodyFeeBase,
       metodoPagamento,
-      armazemNome,
-      armazemCodigo
-    } = req.body;
+      metodoTransferencia,
+      transferMethod,
+      referenciaTransferencia,
+      transferReference,
+      valorTransferido,
+      transferAmount,
+      dataTransferencia,
+      transferDate,
+      comprovativoNome,
+      transferProofName,
+      comprovativoMimeType,
+      transferProofMimeType,
+      comprovativoBase64,
+      transferProofBase64
+    } = body;
 
     const cleanEmail = String(email || '').toLowerCase().trim();
     const cleanEmpresa = String(nomeEmpresa || '').trim();
-    const cleanNuit = String(nuit || '').trim();
+    const cleanNuit = String(nuit || '').replace(/\D/g, '').trim();
     const cleanPassword = String(password || '').trim();
+    const cleanContacto = String(contacto || '').trim() || '+258 84 000 0000';
 
-    if (!cleanEmail || !cleanPassword || !cleanEmpresa) {
-      return res.status(400).json({ erro: 'Campos obrigatórios em falta (Nome da Empresa, E-mail corporativo, NUIT, Senha).' });
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ erro: 'Indique um endereço de e-mail corporativo válido.' });
+    }
+    if (!cleanEmpresa || cleanEmpresa.length < 2) {
+      return res.status(400).json({ erro: 'Indique a denominação social ou nome da empresa.' });
+    }
+    if (!/^\d{9}$/.test(cleanNuit)) {
+      return res.status(400).json({ erro: 'O NUIT da empresa deve conter exatamente 9 dígitos numéricos.' });
+    }
+    if (!cleanPassword || cleanPassword.length < 8) {
+      return res.status(400).json({ erro: 'A palavra-passe deve ter pelo menos 8 caracteres.' });
+    }
+    if (isFounderEmail(cleanEmail)) {
+      return res.status(409).json({ erro: 'Este e-mail pertence à conta de Fundador do sistema.' });
     }
 
     try {
-      const selectedPlan = plano || 'Starter';
-      const mappedPlan = normalizeSubscriptionPlan(selectedPlan);
-      const cycle = billingCycle === 'anual' ? 'anual' : 'mensal';
-      const feeBase = Number(bodyFeeBase) || getPlanFeeMzn(selectedPlan, cycle);
-      const feePorSlip = getPlanExtraSlipFeeMzn(selectedPlan);
+      const planSpec = getPlanSpec(plano || 'Starter');
+      const mappedPlan = planSpec.internalCode;
+      const cycle: 'mensal' | 'anual' = billingCycle === 'anual' ? 'anual' : 'mensal';
+      const expectedFee = getPlanFeeMzn(planSpec.id, cycle);
+      const feePorSlip = getPlanExtraSlipFeeMzn(planSpec.id);
       const billingDays = cycle === 'anual' ? 365 : 30;
       const nextBillingDate = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const nomeCompletoUsuario = `${nome || ''} ${apelido || ''}`.trim() || cleanEmpresa;
 
-      // Se já foi criado na Etapa 1 e está a finalizar a configuração na Etapa 3, atualizar a empresa existente
-      if (existingCompanyId) {
-        const existingCompany = baseDadosClientes.find(c => c.id === existingCompanyId);
-        if (existingCompany) {
-          existingCompany.nome = cleanEmpresa;
-          if (cleanNuit) existingCompany.nuit = cleanNuit;
-          if (nuel) existingCompany.nuel = String(nuel).trim();
-          if (endereco) existingCompany.endereco = endereco;
-          if (provincia) existingCompany.provincia = provincia;
-          if (distrito) existingCompany.distrito = distrito;
-          if (regimeIva) existingCompany.regime_iva = regimeIva;
-          if (logo) existingCompany.logo = logo;
-          if (contacto) existingCompany.telefone = contacto;
-          existingCompany.subscription_plan = mappedPlan;
-          existingCompany.fee_base = feeBase;
-          existingCompany.fee_por_slip = feePorSlip;
-          existingCompany.next_billing_date = nextBillingDate;
-          ensureTenantContainers(existingCompany.id);
-          saveRuntimeState();
+      // Bloqueio rígido até envio e validação do comprovativo de transferência
+      const cleanMethod = String(transferMethod || metodoTransferencia || metodoPagamento || '').trim();
+      const cleanRef = String(transferReference || referenciaTransferencia || '').trim();
+      const cleanDate = String(transferDate || dataTransferencia || '').trim();
+      const numericAmount = Number(transferAmount ?? valorTransferido ?? 0);
+      const rawBase64 = String(transferProofBase64 || comprovativoBase64 || '').trim();
+      const cleanFileName = String(transferProofName || comprovativoNome || 'comprovativo_transferencia.pdf').trim().slice(0, 180);
+      const cleanMimeType = String(transferProofMimeType || comprovativoMimeType || '').trim();
 
-          return res.status(200).json({
-            sucesso: true,
-            pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
-            modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
-            mensagem: 'Configuração da empresa atualizada com sucesso na ClickPay!',
-            token: signSessionToken({
-              email: existingCompany.email || cleanEmail,
-              role: 'CLIENTE_EMPRESA',
-              empresa_id: existingCompany.id
-            }),
-            usuario: {
-              id: existingCompany.id,
-              email: existingCompany.email,
-              funcao: 'CLIENTE_EMPRESA',
-              empresa_id: existingCompany.id,
-              nome_empresa: existingCompany.nome,
-              nuit: existingCompany.nuit,
-              nome_usuario: nomeCompletoUsuario,
-              subscription_status: existingCompany.subscription_status || 'ativo',
-              subscription_plan: existingCompany.subscription_plan,
-              next_billing_date: existingCompany.next_billing_date,
-              fee_base: existingCompany.fee_base
-            }
-          });
-        }
+      if (!cleanMethod || cleanMethod.length < 2) {
+        return res.status(400).json({
+          code: 'PAYMENT_PROOF_REQUIRED',
+          erro: 'Selecione o canal de transferência utilizado (Millennium BIM, BCI, Standard Bank, M-Pesa ou e-Mola) antes de concluir.'
+        });
+      }
+      if (!cleanRef || cleanRef.length < 4) {
+        return res.status(400).json({
+          code: 'PAYMENT_PROOF_REQUIRED',
+          erro: 'Indique o número/referência da transação ou talão de transferência (mínimo 4 caracteres).'
+        });
+      }
+      if (!cleanDate) {
+        return res.status(400).json({
+          code: 'PAYMENT_PROOF_REQUIRED',
+          erro: 'Indique a data em que efetuou a transferência.'
+        });
+      }
+      if (!Number.isFinite(numericAmount) || numericAmount < expectedFee) {
+        return res.status(400).json({
+          code: 'PAYMENT_PROOF_REQUIRED',
+          erro: `O valor transferido (${Number.isFinite(numericAmount) ? formatMzn(numericAmount) : '0 MT'}) deve cobrir o pacote ${planSpec.name} (${formatMzn(expectedFee)}).`
+        });
+      }
+      if (!rawBase64) {
+        return res.status(400).json({
+          code: 'PAYMENT_PROOF_REQUIRED',
+          erro: 'Anexe o comprovativo da transferência (PDF, PNG ou JPG) para validação automática e envio ao Fundador.'
+        });
       }
 
-      const companyId = `cli_reg_${Date.now()}`;
-      const hashedPassword = await persistRotatedCredential(cleanEmail, cleanPassword);
+      const allowedExtRegex = /\.(pdf|png|jpe?g|webp)$/i;
+      const allowedMimeSet = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
+      if ((cleanMimeType && !allowedMimeSet.has(cleanMimeType)) || (cleanFileName && !allowedExtRegex.test(cleanFileName))) {
+        return res.status(422).json({
+          code: 'PAYMENT_PROOF_INVALID',
+          erro: 'Formato de comprovativo não suportado. Utilize apenas ficheiros PDF, PNG, JPG ou WebP até 2 MB.'
+        });
+      }
 
-      // 1. Criar empresa isolada (sem colaboradores ou contratos pré-populados)
-      const novaEmpresa = adicionarClienteEmpresa({
-        id: companyId,
-        nome: cleanEmpresa,
-        nuit: cleanNuit || `400${crypto.randomInt(100000, 1000000)}`,
-        endereco: endereco || 'Av. 25 de Setembro, Maputo',
-        provincia: provincia || 'Maputo Cidade',
-        distrito: distrito || 'KaMpfumo',
-        regime_iva: regimeIva || 'IVA Normal (16%)',
-        nuel: nuel || '100123456',
-        email: cleanEmail,
-        telefone: contacto || '+258 84 000 0000',
-        logo: logo || '/clickpay-logo.png',
-        password: hashedPassword,
-        subscription_status: 'ativo',
-        subscription_plan: mappedPlan,
-        next_billing_date: nextBillingDate,
-        fee_base: feeBase,
-        fee_por_slip: feePorSlip
+      const avCheck = await scanFileForMalware({
+        base64: rawBase64,
+        fileName: cleanFileName,
+        mimeType: cleanMimeType || undefined,
+        maxBytes: 2 * 1024 * 1024
       });
+      if (!avCheck.safe) {
+        return res.status(422).json({
+          code: 'PAYMENT_PROOF_INVALID',
+          erro: avCheck.reason || 'O ficheiro de comprovativo anexado não passou na verificação de segurança (use PDF, PNG ou JPG até 2 MB).'
+        });
+      }
+
+      // Bloquear duplicação de contas já ativas
+      const existingActiveCompany = baseDadosClientes.find(
+        (c) =>
+          String(c.email || '').toLowerCase().trim() === cleanEmail &&
+          String(c.subscription_status || '').toLowerCase() === 'ativo'
+      );
+      const existingActiveSys = systemUsersList.find(
+        (u) =>
+          String(u.email || '').toLowerCase().trim() === cleanEmail &&
+          String(u.status || '').toLowerCase() === 'ativo' &&
+          !u.pendingPaymentApproval
+      );
+      if (existingActiveCompany || existingActiveSys) {
+        return res.status(409).json({
+          erro: 'Já existe uma conta ativa associada a este e-mail. Aceda através do ecrã de início de sessão.'
+        });
+      }
+
+      const hashedPassword = await persistRotatedCredential(cleanEmail, cleanPassword);
+      const nowIso = new Date().toISOString();
+
+      // Reutilizar registo pendente/recusado anterior para o mesmo e-mail, se existir
+      let existingComp = baseDadosClientes.find((c) => String(c.email || '').toLowerCase().trim() === cleanEmail);
+      const companyId = existingComp?.id || `cli_reg_${Date.now()}`;
+
+      if (existingComp) {
+        existingComp.nome = cleanEmpresa;
+        existingComp.nuit = cleanNuit;
+        existingComp.nuel = String(nuel || existingComp.nuel || '100123456').trim();
+        existingComp.endereco = endereco || existingComp.endereco || 'Av. 25 de Setembro, Maputo';
+        existingComp.provincia = provincia || existingComp.provincia || 'Maputo Cidade';
+        existingComp.distrito = distrito || existingComp.distrito || 'KaMpfumo';
+        existingComp.regime_iva = regimeIva || existingComp.regime_iva || 'IVA Normal (16%)';
+        existingComp.telefone = cleanContacto;
+        if (logo) existingComp.logo = logo;
+        existingComp.password = hashedPassword;
+        existingComp.subscription_status = 'pendente';
+        existingComp.subscription_plan = mappedPlan;
+        existingComp.next_billing_date = nextBillingDate;
+        existingComp.fee_base = expectedFee;
+        existingComp.fee_por_slip = feePorSlip;
+      } else {
+        existingComp = adicionarClienteEmpresa({
+          id: companyId,
+          nome: cleanEmpresa,
+          nuit: cleanNuit,
+          endereco: endereco || 'Av. 25 de Setembro, Maputo',
+          provincia: provincia || 'Maputo Cidade',
+          distrito: distrito || 'KaMpfumo',
+          regime_iva: regimeIva || 'IVA Normal (16%)',
+          nuel: String(nuel || '100123456').trim(),
+          email: cleanEmail,
+          telefone: cleanContacto,
+          logo: logo || '/clickpay-logo.png',
+          password: hashedPassword,
+          subscription_status: 'pendente',
+          subscription_plan: mappedPlan,
+          next_billing_date: nextBillingDate,
+          fee_base: expectedFee,
+          fee_por_slip: feePorSlip
+        });
+      }
       ensureTenantContainers(companyId);
 
-      // 2. Registar utilizador local, na gestão de acessos e sincronizar no Firebase Auth
-      clientesRegistadosPelosFounders.push({
+      const regIdx = clientesRegistadosPelosFounders.findIndex(
+        (u) => String(u.email || '').toLowerCase().trim() === cleanEmail
+      );
+      const regEntry = {
         email: cleanEmail,
         password: hashedPassword,
         funcao: 'CLIENTE_EMPRESA',
         empresa_id: companyId,
         nome: nomeCompletoUsuario,
-        resellerCode: resellerCode || ''
-      });
+        resellerCode: resellerCode || '',
+        status: 'pendente',
+        pendingPaymentApproval: true
+      };
+      if (regIdx >= 0) {
+        clientesRegistadosPelosFounders[regIdx] = regEntry;
+      } else {
+        clientesRegistadosPelosFounders.push(regEntry);
+      }
 
-      systemUsersList.unshift({
-        id: `usr_${Date.now()}`,
+      const sysIdx = systemUsersList.findIndex((u) => String(u.email || '').toLowerCase().trim() === cleanEmail);
+      const sysEntry = {
+        id: sysIdx >= 0 ? systemUsersList[sysIdx].id : `usr_${Date.now()}`,
         name: cleanEmpresa,
         email: cleanEmail,
         passwordMasked: '••••••••••••',
         passwordConfigured: true,
         passwordHash: hashedPassword,
         role: 'CLIENTE_EMPRESA',
-        roleLabel: `Cliente Empresa (${selectedPlan})`,
+        roleLabel: `Cliente Empresa (${planSpec.name})`,
         plan: mappedPlan,
         companyName: cleanEmpresa,
-        phone: contacto || '+258 84 000 0000',
-        status: 'ativo',
-        createdAt: new Date().toISOString().substring(0, 10),
-        lastLogin: 'Registado agora',
+        phone: cleanContacto,
+        status: 'inativo',
+        pendingPaymentApproval: true,
+        createdAt: nowIso.substring(0, 10),
+        lastLogin: 'Aguardando confirmação de pagamento',
         apiTokenPrefix: `cp_key_${companyId.substring(0, 10)}...`
-      });
+      };
+      if (sysIdx >= 0) {
+        systemUsersList[sysIdx] = sysEntry;
+      } else {
+        systemUsersList.unshift(sysEntry);
+      }
+
+      const existingReqIdx = paymentProofRequests.findIndex(
+        (r) => String(r.email || '').toLowerCase().trim() === cleanEmail && r.status !== 'CREDENCIAIS_ENVIADAS'
+      );
+      const reqId = existingReqIdx >= 0 ? paymentProofRequests[existingReqIdx].id : `REQ-${Date.now()}`;
+      const proofRecord = {
+        id: reqId,
+        empresaId: companyId,
+        empresa: cleanEmpresa,
+        responsavel: nomeCompletoUsuario,
+        nuit: cleanNuit,
+        nuel: String(nuel || '').trim(),
+        email: cleanEmail,
+        telefone: cleanContacto,
+        endereco: existingComp.endereco,
+        provincia: existingComp.provincia,
+        distrito: existingComp.distrito,
+        regimeIva: existingComp.regime_iva,
+        planoEscolhido: planSpec.name,
+        planInternalCode: mappedPlan,
+        billingCycle: cycle,
+        valorEsperado: expectedFee,
+        feePorSlip,
+        metodoTransferencia: cleanMethod,
+        referenciaTransferencia: cleanRef,
+        valorTransferido: numericAmount,
+        dataTransferencia: cleanDate,
+        comprovativoNome: cleanFileName,
+        comprovativoMimeType: cleanMimeType || 'application/octet-stream',
+        comprovativoBase64: rawBase64,
+        comprovativoTamanhoBytes: avCheck.fileSizeBytes,
+        status: 'PENDENTE_PAGAMENTO',
+        activationCodeHash: '',
+        activationCodePrefix: '',
+        motivoRejeicao: '',
+        createdAt: nowIso,
+        aprovadoEm: '',
+        ativadoEm: ''
+      };
+      if (existingReqIdx >= 0) {
+        paymentProofRequests[existingReqIdx] = proofRecord;
+      } else {
+        paymentProofRequests.unshift(proofRecord);
+      }
+
+      const credReqSummary = {
+        id: reqId,
+        empresa: cleanEmpresa,
+        responsavel: nomeCompletoUsuario,
+        nuit: cleanNuit,
+        email: cleanEmail,
+        telefone: cleanContacto,
+        plano: planSpec.name,
+        cicloFaturacao: cycle,
+        metodoTransferencia: cleanMethod,
+        referenciaTransferencia: cleanRef,
+        valorTransferido: numericAmount,
+        dataTransferencia: cleanDate,
+        comprovativoNome: cleanFileName,
+        status: 'PENDENTE_PAGAMENTO',
+        createdAt: nowIso
+      };
+      const credIdx = credentialRequestsList.findIndex((c) => c.id === reqId);
+      if (credIdx >= 0) {
+        credentialRequestsList[credIdx] = credReqSummary;
+      } else {
+        credentialRequestsList.unshift(credReqSummary);
+      }
 
       saveRuntimeState();
-      await syncUserToFirebase(cleanEmail, cleanPassword);
+
+      // Envio automático para o e-mail do Fundador (gersonjcumbane@gmail.com)
+      const founderEmail = 'gersonjcumbane@gmail.com';
+      const founderWhatsApp = (process.env.SUPPORT_WHATSAPP_PRIMARY || '258842014173').replace(/[^0-9]/g, '') || '258842014173';
+      const assunto = `💳 [COMPROVATIVO #${reqId}] ${cleanEmpresa} — Pacote ${planSpec.name} (${formatMzn(numericAmount)})`;
+      const corpoHtml = `<div style="font-family: Inter, -apple-system, sans-serif; color: #0f172a; max-width: 640px; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; margin: 0 auto; background: #ffffff;">
+        <div style="background: linear-gradient(135deg, #0f172a, #1e3a8a); padding: 24px; color: #ffffff;">
+          <p style="margin: 0; font-size: 11px; color: #93c5fd; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">ClickPay ERP · Validação de Transferência</p>
+          <h2 style="margin: 6px 0 0 0; font-size: 19px; font-weight: 800;">Novo Comprovativo Recebido (#${escapeHtmlForSupport(reqId)})</h2>
+        </div>
+        <div style="padding: 24px; line-height: 1.6;">
+          <p style="margin-top: 0; font-size: 14px; color: #334155;">Um novo cliente submeteu o pedido de subscrição e anexou o comprovativo de transferência bancária/móvel. A conta permanece <b>bloqueada</b> até confirmação no Painel de Clientes.</p>
+          <div style="background: #f8fafc; border-left: 4px solid #1e3a8a; border-radius: 8px; padding: 16px; margin: 18px 0;">
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0; color: #64748b; width: 170px;"><strong>Empresa:</strong></td><td style="padding: 5px 0; color: #0f172a; font-weight: 700;">${escapeHtmlForSupport(cleanEmpresa)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Responsável:</strong></td><td style="padding: 5px 0; color: #0f172a;">${escapeHtmlForSupport(nomeCompletoUsuario)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>NUIT:</strong></td><td style="padding: 5px 0; color: #0f172a; font-family: monospace;">${escapeHtmlForSupport(cleanNuit)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>E-mail do Cliente:</strong></td><td style="padding: 5px 0; color: #1e3a8a; font-weight: 700;">${escapeHtmlForSupport(cleanEmail)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Contacto / WhatsApp:</strong></td><td style="padding: 5px 0; color: #0f172a;">${escapeHtmlForSupport(cleanContacto)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Pacote Escolhido:</strong></td><td style="padding: 5px 0; color: #059669; font-weight: 800;">${escapeHtmlForSupport(planSpec.name)} (${cycle === 'anual' ? 'Ciclo Anual' : 'Ciclo Mensal'})</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Valor do Pacote:</strong></td><td style="padding: 5px 0; color: #0f172a; font-weight: 700;">${escapeHtmlForSupport(formatMzn(expectedFee))}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Canal de Transferência:</strong></td><td style="padding: 5px 0; color: #0f172a; font-weight: 700;">${escapeHtmlForSupport(cleanMethod)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Referência / Talão:</strong></td><td style="padding: 5px 0; color: #0f172a; font-family: monospace; font-weight: 700;">${escapeHtmlForSupport(cleanRef)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Valor Transferido:</strong></td><td style="padding: 5px 0; color: #059669; font-weight: 800;">${escapeHtmlForSupport(formatMzn(numericAmount))}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Data da Transferência:</strong></td><td style="padding: 5px 0; color: #0f172a;">${escapeHtmlForSupport(cleanDate)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #64748b;"><strong>Comprovativo Anexado:</strong></td><td style="padding: 5px 0; color: #0f172a;">${escapeHtmlForSupport(cleanFileName)} (${Math.max(1, Math.round(avCheck.fileSizeBytes / 1024))} KB · Validado)</td></tr>
+            </table>
+          </div>
+          <p style="font-size: 12.5px; color: #475569; margin-bottom: 0;">Aceda a <b>Gestão de Clientes → Validação de Transferências</b> no ClickPay ERP para visualizar o comprovativo e confirmar a recepção do valor, gerando automaticamente o código de ativação e as credenciais para o pacote <b>${escapeHtmlForSupport(planSpec.name)}</b>.</p>
+        </div>
+      </div>`;
+
+      const waMsg = `💳 *COMPROVATIVO CLICKPAY #${reqId}*\nEmpresa: ${cleanEmpresa}\nNUIT: ${cleanNuit}\nE-mail: ${cleanEmail}\nPacote: ${planSpec.name} (${cycle})\nValor: ${formatMzn(numericAmount)}\nCanal: ${cleanMethod}\nRef: ${cleanRef}\nData: ${cleanDate}\nFicheiro: ${cleanFileName}`;
+
+      const [emailDelivery, waDelivery] = await Promise.all([
+        enviarEmailServicoExterno(founderEmail, assunto, corpoHtml),
+        enviarWhatsAppServicoExterno(founderWhatsApp, waMsg, { requestId: reqId })
+      ]);
+
+      if (Array.isArray(alertHistory)) {
+        alertHistory.unshift({
+          id: `al_proof_${Date.now()}`,
+          data_envio: nowIso,
+          tipo_alerta: 'COMPROVATIVO_TRANSFERENCIA',
+          destinatario: founderEmail,
+          assunto,
+          status: emailDelivery.sucesso ? 'ENVIADO' : 'FALHA',
+          conteudo_html: corpoHtml,
+          detalhes_sucesso: `Comprovativo encaminhado (${emailDelivery.gateway}). Ref: ${cleanRef}`
+        });
+      }
 
       notifyFounder(
-        'Nova Conta Empresarial Criada (ClickPay)',
-        `Empresa "${cleanEmpresa}" (NUIT: ${novaEmpresa.nuit}) registada com o e-mail ${cleanEmail} e sincronizada com o Firebase.`,
-        { userEmail: cleanEmail, nuit: novaEmpresa.nuit, status: 'sucesso' }
+        'Comprovativo de Transferência Recebido (Aguardando Confirmação)',
+        `Empresa "${cleanEmpresa}" (${cleanEmail}) submeteu comprovativo #${reqId} (${cleanMethod} · Ref ${cleanRef} · ${formatMzn(numericAmount)}) para o pacote ${planSpec.name}. Conta bloqueada até confirmação.`,
+        { userEmail: cleanEmail, nuit: cleanNuit, requestId: reqId, status: 'pendente' }
       );
+
+      const plainMailBody = [
+        `Pedido de Ativação ClickPay #${reqId}`,
+        `Empresa: ${cleanEmpresa} (NUIT: ${cleanNuit})`,
+        `Responsável: ${nomeCompletoUsuario}`,
+        `E-mail: ${cleanEmail} | Tel: ${cleanContacto}`,
+        `Pacote Escolhido: ${planSpec.name} (${cycle}) - ${formatMzn(expectedFee)}`,
+        `Canal de Transferência: ${cleanMethod}`,
+        `Referência: ${cleanRef}`,
+        `Valor Transferido: ${formatMzn(numericAmount)}`,
+        `Data: ${cleanDate}`,
+        `Comprovativo: ${cleanFileName}`
+      ].join('\n');
+      const mailtoUrl = `mailto:${founderEmail}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(plainMailBody)}`;
 
       return res.status(201).json({
         sucesso: true,
+        pendingApproval: true,
         pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
         modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
-        mensagem: 'Conta e empresa criadas com sucesso! Bem-vindo à ClickPay.',
-        token: signSessionToken({ email: cleanEmail, role: 'CLIENTE_EMPRESA', empresa_id: companyId }),
-        usuario: {
-          id: companyId,
-          email: cleanEmail,
-          funcao: 'CLIENTE_EMPRESA',
-          empresa_id: companyId,
-          nome_empresa: cleanEmpresa,
-          nuit: novaEmpresa.nuit,
-          nome_usuario: nomeCompletoUsuario,
-          subscription_status: 'ativo',
-          subscription_plan: mappedPlan,
-          next_billing_date: novaEmpresa.next_billing_date
-        }
+        mensagem: `Comprovativo de transferência validado e enviado automaticamente para ${founderEmail}. A sua conta permanece bloqueada até à confirmação do pagamento e emissão do código/credenciais.`,
+        requestId: reqId,
+        status: 'PENDENTE_PAGAMENTO',
+        emailTarget: founderEmail,
+        plan: {
+          id: planSpec.id,
+          name: planSpec.name,
+          internalCode: mappedPlan,
+          billingCycle: cycle,
+          expectedFee,
+          feePorSlip
+        },
+        emailDelivery,
+        mailtoUrl,
+        whatsappUrl: waDelivery.whatsappUrl,
+        token: null
       });
     } catch (err: any) {
-      console.error('Erro ao registar conta via onboarding:', err);
-      return res.status(500).json({ erro: 'Não foi possível concluir o registo. Tente novamente.' });
+      console.error('Erro ao registar pedido de onboarding com comprovativo:', err);
+      return res.status(500).json({ erro: 'Não foi possível submeter o comprovativo. Tente novamente.' });
+    }
+  });
+
+  // CONSULTAR ESTADO DO PEDIDO / PAGAMENTO (PÚBLICO PARA O SOLICITANTE)
+  app.get('/api/onboarding/status', (req: Request, res: Response) => {
+    const cleanEmail = String(req.query.email || '').toLowerCase().trim();
+    const cleanReqId = String(req.query.requestId || '').trim();
+    if (!cleanEmail && !cleanReqId) {
+      return res.status(400).json({ erro: 'Indique o e-mail ou o identificador do pedido.' });
+    }
+
+    const found = paymentProofRequests.find(
+      (r) =>
+        (cleanReqId && r.id === cleanReqId) ||
+        (cleanEmail && String(r.email || '').toLowerCase().trim() === cleanEmail)
+    );
+    if (!found) {
+      return res.json({ found: false });
+    }
+
+    return res.json({
+      found: true,
+      requestId: found.id,
+      empresa: found.empresa,
+      email: found.email,
+      planoEscolhido: found.planoEscolhido,
+      planInternalCode: found.planInternalCode,
+      billingCycle: found.billingCycle,
+      valorEsperado: found.valorEsperado,
+      metodoTransferencia: found.metodoTransferencia,
+      referenciaTransferencia: found.referenciaTransferencia,
+      valorTransferido: found.valorTransferido,
+      dataTransferencia: found.dataTransferencia,
+      comprovativoNome: found.comprovativoNome,
+      status: found.status,
+      activationCodePrefix: found.activationCodePrefix || '',
+      motivoRejeicao: found.motivoRejeicao || '',
+      createdAt: found.createdAt,
+      aprovadoEm: found.aprovadoEm || '',
+      ativadoEm: found.ativadoEm || ''
+    });
+  });
+
+  // ATIVAR CONTA COM CÓDIGO RECEBIDO APÓS CONFIRMAÇÃO DE PAGAMENTO PELO FUNDADOR
+  app.post('/api/onboarding/activate-code', (req: Request, res: Response) => {
+    const cleanEmail = String(req.body?.email || '').toLowerCase().trim();
+    const cleanReqId = String(req.body?.requestId || '').trim();
+    const cleanCode = String(req.body?.activationCode || '').toUpperCase().trim();
+
+    if (!cleanCode || cleanCode.length < 6) {
+      return res.status(400).json({ erro: 'Introduza o código de ativação enviado após confirmação do pagamento.' });
+    }
+    if (!cleanEmail && !cleanReqId) {
+      return res.status(400).json({ erro: 'Indique o e-mail da conta ou o número do pedido.' });
+    }
+
+    const reqRecord = paymentProofRequests.find(
+      (r) =>
+        (cleanReqId && r.id === cleanReqId) ||
+        (cleanEmail && String(r.email || '').toLowerCase().trim() === cleanEmail)
+    );
+
+    if (!reqRecord) {
+      return res.status(404).json({ erro: 'Pedido de registo não encontrado para os dados fornecidos.' });
+    }
+
+    if (reqRecord.status === 'PENDENTE_PAGAMENTO') {
+      return res.status(403).json({
+        code: 'PAYMENT_APPROVAL_PENDING',
+        erro: 'O seu pagamento ainda está a aguardar confirmação pelo Fundador (gersonjcumbane@gmail.com).'
+      });
+    }
+    if (reqRecord.status === 'REJEITADO') {
+      return res.status(403).json({
+        code: 'PAYMENT_PROOF_REJECTED',
+        erro: `O comprovativo foi recusado (${reqRecord.motivoRejeicao || 'verifique os dados enviados'}).`
+      });
+    }
+
+    const candidateHash = crypto.createHash('sha256').update(cleanCode).digest('hex');
+    if (!reqRecord.activationCodeHash || !constantTimeStringMatch(candidateHash, reqRecord.activationCodeHash)) {
+      return res.status(401).json({ erro: 'Código de ativação inválido. Verifique o e-mail enviado pelo Fundador.' });
+    }
+
+    // Garantir empresa & utilizador ativos no pacote confirmado
+    const company = baseDadosClientes.find(
+      (c) => c.id === reqRecord.empresaId || String(c.email || '').toLowerCase().trim() === reqRecord.email
+    );
+    if (company) {
+      company.subscription_status = 'ativo';
+      company.subscription_plan = reqRecord.planInternalCode || 'Bronze';
+      company.fee_base = reqRecord.valorEsperado;
+      company.fee_por_slip = reqRecord.feePorSlip;
+    }
+
+    const sysUser = systemUsersList.find((u) => String(u.email || '').toLowerCase().trim() === reqRecord.email);
+    if (sysUser) {
+      sysUser.status = 'ativo';
+      sysUser.pendingPaymentApproval = false;
+      sysUser.plan = reqRecord.planInternalCode || 'Bronze';
+      sysUser.lastLogin = 'Ativado por código';
+    }
+
+    const regUser = clientesRegistadosPelosFounders.find(
+      (u) => String(u.email || '').toLowerCase().trim() === reqRecord.email
+    );
+    if (regUser) {
+      regUser.status = 'ativo';
+      regUser.pendingPaymentApproval = false;
+    }
+
+    reqRecord.ativadoEm = reqRecord.ativadoEm || new Date().toISOString();
+    saveRuntimeState();
+
+    const resolvedCompanyId = company?.id || reqRecord.empresaId;
+    const token = signSessionToken({
+      email: reqRecord.email,
+      role: 'CLIENTE_EMPRESA',
+      empresa_id: resolvedCompanyId
+    });
+
+    notifyFounder(
+      'Conta Ativada com Código pelo Cliente',
+      `O cliente ${reqRecord.empresa} (${reqRecord.email}) ativou o acesso ao pacote ${reqRecord.planoEscolhido} com o código confirmado.`,
+      { userEmail: reqRecord.email, requestId: reqRecord.id, status: 'sucesso' }
+    );
+
+    return res.json({
+      sucesso: true,
+      pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
+      modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
+      mensagem: `Conta ativada com sucesso no pacote ${reqRecord.planoEscolhido}!`,
+      token,
+      usuario: {
+        id: resolvedCompanyId,
+        email: reqRecord.email,
+        funcao: 'CLIENTE_EMPRESA',
+        empresa_id: resolvedCompanyId,
+        nome_empresa: company?.nome || reqRecord.empresa,
+        nuit: company?.nuit || reqRecord.nuit,
+        nome_usuario: reqRecord.responsavel,
+        subscription_status: 'ativo',
+        subscription_plan: reqRecord.planInternalCode || 'Bronze',
+        next_billing_date: company?.next_billing_date || getDefaultNextBillingDate(),
+        fee_base: reqRecord.valorEsperado
+      }
+    });
+  });
+
+  // ADMIN: LISTAR COMPROVATIVOS DE TRANSFERÊNCIA SUBMETIDOS
+  app.get('/api/admin/payment-proofs', requireSuperAdmin, (_req: Request, res: Response) => {
+    const sanitized = paymentProofRequests.map(({ comprovativoBase64, activationCodeHash, ...rest }) => ({
+      ...rest,
+      hasProofFile: Boolean(comprovativoBase64)
+    }));
+    res.json(sanitized);
+  });
+
+  // ADMIN: VER / DESCARREGAR COMPROVATIVO ANEXADO
+  app.get('/api/admin/payment-proofs/:id/file', requireSuperAdmin, (req: Request, res: Response) => {
+    const item = paymentProofRequests.find((r) => r.id === req.params.id);
+    if (!item || !item.comprovativoBase64) {
+      return res.status(404).json({ erro: 'Comprovativo não encontrado para este pedido.' });
+    }
+    return res.json({
+      id: item.id,
+      fileName: item.comprovativoNome || 'comprovativo.pdf',
+      mimeType: item.comprovativoMimeType || 'application/octet-stream',
+      base64: item.comprovativoBase64,
+      sizeBytes: item.comprovativoTamanhoBytes || 0
+    });
+  });
+
+  // ADMIN: CONFIRMAR RECEPÇÃO DO VALOR, ATIVAR PACOTE E EMITIR CÓDIGO + CREDENCIAIS
+  app.post('/api/admin/payment-proofs/:id/confirm', requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const reqRecord = paymentProofRequests.find((r) => r.id === req.params.id);
+      if (!reqRecord) {
+        return res.status(404).json({ erro: 'Pedido de comprovativo não encontrado.' });
+      }
+
+      const planSpec = getPlanSpec(reqRecord.planoEscolhido || reqRecord.planInternalCode || 'Starter');
+      const cycle: 'mensal' | 'anual' = reqRecord.billingCycle === 'anual' ? 'anual' : 'mensal';
+      const billingDays = cycle === 'anual' ? 365 : 30;
+      const nextBillingDate = new Date(Date.now() + billingDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const customPass = String(req.body?.customPassword || '').trim();
+      if (customPass && customPass.length < 8) {
+        return res.status(400).json({ erro: 'A palavra-passe personalizada deve ter no mínimo 8 caracteres.' });
+      }
+      const issuedPassword = customPass || generateSecurePassword(14);
+      const hashedPassword = await persistRotatedCredential(reqRecord.email, issuedPassword);
+
+      const planSlug = planSpec.name.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3) || 'STD';
+      const randomSuffix = crypto.randomBytes(4).toString('hex').toUpperCase();
+      const activationCode = `CP-${planSlug}-${randomSuffix}`;
+      const activationCodeHash = crypto.createHash('sha256').update(activationCode).digest('hex');
+      const activationCodePrefix = `${activationCode.slice(0, 9)}••••`;
+
+      // Ativar empresa cliente no pacote escolhido
+      let company = baseDadosClientes.find(
+        (c) => c.id === reqRecord.empresaId || String(c.email || '').toLowerCase().trim() === reqRecord.email
+      );
+      if (!company) {
+        company = adicionarClienteEmpresa({
+          id: reqRecord.empresaId,
+          nome: reqRecord.empresa,
+          nuit: reqRecord.nuit,
+          endereco: reqRecord.endereco || 'Maputo, Moçambique',
+          provincia: reqRecord.provincia || 'Maputo Cidade',
+          distrito: reqRecord.distrito || 'KaMpfumo',
+          regime_iva: reqRecord.regimeIva || 'IVA Normal (16%)',
+          nuel: reqRecord.nuel || '100123456',
+          email: reqRecord.email,
+          telefone: reqRecord.telefone,
+          logo: '/clickpay-logo.png',
+          password: hashedPassword,
+          subscription_status: 'ativo',
+          subscription_plan: planSpec.internalCode,
+          next_billing_date: nextBillingDate,
+          fee_base: reqRecord.valorEsperado,
+          fee_por_slip: reqRecord.feePorSlip
+        });
+      } else {
+        company.subscription_status = 'ativo';
+        company.subscription_plan = planSpec.internalCode;
+        company.fee_base = reqRecord.valorEsperado;
+        company.fee_por_slip = reqRecord.feePorSlip;
+        company.next_billing_date = nextBillingDate;
+        company.password = hashedPassword;
+      }
+      ensureTenantContainers(company.id);
+
+      const regIdx = clientesRegistadosPelosFounders.findIndex(
+        (u) => String(u.email || '').toLowerCase().trim() === reqRecord.email
+      );
+      if (regIdx >= 0) {
+        clientesRegistadosPelosFounders[regIdx].password = hashedPassword;
+        clientesRegistadosPelosFounders[regIdx].status = 'ativo';
+        clientesRegistadosPelosFounders[regIdx].pendingPaymentApproval = false;
+        clientesRegistadosPelosFounders[regIdx].empresa_id = company.id;
+      } else {
+        clientesRegistadosPelosFounders.push({
+          email: reqRecord.email,
+          password: hashedPassword,
+          funcao: 'CLIENTE_EMPRESA',
+          empresa_id: company.id,
+          nome: reqRecord.responsavel,
+          status: 'ativo',
+          pendingPaymentApproval: false
+        });
+      }
+
+      const sysIdx = systemUsersList.findIndex(
+        (u) => String(u.email || '').toLowerCase().trim() === reqRecord.email
+      );
+      if (sysIdx >= 0) {
+        systemUsersList[sysIdx].status = 'ativo';
+        systemUsersList[sysIdx].pendingPaymentApproval = false;
+        systemUsersList[sysIdx].plan = planSpec.internalCode;
+        systemUsersList[sysIdx].roleLabel = `Cliente Empresa (${planSpec.name})`;
+        systemUsersList[sysIdx].passwordHash = hashedPassword;
+        systemUsersList[sysIdx].passwordConfigured = true;
+        systemUsersList[sysIdx].lastLogin = 'Pagamento confirmado (aguarda 1º acesso)';
+      } else {
+        systemUsersList.unshift({
+          id: `usr_${Date.now()}`,
+          name: reqRecord.empresa,
+          email: reqRecord.email,
+          passwordMasked: '••••••••••••',
+          passwordConfigured: true,
+          passwordHash: hashedPassword,
+          role: 'CLIENTE_EMPRESA',
+          roleLabel: `Cliente Empresa (${planSpec.name})`,
+          plan: planSpec.internalCode,
+          companyName: reqRecord.empresa,
+          phone: reqRecord.telefone,
+          status: 'ativo',
+          pendingPaymentApproval: false,
+          createdAt: new Date().toISOString().substring(0, 10),
+          lastLogin: 'Pagamento confirmado (aguarda 1º acesso)',
+          apiTokenPrefix: `cp_key_${company.id.substring(0, 10)}...`
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      reqRecord.status = 'CREDENCIAIS_ENVIADAS';
+      reqRecord.activationCodeHash = activationCodeHash;
+      reqRecord.activationCodePrefix = activationCodePrefix;
+      reqRecord.motivoRejeicao = '';
+      reqRecord.aprovadoEm = nowIso;
+
+      const credSummary = credentialRequestsList.find((c) => c.id === reqRecord.id);
+      if (credSummary) {
+        credSummary.status = 'CREDENCIAIS_ENVIADAS';
+        credSummary.activationCodePrefix = activationCodePrefix;
+        credSummary.aprovadoEm = nowIso;
+      }
+
+      saveRuntimeState();
+      await syncUserToFirebase(reqRecord.email, issuedPassword);
+
+      const assunto = `✅ Pagamento Confirmado · Código e Credenciais ClickPay ERP (${planSpec.name})`;
+      const corpoHtml = `<div style="font-family: Inter, -apple-system, sans-serif; color: #0f172a; max-width: 620px; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; margin: 0 auto; background: #ffffff;">
+        <div style="background: linear-gradient(135deg, #065f46, #0f172a); padding: 24px; color: #ffffff;">
+          <p style="margin: 0; font-size: 11px; color: #6ee7b7; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">ClickPay ERP Moçambique · Conta Ativada</p>
+          <h2 style="margin: 6px 0 0 0; font-size: 19px; font-weight: 800;">Pagamento Confirmado!</h2>
+        </div>
+        <div style="padding: 24px; line-height: 1.6;">
+          <p style="margin-top: 0; font-size: 14px; color: #334155;">Caro(a) <b>${escapeHtmlForSupport(reqRecord.responsavel)}</b> (${escapeHtmlForSupport(reqRecord.empresa)}), confirmámos a recepção da sua transferência de <b>${escapeHtmlForSupport(formatMzn(reqRecord.valorTransferido))}</b>.</p>
+          <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 16px; margin: 18px 0;">
+            <p style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; font-weight: 800; color: #065f46;">Código de Ativação &amp; Credenciais (${escapeHtmlForSupport(planSpec.name)})</p>
+            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+              <tr><td style="padding: 5px 0; color: #047857; width: 170px;"><strong>Código de Ativação:</strong></td><td style="padding: 5px 0; color: #0f172a; font-family: monospace; font-size: 15px; font-weight: 800;">${escapeHtmlForSupport(activationCode)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #047857;"><strong>E-mail de Acesso:</strong></td><td style="padding: 5px 0; color: #0f172a; font-weight: 700;">${escapeHtmlForSupport(reqRecord.email)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #047857;"><strong>Palavra-passe Emitida:</strong></td><td style="padding: 5px 0; color: #0f172a; font-family: monospace; font-weight: 700;">${escapeHtmlForSupport(issuedPassword)}</td></tr>
+              <tr><td style="padding: 5px 0; color: #047857;"><strong>Pacote Ativado:</strong></td><td style="padding: 5px 0; color: #0f172a; font-weight: 700;">${escapeHtmlForSupport(planSpec.name)} (${cycle === 'anual' ? 'Anual' : 'Mensal'}) · Próx. renovação ${escapeHtmlForSupport(nextBillingDate)}</td></tr>
+            </table>
+          </div>
+          <p style="font-size: 12.5px; color: #475569; margin-bottom: 0;">Utilize o Código de Ativação acima no portal ClickPay ou inicie sessão diretamente com o seu e-mail e palavra-passe.</p>
+        </div>
+      </div>`;
+
+      const [emailDelivery] = await Promise.all([
+        enviarEmailServicoExterno(reqRecord.email, assunto, corpoHtml, ['gersonjcumbane@gmail.com'])
+      ]);
+
+      if (Array.isArray(alertHistory)) {
+        alertHistory.unshift({
+          id: `al_appr_${Date.now()}`,
+          data_envio: nowIso,
+          tipo_alerta: 'PAGAMENTO_CONFIRMADO_CREDENCIAIS',
+          destinatario: reqRecord.email,
+          assunto,
+          status: emailDelivery.sucesso ? 'ENVIADO' : 'FALHA',
+          conteudo_html: corpoHtml,
+          detalhes_sucesso: `Código e credenciais emitidos para ${planSpec.name} (${emailDelivery.gateway}).`
+        });
+      }
+
+      notifyFounder(
+        'Pagamento Confirmado & Credenciais Emitidas',
+        `Confirmado pagamento de ${reqRecord.empresa} (${reqRecord.email}) para o pacote ${planSpec.name}. Código ${activationCodePrefix} emitido.`,
+        { userEmail: reqRecord.email, requestId: reqRecord.id, status: 'sucesso' }
+      );
+
+      const plainBody = [
+        `Olá ${reqRecord.responsavel} (${reqRecord.empresa}),`,
+        ``,
+        `Confirmamos a receção da sua transferência no ClickPay ERP!`,
+        `Pacote Ativado: ${planSpec.name} (${cycle === 'anual' ? 'Anual' : 'Mensal'})`,
+        ``,
+        `Código de Ativação: ${activationCode}`,
+        `E-mail de Acesso: ${reqRecord.email}`,
+        `Palavra-passe: ${issuedPassword}`,
+        `Próxima Renovação: ${nextBillingDate}`,
+        ``,
+        `Aceda ao sistema e clique em "Activar com Código Recebido" ou inicie sessão com as credenciais acima.`
+      ].join('\n');
+
+      const mailtoUrl = `mailto:${reqRecord.email}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(plainBody)}`;
+      const clientPhoneDigits = String(reqRecord.telefone || '').replace(/[^0-9]/g, '');
+      const whatsappUrl = clientPhoneDigits
+        ? `https://wa.me/${clientPhoneDigits}?text=${encodeURIComponent(plainBody)}`
+        : '';
+
+      const { comprovativoBase64: _dropB64, activationCodeHash: _dropHash, ...safeReq } = reqRecord;
+
+      return res.json({
+        sucesso: true,
+        request: { ...safeReq, hasProofFile: Boolean(_dropB64) },
+        credentials: {
+          email: reqRecord.email,
+          password: issuedPassword,
+          activationCode,
+          plano: planSpec.name,
+          planInternalCode: planSpec.internalCode,
+          billingCycle: cycle,
+          feeBase: reqRecord.valorEsperado,
+          nextBillingDate
+        },
+        emailDelivery,
+        mailtoUrl,
+        whatsappUrl
+      });
+    } catch (err: any) {
+      console.error('Erro ao confirmar pagamento:', err);
+      return res.status(500).json({ erro: 'Erro ao confirmar pagamento e emitir credenciais.' });
+    }
+  });
+
+  // ADMIN: RECUSAR COMPROVATIVO DE TRANSFERÊNCIA
+  app.post('/api/admin/payment-proofs/:id/reject', requireSuperAdmin, async (req: Request, res: Response) => {
+    try {
+      const reqRecord = paymentProofRequests.find((r) => r.id === req.params.id);
+      if (!reqRecord) {
+        return res.status(404).json({ erro: 'Pedido de comprovativo não encontrado.' });
+      }
+      const motivo =
+        String(req.body?.motivo || '').trim() ||
+        'Comprovativo não validado na conta bancária/móvel. Envie um novo comprovativo legível.';
+
+      reqRecord.status = 'REJEITADO';
+      reqRecord.motivoRejeicao = motivo;
+      reqRecord.activationCodeHash = '';
+      reqRecord.activationCodePrefix = '';
+
+      const comp = baseDadosClientes.find(
+        (c) => c.id === reqRecord.empresaId || String(c.email || '').toLowerCase().trim() === reqRecord.email
+      );
+      if (comp) comp.subscription_status = 'pendente';
+
+      const sys = systemUsersList.find((u) => String(u.email || '').toLowerCase().trim() === reqRecord.email);
+      if (sys) {
+        sys.status = 'inativo';
+        sys.pendingPaymentApproval = true;
+      }
+
+      const credSummary = credentialRequestsList.find((c) => c.id === reqRecord.id);
+      if (credSummary) {
+        credSummary.status = 'REJEITADO';
+        credSummary.motivoRejeicao = motivo;
+      }
+
+      saveRuntimeState();
+
+      const assunto = `⚠️ Comprovativo ClickPay ERP não validado (#${reqRecord.id})`;
+      const corpoHtml = `<div style="font-family: Inter, sans-serif; color: #0f172a; max-width: 600px; border: 1px solid #fecdd3; border-radius: 12px; padding: 24px; margin: 0 auto; background: #fff;">
+        <h3 style="margin-top: 0; color: #be123c;">Comprovativo de Transferência Recusado</h3>
+        <p>Olá <b>${escapeHtmlForSupport(reqRecord.responsavel)}</b>, o comprovativo enviado para <b>${escapeHtmlForSupport(reqRecord.empresa)}</b> (${escapeHtmlForSupport(reqRecord.planoEscolhido)}) não pôde ser confirmado.</p>
+        <p style="background: #fff1f2; border-left: 4px solid #e11d48; padding: 12px; color: #881337;"><b>Motivo:</b> ${escapeHtmlForSupport(motivo)}</p>
+        <p style="font-size: 13px; color: #475569;">Aceda novamente ao formulário de subscrição com o mesmo e-mail para reenviar o comprovativo ou contacte gersonjcumbane@gmail.com.</p>
+      </div>`;
+
+      const emailDelivery = await enviarEmailServicoExterno(reqRecord.email, assunto, corpoHtml);
+      notifyFounder(
+        'Comprovativo de Transferência Recusado',
+        `Pedido #${reqRecord.id} (${reqRecord.empresa}) recusado: ${motivo}`,
+        { userEmail: reqRecord.email, requestId: reqRecord.id, status: 'bloqueado' }
+      );
+
+      const mailtoUrl = `mailto:${reqRecord.email}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(`Olá ${reqRecord.responsavel},\n\nO comprovativo #${reqRecord.id} não foi validado.\nMotivo: ${motivo}\n\nPor favor reenvie um comprovativo válido ou responda a este e-mail.`)}`;
+      const { comprovativoBase64: _dropB64, activationCodeHash: _dropHash, ...safeReq } = reqRecord;
+
+      return res.json({
+        sucesso: true,
+        request: { ...safeReq, hasProofFile: Boolean(_dropB64) },
+        emailDelivery,
+        mailtoUrl
+      });
+    } catch (err: any) {
+      return res.status(500).json({ erro: 'Erro ao recusar comprovativo.' });
     }
   });
 
@@ -7714,8 +8475,7 @@ Host: https://clickpay.co.mz
     });
   }
 
-  // Lista de Solicitações de Credenciais de Acesso ao Sistema
-  const credentialRequestsList: any[] = [];
+  // Solicitações de Credenciais (declarado no topo de createApp para persistência)
 
   app.post('/api/auth/request-credentials', async (req: Request, res: Response) => {
     try {

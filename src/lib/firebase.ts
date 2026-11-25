@@ -109,11 +109,13 @@ export async function syncBackupToFirestore(backup: any) {
   }
 }
 
-// Sincronizar pedido de credenciais no Firebase Firestore
+// Sincronizar pedido de credenciais e comprovativo de transferência no Firebase Firestore
 export async function syncCredentialRequestToFirestore(reqData: any): Promise<{ ok: boolean; error?: string }> {
   try {
     const safeId = String(reqData.id || `REQ_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
-    await setDoc(doc(db, 'erp_credential_requests', safeId), {
+    const allowedStatuses = ['PENDENTE', 'PENDENTE_PAGAMENTO', 'APROVADO', 'CREDENCIAIS_ENVIADAS', 'REJEITADO'];
+    const safeStatus = allowedStatuses.includes(reqData.status) ? reqData.status : 'PENDENTE_PAGAMENTO';
+    const docPayload: Record<string, any> = {
       id: safeId,
       nomeEmpresa: String(reqData.nomeEmpresa || '').substring(0, 256),
       nomeResponsavel: String(reqData.nomeResponsavel || reqData.nomeEmpresa || '').substring(0, 256),
@@ -122,9 +124,37 @@ export async function syncCredentialRequestToFirestore(reqData: any): Promise<{ 
       nuit: String(reqData.nuit || '').substring(0, 32),
       planoEscolhido: String(reqData.planoEscolhido || 'Starter').substring(0, 64),
       precoMensal: Number(reqData.precoMensal) || getPlanFeeMzn(reqData.planoEscolhido),
-      status: reqData.status === 'APROVADO' || reqData.status === 'CREDENCIAIS_ENVIADAS' ? reqData.status : 'PENDENTE',
+      status: safeStatus,
       dataSolicitacao: String(reqData.dataSolicitacao || new Date().toISOString()).substring(0, 64)
-    });
+    };
+    if (reqData.cicloFaturacao === 'mensal' || reqData.cicloFaturacao === 'anual') {
+      docPayload.cicloFaturacao = reqData.cicloFaturacao;
+    }
+    if (reqData.metodoTransferencia) {
+      docPayload.metodoTransferencia = String(reqData.metodoTransferencia).substring(0, 64);
+    }
+    if (reqData.referenciaTransferencia) {
+      docPayload.referenciaTransferencia = String(reqData.referenciaTransferencia).substring(0, 128);
+    }
+    if (reqData.valorTransferido !== undefined && !Number.isNaN(Number(reqData.valorTransferido))) {
+      docPayload.valorTransferido = Number(reqData.valorTransferido);
+    }
+    if (reqData.dataTransferencia) {
+      docPayload.dataTransferencia = String(reqData.dataTransferencia).substring(0, 64);
+    }
+    if (reqData.comprovativoNome) {
+      docPayload.comprovativoNome = String(reqData.comprovativoNome).substring(0, 256);
+    }
+    if (reqData.activationCodePrefix) {
+      docPayload.activationCodePrefix = String(reqData.activationCodePrefix).substring(0, 32);
+    }
+    if (reqData.motivoRejeicao) {
+      docPayload.motivoRejeicao = String(reqData.motivoRejeicao).substring(0, 512);
+    }
+    if (reqData.aprovadoEm) {
+      docPayload.aprovadoEm = String(reqData.aprovadoEm).substring(0, 64);
+    }
+    await setDoc(doc(db, 'erp_credential_requests', safeId), docPayload, { merge: true });
     return { ok: true };
   } catch (error: any) {
     console.warn('Sync credential request to Firestore warning:', error);
@@ -185,7 +215,7 @@ interface LocalVaultAccount {
   nuit: string;
   passwordHash: string;
   plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
-  status: 'ativo' | 'suspenso';
+  status: 'ativo' | 'suspenso' | 'pendente';
   updatedAt: string;
 }
 
@@ -205,6 +235,7 @@ async function saveAccountToLocalVault(params: {
   nuit: string;
   password: string;
   plan: string;
+  status?: 'ativo' | 'suspenso' | 'pendente';
 }): Promise<boolean> {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
   try {
@@ -220,7 +251,7 @@ async function saveAccountToLocalVault(params: {
       nuit: params.nuit,
       passwordHash: hashed,
       plan: normalizeFirebasePlan(params.plan),
-      status: 'ativo',
+      status: params.status || 'pendente',
       updatedAt: new Date().toISOString()
     };
     const idx = safeList.findIndex((a) => a.email === emailNorm || a.id === params.id);
@@ -253,7 +284,8 @@ export async function updateLocalVaultPassword(
   email: string,
   newPassword: string,
   companyName?: string,
-  clientId?: string
+  clientId?: string,
+  status?: 'ativo' | 'suspenso' | 'pendente'
 ): Promise<boolean> {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
   const emailNorm = String(email || '').toLowerCase().trim();
@@ -267,7 +299,8 @@ export async function updateLocalVaultPassword(
       companyName: existing?.companyName || companyName || `Empresa ${emailNorm.split('@')[0].toUpperCase()}`,
       nuit: existing?.nuit || '',
       password: cleanPwd,
-      plan: existing?.plan || 'Bronze'
+      plan: existing?.plan || 'Bronze',
+      status: status || existing?.status || 'ativo'
     });
   } catch {
     return false;
@@ -336,47 +369,58 @@ export async function syncUpdatedCredentialsToFirestore(params: {
   }
 }
 
-// Registar e sincronizar conta recém-criada em todas as coleções Firebase da ClickPay
+// Registar e sincronizar conta recém-criada em estado PENDENTE até confirmação do comprovativo pelo Fundador
 export async function syncRegisteredAccountToFirestore(params: {
   clientId: string;
+  requestId?: string;
   nomeEmpresa: string;
   email: string;
   nuit: string;
   password: string;
   plano?: string;
+  billingCycle?: 'mensal' | 'anual';
   feeBase?: number;
   telefone?: string;
   endereco?: string;
   provincia?: string;
+  transferMethod?: string;
+  transferReference?: string;
+  transferAmount?: number;
+  transferDate?: string;
+  comprovativoNome?: string;
+  subscriptionStatus?: 'pendente' | 'ativo';
   isUpdate?: boolean;
 }) {
   const now = new Date().toISOString();
   const safeId = String(params.clientId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
-  const reqId = `ONB_${safeId}`.substring(0, 128);
+  const reqId = String(params.requestId || `ONB_${safeId}`).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
   const plano = params.plano || 'Starter';
-  const feeBase = Number(params.feeBase) || getPlanFeeMzn(plano);
+  const cycle = params.billingCycle === 'anual' ? 'anual' : 'mensal';
+  const feeBase = Number(params.feeBase) || getPlanFeeMzn(plano, cycle);
+  const subStatus: 'pendente' | 'ativo' = params.subscriptionStatus === 'ativo' ? 'ativo' : 'pendente';
+  const saasStatus = subStatus === 'ativo' ? 'Ativo' : 'Pendente';
   const syncedCollections: string[] = [];
   const errors: string[] = [];
 
-  // 0. Persistir imediatamente no cofre local para garantir login em modo estático/offline
+  // 0. Persistir no cofre local respeitando o estado pendente até confirmação
   const savedVault = await saveAccountToLocalVault({
     id: safeId,
     email: params.email,
     companyName: params.nomeEmpresa,
     nuit: params.nuit,
     password: params.password,
-    plan: plano
+    plan: plano,
+    status: subStatus
   });
   if (savedVault) {
     syncedCollections.push('local_vault');
   }
 
-  // Se for apenas atualização da Etapa 3 sem sessão Firebase Auth ativa, evitar reescrita que dispara erro de permissão de atualização
   if (params.isUpdate && !auth.currentUser) {
     return { syncedCollections, errors };
   }
 
-  // 1. Tentar criar utilizador no Firebase Auth (se o provedor Email/Password estiver ativo)
+  // 1. Tentar criar utilizador no Firebase Auth (permanece pendente até aprovação)
   if (!params.isUpdate) {
     try {
       const cred = await createUserWithEmailAndPassword(auth, params.email, params.password);
@@ -388,19 +432,18 @@ export async function syncRegisteredAccountToFirestore(params: {
           role: 'CLIENTE_EMPRESA',
           companyId: safeId,
           createdAt: now,
-          status: 'ativo'
+          status: subStatus
         }, { merge: true });
         syncedCollections.push('users');
       }
     } catch (authErr: any) {
-      // Se Email/Password estiver desativado no console Firebase, continua normalmente para gravar no Firestore
       if (authErr?.code !== 'auth/operation-not-allowed' && authErr?.code !== 'auth/email-already-in-use') {
         console.warn('Firebase Auth signup info:', authErr?.code || authErr?.message);
       }
     }
   }
 
-  // 2. Gravar na coleção oficial erp_clients
+  // 2. Gravar na coleção oficial erp_clients (sempre 'pendente' na criação inicial)
   const erpRes = await syncClientToFirestore({
     id: safeId,
     nome: params.nomeEmpresa,
@@ -409,13 +452,13 @@ export async function syncRegisteredAccountToFirestore(params: {
     telefone: params.telefone || '+258 84 000 0000',
     password: params.password,
     subscription_plan: plano,
-    subscription_status: 'ativo',
+    subscription_status: subStatus,
     fee_base: feeBase
   });
   if (erpRes.ok) syncedCollections.push('erp_clients');
   else if (erpRes.error) errors.push(`erp_clients: ${erpRes.error}`);
 
-  // 3. Gravar na coleção saas_clients (listagem em tempo real, com palavra-passe encriptada/hashed)
+  // 3. Gravar na coleção saas_clients
   try {
     const hashedAdminPass = await hashPassword(String(params.password));
     await setDoc(doc(db, 'saas_clients', safeId), {
@@ -428,7 +471,7 @@ export async function syncRegisteredAccountToFirestore(params: {
       address: `${params.endereco || 'Maputo'}, ${params.provincia || 'Maputo Cidade'}`,
       plan: plano,
       monthlyFee: feeBase,
-      status: 'Ativo',
+      status: saasStatus,
       adminName: String(params.nomeEmpresa).substring(0, 256),
       adminPassword: hashedAdminPass.substring(0, 256),
       createdAt: now,
@@ -447,7 +490,7 @@ export async function syncRegisteredAccountToFirestore(params: {
       nuit: String(params.nuit).substring(0, 32),
       email: String(params.email).substring(0, 256),
       plano,
-      status: 'ativo',
+      status: subStatus,
       origem: 'Criar Conta ClickPay',
       createdAt: now,
       updatedAt: now
@@ -457,7 +500,7 @@ export async function syncRegisteredAccountToFirestore(params: {
     errors.push(`companies: ${err?.message || String(err)}`);
   }
 
-  // 5. Gravar pedido/registo de credenciais no Firestore apenas na criação inicial
+  // 5. Registar solicitação com dados do comprovativo de transferência para aprovação do Fundador
   if (!params.isUpdate) {
     const reqRes = await syncCredentialRequestToFirestore({
       id: reqId,
@@ -467,15 +510,21 @@ export async function syncRegisteredAccountToFirestore(params: {
       telefone: params.telefone || '+258 84 000 0000',
       nuit: params.nuit,
       planoEscolhido: plano,
+      cicloFaturacao: cycle,
       precoMensal: feeBase,
-      status: 'APROVADO',
+      metodoTransferencia: params.transferMethod,
+      referenciaTransferencia: params.transferReference,
+      valorTransferido: params.transferAmount,
+      dataTransferencia: params.transferDate,
+      comprovativoNome: params.comprovativoNome,
+      status: subStatus === 'ativo' ? 'APROVADO' : 'PENDENTE_PAGAMENTO',
       dataSolicitacao: now
     });
     if (reqRes.ok) syncedCollections.push('erp_credential_requests');
     else if (reqRes.error) errors.push(`erp_credential_requests: ${reqRes.error}`);
 
     try {
-      await setDoc(doc(db, 'credential_requests', reqId), {
+      const landingDoc: Record<string, any> = {
         id: reqId,
         empresa: String(params.nomeEmpresa).substring(0, 256),
         responsavel: String(params.nomeEmpresa).substring(0, 256),
@@ -483,9 +532,17 @@ export async function syncRegisteredAccountToFirestore(params: {
         email: String(params.email).substring(0, 256),
         telefone: String(params.telefone || '+258 84 000 0000').substring(0, 64),
         plano,
-        status: 'REGISTADO_ONLINE',
+        cicloFaturacao: cycle,
+        status: subStatus === 'ativo' ? 'REGISTADO_ONLINE' : 'PENDENTE_PAGAMENTO',
         createdAt: now
-      }, { merge: true });
+      };
+      if (params.transferMethod) landingDoc.metodoTransferencia = String(params.transferMethod).substring(0, 64);
+      if (params.transferReference) landingDoc.referenciaTransferencia = String(params.transferReference).substring(0, 128);
+      if (params.transferAmount !== undefined) landingDoc.valorTransferido = Number(params.transferAmount);
+      if (params.transferDate) landingDoc.dataTransferencia = String(params.transferDate).substring(0, 64);
+      if (params.comprovativoNome) landingDoc.comprovativoNome = String(params.comprovativoNome).substring(0, 256);
+
+      await setDoc(doc(db, 'credential_requests', reqId), landingDoc, { merge: true });
       syncedCollections.push('credential_requests');
     } catch (err: any) {
       errors.push(`credential_requests: ${err?.message || String(err)}`);
@@ -495,18 +552,84 @@ export async function syncRegisteredAccountToFirestore(params: {
   return { syncedCollections, errors };
 }
 
+// Sincronizar aprovação/rejeição do pagamento pelo Fundador no Firestore
+export async function syncPaymentApprovalToFirestore(params: {
+  requestId: string;
+  companyId?: string;
+  email: string;
+  nomeEmpresa?: string;
+  plan?: string;
+  feeBase?: number;
+  nextBillingDate?: string;
+  newPassword?: string;
+  activationCodePrefix?: string;
+  approved: boolean;
+  motivoRejeicao?: string;
+}): Promise<{ ok: boolean }> {
+  const now = new Date().toISOString();
+  const safeReqId = String(params.requestId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
+  const emailNorm = String(params.email || '').toLowerCase().trim();
+
+  if (params.approved && params.newPassword && emailNorm) {
+    await updateLocalVaultPassword(emailNorm, params.newPassword, params.nomeEmpresa, params.companyId, 'ativo').catch(() => {});
+  }
+
+  if (!auth.currentUser) {
+    return { ok: false };
+  }
+
+  try {
+    const reqStatus = params.approved ? 'CREDENCIAIS_ENVIADAS' : 'REJEITADO';
+    const nextDocUpdate: Record<string, any> = { status: reqStatus };
+    if (params.activationCodePrefix) nextDocUpdate.activationCodePrefix = params.activationCodePrefix.substring(0, 32);
+    if (params.motivoRejeicao) nextDocUpdate.motivoRejeicao = params.motivoRejeicao.substring(0, 512);
+    if (params.approved) nextDocUpdate.aprovadoEm = now;
+
+    await setDoc(doc(db, 'credential_requests', safeReqId), nextDocUpdate, { merge: true }).catch(() => {});
+    await setDoc(doc(db, 'erp_credential_requests', safeReqId), nextDocUpdate, { merge: true }).catch(() => {});
+
+    if (params.companyId) {
+      const safeCompId = String(params.companyId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 128);
+      const hashedPass = params.newPassword ? await hashPassword(params.newPassword) : '';
+      const saasPatch: Record<string, any> = {
+        status: params.approved ? 'Ativo' : 'Pendente',
+        updatedAt: now
+      };
+      if (params.plan) saasPatch.plan = params.plan;
+      if (params.feeBase !== undefined) saasPatch.monthlyFee = Number(params.feeBase);
+      if (params.nextBillingDate) saasPatch.nextBillingDate = params.nextBillingDate;
+      if (hashedPass) saasPatch.adminPassword = hashedPass.substring(0, 256);
+
+      await setDoc(doc(db, 'saas_clients', safeCompId), saasPatch, { merge: true }).catch(() => {});
+
+      const erpPatch: Record<string, any> = {
+        subscription_status: params.approved ? 'ativo' : 'pendente',
+        updatedAt: now
+      };
+      if (params.plan) erpPatch.subscription_plan = params.plan;
+      if (params.feeBase !== undefined) erpPatch.fee_base = Number(params.feeBase);
+      if (hashedPass) erpPatch.passwordHash = hashedPass.substring(0, 256);
+      await setDoc(doc(db, 'erp_clients', safeCompId), erpPatch, { merge: true }).catch(() => {});
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
 // Autenticar conta registada no Firebase (Firestore saas_clients + Firebase Auth) para ambientes estáticos/cloud
 export async function authenticateClientInFirebase(
   email: string,
   password: string
 ): Promise<{
   ok: boolean;
+  pendingApproval?: boolean;
   client?: {
     id: string;
     email: string;
     companyName: string;
     plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
-    status: 'ativo' | 'suspenso';
+    status: 'ativo' | 'suspenso' | 'pendente';
     nuit?: string;
   };
 }> {
@@ -545,13 +668,18 @@ export async function authenticateClientInFirebase(
         (await verifyPassword(passTrim, storedPass)) ||
         (await verifyPassword(passRaw, storedPass));
       if (passMatches) {
-        // Migração automática para hash seguro caso o documento antigo ainda estivesse em texto limpo
         if (storedPass && !isHashedPassword(storedPass)) {
           hashPassword(passTrim)
             .then((upgraded) =>
               setDoc(doc(db, 'saas_clients', d.id), { adminPassword: upgraded, updatedAt: new Date().toISOString() }, { merge: true })
             )
             .catch(() => {});
+        }
+        const rawSt = String(data.status || 'ativo').toLowerCase();
+        const normSt: 'ativo' | 'suspenso' | 'pendente' =
+          rawSt === 'pendente' ? 'pendente' : rawSt === 'suspenso' ? 'suspenso' : 'ativo';
+        if (normSt === 'pendente') {
+          return { ok: false, pendingApproval: true };
         }
         return {
           ok: true,
@@ -560,7 +688,7 @@ export async function authenticateClientInFirebase(
             email: emailNorm,
             companyName: data.companyName || data.tradeName || 'Empresa ClickPay',
             plan: mapPlan(data.plan),
-            status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo',
+            status: normSt,
             nuit: data.nuit || ''
           }
         };
@@ -583,13 +711,16 @@ export async function authenticateClientInFirebase(
     };
   }
 
-  // Verificar também no cofre local (para contas recém-registadas no navegador)
+  // Verificar também no cofre local
   const localVaultAcc = getAccountFromLocalVault(emailNorm);
   if (localVaultAcc) {
     const matchesLocal =
       (await verifyPassword(passTrim, localVaultAcc.passwordHash)) ||
       (await verifyPassword(passRaw, localVaultAcc.passwordHash));
     if (matchesLocal) {
+      if (localVaultAcc.status === 'pendente') {
+        return { ok: false, pendingApproval: true };
+      }
       return {
         ok: true,
         client: {
@@ -718,7 +849,7 @@ export async function lookupClientByEmailInCloud(email: string): Promise<{
     email: string;
     companyName: string;
     plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
-    status: 'ativo' | 'suspenso';
+    status: 'ativo' | 'suspenso' | 'pendente';
   };
 }> {
   const emailNorm = String(email || '').toLowerCase().trim();
@@ -730,6 +861,12 @@ export async function lookupClientByEmailInCloud(email: string): Promise<{
     if (p === 'Business' || p === 'Gold' || p === 'Empresarial') return 'Gold';
     if (p === 'Platinum') return 'Platinum';
     return 'Bronze';
+  };
+  const mapStatus = (s?: string): 'ativo' | 'suspenso' | 'pendente' => {
+    const raw = String(s || 'ativo').toLowerCase();
+    if (raw === 'pendente') return 'pendente';
+    if (raw === 'suspenso') return 'suspenso';
+    return 'ativo';
   };
 
   try {
@@ -744,7 +881,7 @@ export async function lookupClientByEmailInCloud(email: string): Promise<{
           email: emailNorm,
           companyName: data.companyName || data.tradeName || 'Empresa ClickPay',
           plan: mapPlan(data.plan),
-          status: String(data.status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo'
+          status: mapStatus(data.status)
         }
       };
     }
@@ -760,7 +897,7 @@ export async function lookupClientByEmailInCloud(email: string): Promise<{
           email: emailNorm,
           companyName: data.nome || 'Empresa ClickPay',
           plan: mapPlan(data.subscription_plan),
-          status: String(data.subscription_status || 'ativo').toLowerCase() === 'suspenso' ? 'suspenso' : 'ativo'
+          status: mapStatus(data.subscription_status)
         }
       };
     }
@@ -818,7 +955,7 @@ export async function provisionOrLookupGoogleClientInCloud(params: {
   email: string;
   companyName: string;
   plan: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
-  status: 'ativo' | 'suspenso';
+  status: 'ativo' | 'suspenso' | 'pendente';
 }> {
   const emailNorm = String(params.email || '').toLowerCase().trim();
   const existing = await lookupClientByEmailInCloud(emailNorm);
@@ -840,7 +977,8 @@ export async function provisionOrLookupGoogleClientInCloud(params: {
     companyName,
     nuit: '400000000',
     password: randomSeedPass,
-    plan: 'Bronze'
+    plan: 'Bronze',
+    status: 'pendente'
   });
 
   if (auth.currentUser) {
@@ -852,6 +990,7 @@ export async function provisionOrLookupGoogleClientInCloud(params: {
       password: randomSeedPass,
       plano: 'Starter',
       feeBase: getPlanFeeMzn('Starter'),
+      subscriptionStatus: 'pendente',
       isUpdate: false
     }).catch(() => {});
   }
@@ -861,7 +1000,7 @@ export async function provisionOrLookupGoogleClientInCloud(params: {
     email: emailNorm,
     companyName,
     plan: 'Bronze',
-    status: 'ativo'
+    status: 'pendente'
   };
 }
 

@@ -24,4 +24,5 @@
 11. **Infected Upload (Antivirus)**: Uploading Windows PE (`MZ`), PDF with `/JavaScript`, SVG `<script>`, or `EICAR` test signature to `/api/employees/upload-parse` or `/api/brain/invoice-ocr`.
 12. **WAF Cyber Attack Payload**: Submitting `__proto__`, `$where` NoSQL operator, `UNION SELECT` SQLi, or `<script>alert(1)</script>` XSS to `/api/*`.
 13. **Support Ticket Status Spoofing**: Creating `/support_tickets/{id}` with `status: "RESOLVIDO"` or oversized `mensagem` (>4000 chars) or non-matching `id`.
+14. **Payment Confirmation Bypass**: Creating `/erp_credential_requests/{id}` or `/credential_requests/{id}` directly with `status: "APROVADO"` / `"CREDENCIAIS_ENVIADAS"`, or updating `status` without `isSuperAdmin()`.
 

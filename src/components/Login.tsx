@@ -82,6 +82,19 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
+  // Estado de Pagamento Pendente + Modal de Ativação por Código
+  const [pendingPaymentNotice, setPendingPaymentNotice] = useState<{
+    message: string;
+    requestId?: string | null;
+    plano?: string;
+    email?: string;
+  } | null>(null);
+  const [activationModalOpen, setActivationModalOpen] = useState(false);
+  const [activationEmail, setActivationEmail] = useState('');
+  const [activationCode, setActivationCode] = useState('');
+  const [activationLoading, setActivationLoading] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+
   const generateClientOtp = () => {
     if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
       const arr = new Uint32Array(1);
@@ -121,6 +134,15 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
 
     // Autenticar apenas contas empresariais registadas na nuvem ClickPay (nunca credenciais de sistema)
     const fbAuth = await authenticateClientInFirebase(cleanEmail, cleanPassword);
+    if (fbAuth.pendingApproval || fbAuth.client?.status === 'pendente') {
+      setPendingPaymentNotice({
+        message:
+          'A sua conta aguarda confirmação do pagamento por transferência pelo Fundador (gersonjcumbane@gmail.com).',
+        plano: fbAuth.client?.plan || 'Starter',
+        email: cleanEmail
+      });
+      return null;
+    }
     if (fbAuth.ok && fbAuth.client) {
       return {
         token: `token_cloud_${fbAuth.client.id}`,
@@ -129,7 +151,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
           funcao: 'CLIENTE_EMPRESA',
           empresa_id: fbAuth.client.id,
           nome_empresa: fbAuth.client.companyName,
-          subscription_status: fbAuth.client.status,
+          subscription_status: fbAuth.client.status === 'suspenso' ? 'suspenso' : 'ativo',
           subscription_plan: fbAuth.client.plan,
           next_billing_date: defaultExp
         }
@@ -142,6 +164,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setPendingPaymentNotice(null);
     setLoading(true);
 
     const cleanEmail = email.replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase().trim();
@@ -222,6 +245,14 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
           setBootstrapEmail(cleanEmail || 'gersonjcumbane@gmail.com');
           setBootstrapError(null);
           setBootstrapModalOpen(true);
+        } else if (response.status === 403 && errData.code === 'PAYMENT_APPROVAL_PENDING') {
+          setPendingPaymentNotice({
+            message: errData.erro,
+            requestId: errData.requestId,
+            plano: errData.plano,
+            email: cleanEmail
+          });
+          setActivationEmail(cleanEmail);
         }
         setError(errData.erro || 'Dados de início de sessão incorretos. Verifique o e-mail e a palavra-passe.');
       }
@@ -229,7 +260,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       console.warn('Backend indisponível, autenticando via nuvem ClickPay:', err);
       const ok = await triggerFallbackAuth();
       if (!ok) {
-        setError('Ligação ao servidor de autenticação indisponível ou credenciais incorretas.');
+        setError((prev) => prev || 'Ligação ao servidor de autenticação indisponível ou credenciais incorretas.');
       }
     } finally {
       setLoading(false);
@@ -403,6 +434,17 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         email: gRes.email!,
         displayName: gRes.displayName
       });
+      if (client.status === 'pendente') {
+        setPendingPaymentNotice({
+          message:
+            'A sua conta aguarda confirmação do pagamento por transferência pelo Fundador (gersonjcumbane@gmail.com).',
+          plano: client.plan,
+          email: client.email
+        });
+        setActivationEmail(client.email);
+        setError('Conta pendente de confirmação de pagamento.');
+        return false;
+      }
       ensureIsolatedTenantSnapshot(client);
       persistUserSession(
         `token_google_${client.id}`,
@@ -433,7 +475,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       if (!isJson || res.status === 404 || res.status === 405 || res.status >= 500) {
         const ok = await completeStaticGoogleFallback();
         if (!ok) {
-          setError(`Não foi possível autenticar a conta Gmail (${gRes.email}).`);
+          setError((prev) => prev || `Não foi possível autenticar a conta Gmail (${gRes.email}).`);
         }
         return;
       }
@@ -443,11 +485,20 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         onLoginSuccess();
         return;
       }
+      if (res.status === 403 && data?.code === 'PAYMENT_APPROVAL_PENDING') {
+        setPendingPaymentNotice({
+          message: data.erro,
+          requestId: data.requestId,
+          plano: data.plano,
+          email: gRes.email
+        });
+        setActivationEmail(gRes.email || '');
+      }
       setError(data.erro || 'Conta Gmail não autorizada neste portal.');
     } catch {
       const ok = await completeStaticGoogleFallback();
       if (!ok) {
-        setError(`Não foi possível autenticar a conta Gmail (${gRes.email}).`);
+        setError((prev) => prev || `Não foi possível autenticar a conta Gmail (${gRes.email}).`);
       }
     }
   };
@@ -655,6 +706,42 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     }
   };
 
+  const handleActivateWithCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActivationError(null);
+    const cleanEmail = (activationEmail || email).toLowerCase().trim();
+    const cleanCode = activationCode.toUpperCase().trim();
+    if (!cleanEmail || !cleanCode) {
+      setActivationError('Introduza o e-mail da conta e o código de ativação recebido.');
+      return;
+    }
+
+    setActivationLoading(true);
+    try {
+      const res = await fetch('/api/onboarding/activate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          requestId: pendingPaymentNotice?.requestId || undefined,
+          activationCode: cleanCode
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.sucesso || !data?.token) {
+        setActivationError(data?.erro || 'Código inválido ou pagamento ainda não confirmado.');
+        return;
+      }
+      persistUserSession(data.token, data.usuario, cleanEmail);
+      setActivationModalOpen(false);
+      onLoginSuccess();
+    } catch {
+      setActivationError('Erro ao validar o código de ativação. Tente novamente.');
+    } finally {
+      setActivationLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 lg:p-8 font-sans text-slate-800">
       <div className="w-full max-w-md">
@@ -694,6 +781,35 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
               <AlertCircle size={16} className="shrink-0" />
               <span>{error}</span>
             </motion.div>
+          )}
+
+          {pendingPaymentNotice && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2.5 text-xs">
+              <div className="flex items-start gap-2 font-bold text-amber-950">
+                <Lock size={15} className="text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <p>Conta Bloqueada — Aguardando Confirmação de Pagamento</p>
+                  {pendingPaymentNotice.plano && (
+                    <p className="text-[11px] font-normal text-amber-800 mt-0.5">
+                      Pacote selecionado: <b>{pendingPaymentNotice.plano}</b>
+                      {pendingPaymentNotice.requestId ? ` · Pedido #${pendingPaymentNotice.requestId}` : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivationEmail(pendingPaymentNotice.email || email);
+                  setActivationError(null);
+                  setActivationModalOpen(true);
+                }}
+                className="w-full py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg text-[11px] transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <KeyRound size={13} />
+                <span>Activar Conta com Código Recebido</span>
+              </button>
+            </div>
           )}
 
           {otpSuccessMessage && (
@@ -1025,6 +1141,19 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
             </a>
           )}
 
+          <button
+            type="button"
+            onClick={() => {
+              setActivationEmail(email);
+              setActivationError(null);
+              setActivationModalOpen(true);
+            }}
+            className="w-full py-2.5 px-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-900 font-bold rounded-xl text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <KeyRound size={13} />
+            <span>JÁ ENVIEI O COMPROVATIVO · ACTIVAR COM CÓDIGO</span>
+          </button>
+
           <div className="text-center pt-3 border-t border-slate-100 space-y-2">
             <p className="text-xs text-slate-600 font-medium">
               Precisa de recuperar acesso ou apoio técnico?
@@ -1278,6 +1407,96 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                     </>
                   ) : (
                     <span>Guardar &amp; Activar Acesso</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {activationModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-emerald-700 text-white">
+                  <KeyRound size={18} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-950">
+                    Activar Conta com Código Confirmado
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Introduza o código enviado após confirmação do seu comprovativo pelo Fundador.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivationModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {activationError && (
+              <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />
+                <span>{activationError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleActivateWithCode} className="space-y-3.5">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">E-mail da Conta</label>
+                <input
+                  type="email"
+                  required
+                  value={activationEmail}
+                  onChange={(e) => setActivationEmail(e.target.value)}
+                  placeholder="empresa@exemplo.co.mz"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700">Código de Ativação</label>
+                <input
+                  type="text"
+                  required
+                  value={activationCode}
+                  onChange={(e) => setActivationCode(e.target.value.toUpperCase())}
+                  placeholder="Ex: CP-PRO-8F3K9A2D"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase focus:outline-none focus:ring-2 focus:ring-blue-900/10"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActivationModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={activationLoading}
+                  className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white text-xs font-bold flex items-center gap-2 cursor-pointer"
+                >
+                  {activationLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>A validar...</span>
+                    </>
+                  ) : (
+                    <span>Validar Código &amp; Entrar</span>
                   )}
                 </button>
               </div>
