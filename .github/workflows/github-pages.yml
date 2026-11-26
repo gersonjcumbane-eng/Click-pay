@@ -32,6 +32,8 @@ jobs:
       - name: Configurar GitHub Pages
         id: pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Instalar dependências
         run: npm ci || npm install

@@ -19,12 +19,20 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Verificar segredo Firebase Hosting
+        id: check_fb
+        env:
+          HAS_FB_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_FUTURE_CHARTER_96PPV != '' }}
+        run: echo "enabled=${HAS_FB_SA}" >> "$GITHUB_OUTPUT"
+
       - name: Instalar dependências e gerar build de produção
+        if: steps.check_fb.outputs.enabled == 'true'
         run: |
           npm ci || npm install
           npm run build
 
       - name: Deploy para Firebase Hosting Live
+        if: steps.check_fb.outputs.enabled == 'true'
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
