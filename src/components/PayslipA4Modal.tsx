@@ -10,6 +10,7 @@ import {
   downloadOrFallbackPdf,
   generatePayslipPdfBlob
 } from '../lib/clientPdf';
+import { getCompanyInitials, isRenderableLogoUrl } from '../lib/logoUtils';
 
 export interface PayslipA4Data {
   numeroRecibo: string;
@@ -136,7 +137,7 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
             <div className="flex flex-col sm:flex-row justify-between items-start gap-6 border-b-2 border-slate-900 pb-4">
               <div className="space-y-2 flex-1">
                 <div className="flex items-center gap-3">
-                  {empresa.logo && empresa.logo.startsWith('data:image/') ? (
+                  {isRenderableLogoUrl(empresa.logo) ? (
                     <img
                       src={empresa.logo}
                       alt={empresa.nome}
@@ -144,16 +145,15 @@ export default function PayslipA4Modal({ isOpen, onClose, data }: PayslipA4Modal
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <img
-                      src="/clickpay-logo.png"
-                      alt={empresa.nome || 'ClickPay'}
-                      className="h-12 w-auto object-contain max-w-[140px]"
-                      referrerPolicy="no-referrer"
-                    />
+                    <div className="h-11 w-11 rounded border border-slate-900 bg-slate-100 flex items-center justify-center shrink-0">
+                      <span className="text-xs font-black text-slate-900 tracking-tight">
+                        {getCompanyInitials(empresa.nome)}
+                      </span>
+                    </div>
                   )}
                   <div>
                     <h1 className="text-base font-bold text-slate-950 uppercase tracking-tight leading-tight">
-                      {empresa.nome || 'CLICKPAY MOÇAMBIQUE, LDA'}
+                      {empresa.nome || 'EMPRESA CLIENTE'}
                     </h1>
                     <p className="text-[10px] font-medium text-slate-600">
                       Processamento Salarial Certificado · Lei do Trabalho n.º 13/2023 &amp; IRPS Lei 11/2025

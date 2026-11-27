@@ -38,7 +38,7 @@ import {
 import { useToast, useConfirm } from '../context/ToastContext';
 import { db, doc, setDoc, collection, onSnapshot, syncPaymentApprovalToFirestore } from '../lib/firebase';
 import { getDefaultNextBillingDate, baseDadosClientes } from '../db_tax';
-import { hashPassword } from '../lib/security';
+import { hashPassword, scanFileForMalware } from '../lib/security';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
 import { formatMzn, getPlanExtraSlipFeeMzn, getPlanFeeMzn } from '../lib/pricing';
 import {
@@ -46,6 +46,11 @@ import {
   CLICKPAY_COMPUTER_NOTE
 } from '../utils/documentUtils';
 import { downloadBlobAsFile, generateA4CommercialDocPdfBlob } from '../lib/clientPdf';
+import {
+  getCompanyInitials,
+  isRenderableLogoUrl,
+  normalizeLogoToPngDataUrl
+} from '../lib/logoUtils';
 
 interface PaymentProofItem {
   id: string;
@@ -239,6 +244,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
   const [editFeePorSlip, setEditFeePorSlip] = useState('120');
   const [editNextBillingDate, setEditNextBillingDate] = useState(() => getDefaultNextBillingDate());
   const [editPassword, setEditPassword] = useState('');
+  const [editLogo, setEditLogo] = useState('');
   const [updatingSubscription, setUpdatingSubscription] = useState(false);
 
   // Solicitações de Credenciais em tempo real (Firebase + API)
@@ -277,6 +283,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
     setEditFeePorSlip(client.fee_por_slip.toString());
     setEditNextBillingDate(client.next_billing_date || getDefaultNextBillingDate());
     setEditPassword('');
+    setEditLogo(client.logo || '');
   };
 
   const fetchFbUsers = async () => {
@@ -483,7 +490,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             nuel: String(data.nuel || ''),
             email: String(data.email || ''),
             telefone: String(data.phone || data.telefone || '+258 84 000 0000'),
-            logo: '/clickpay-logo.png',
+            logo: String(data.logo || ''),
             subscription_status: (() => {
               const rawSt = String(data.status || 'ativo').toLowerCase();
               if (rawSt.includes('suspens')) return 'suspenso';
@@ -735,6 +742,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
           status: subStatus === 'ativo' ? 'Ativo' : subStatus === 'suspenso' ? 'Suspenso' : 'Pendente',
           adminName: nome,
           adminPassword: hashedNewPass,
+          logo: logo ? String(logo).substring(0, 145000) : '',
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (fbErr) {
@@ -780,7 +788,8 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
           fee_base: Number(editFeeBase),
           fee_por_slip: Number(editFeePorSlip),
           next_billing_date: editNextBillingDate,
-          password: editPassword
+          password: editPassword,
+          logo: editLogo
         })
       });
 
@@ -793,12 +802,19 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
           monthlyFee: Number(editFeeBase),
           status: editStatus === 'ativo' ? 'Ativo' : editStatus === 'suspenso' ? 'Suspenso' : 'Pendente',
           nextBillingDate: editNextBillingDate,
+          logo: editLogo ? String(editLogo).substring(0, 145000) : '',
           updatedAt: new Date().toISOString()
         };
         if (editPassword) fbUpdate.adminPassword = await hashPassword(editPassword);
         await setDoc(doc(db, 'saas_clients', selectedInvoiceClient.id), fbUpdate, { merge: true });
       } catch (fbErr) {
         console.warn('Aviso ao atualizar assinatura no Firebase:', fbErr);
+      }
+
+      if (data?.cliente) {
+        setSelectedInvoiceClient((prev) =>
+          prev && prev.id === selectedInvoiceClient.id ? { ...prev, ...data.cliente } : prev
+        );
       }
 
       showSuccess(data.mensagem || 'Assinatura e credenciais sincronizadas no Firebase!');
@@ -1488,15 +1504,71 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-700">URL do Logótipo (Opcional)</label>
-              <input
-                type="text"
-                value={logo}
-                onChange={(e) => setLogo(e.target.value)}
-                placeholder="Ex: https://link.com/logo.png"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
-              />
+            <div className="space-y-1.5 md:col-span-2">
+              <label className="text-[11px] font-bold text-slate-700">Logótipo da Empresa Cliente (Upload PNG/JPG ou URL)</label>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                  {isRenderableLogoUrl(logo) ? (
+                    <img src={logo} alt="Preview" className="w-full h-full object-contain p-0.5" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="text-[10px] font-black text-slate-400">{getCompanyInitials(nome || 'EM')}</span>
+                  )}
+                </div>
+                <label className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[11px] font-bold cursor-pointer transition-colors shrink-0">
+                  Carregar Ficheiro
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      if (file.size > 2 * 1024 * 1024) {
+                        showError('O logótipo excede o limite de 2 MB.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onloadend = async () => {
+                        const rawUrl = String(reader.result || '');
+                        const av = await scanFileForMalware({
+                          base64: rawUrl.split(',')[1] || '',
+                          mimeType: file.type || 'image/png',
+                          fileName: file.name,
+                          maxBytes: 2 * 1024 * 1024
+                        });
+                        if (!av.safe) {
+                          showError(`Ficheiro bloqueado: ${av.reason}`);
+                          return;
+                        }
+                        try {
+                          const normalized = await normalizeLogoToPngDataUrl(rawUrl, 280);
+                          setLogo(normalized);
+                        } catch {
+                          setLogo(rawUrl);
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+                <input
+                  type="text"
+                  value={logo}
+                  onChange={(e) => setLogo(e.target.value)}
+                  placeholder="Ou cole https://link.com/logo.png"
+                  className="flex-1 min-w-[180px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
+                />
+                {logo && (
+                  <button
+                    type="button"
+                    onClick={() => setLogo('')}
+                    className="px-2.5 py-2 text-[11px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl cursor-pointer"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -1641,10 +1713,10 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                         }`}>
                           {isFoundersCo ? (
                             <Sparkles size={24} className="text-white animate-pulse" />
-                          ) : client.logo ? (
-                            <img src={client.logo} alt={client.nome} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : isRenderableLogoUrl(client.logo) ? (
+                            <img src={client.logo} alt={client.nome} className="w-full h-full object-contain p-1 bg-white" referrerPolicy="no-referrer" />
                           ) : (
-                            <Building2 size={24} className="text-slate-400" />
+                            <span className="text-xs font-black text-slate-600">{getCompanyInitials(client.nome)}</span>
                           )}
                         </div>
                         
@@ -1753,7 +1825,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                       {!isFoundersCo ? (
                         <>
                           <button
-                            onClick={() => setSelectedInvoiceClient(client)}
+                            onClick={() => selectInvoiceClientAndSync(client)}
                             className={`inline-flex items-center gap-1 text-[11px] font-bold hover:underline cursor-pointer transition-colors ${
                               selectedInvoiceClient?.id === client.id ? 'text-blue-900' : 'text-slate-500 hover:text-slate-800'
                             }`}
@@ -1896,6 +1968,75 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                       </div>
                     </div>
                   </div>
+
+                  <div className="space-y-1.5 col-span-2 pt-1 border-t border-slate-100">
+                    <label className="text-[10px] font-bold text-slate-600 block">Logótipo Próprio desta Empresa (Documentos & Recibos)</label>
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                        {isRenderableLogoUrl(editLogo) ? (
+                          <img src={editLogo} alt="Logo" className="w-full h-full object-contain p-0.5 bg-white" referrerPolicy="no-referrer" />
+                        ) : (
+                          <span className="text-[9px] font-black text-slate-400">
+                            {getCompanyInitials(selectedInvoiceClient.nome)}
+                          </span>
+                        )}
+                      </div>
+                      <label className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer shrink-0">
+                        Carregar
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file) return;
+                            if (file.size > 2 * 1024 * 1024) {
+                              showError('O logótipo excede o limite de 2 MB.');
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onloadend = async () => {
+                              const rawUrl = String(reader.result || '');
+                              const av = await scanFileForMalware({
+                                base64: rawUrl.split(',')[1] || '',
+                                mimeType: file.type || 'image/png',
+                                fileName: file.name,
+                                maxBytes: 2 * 1024 * 1024
+                              });
+                              if (!av.safe) {
+                                showError(`Ficheiro bloqueado: ${av.reason}`);
+                                return;
+                              }
+                              try {
+                                const normalized = await normalizeLogoToPngDataUrl(rawUrl, 280);
+                                setEditLogo(normalized);
+                              } catch {
+                                setEditLogo(rawUrl);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      <input
+                        type="text"
+                        value={editLogo}
+                        onChange={(e) => setEditLogo(e.target.value)}
+                        placeholder="URL ou Data URL PNG"
+                        className="flex-1 min-w-0 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      {editLogo && (
+                        <button
+                          type="button"
+                          onClick={() => setEditLogo('')}
+                          className="px-2 py-1.5 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg cursor-pointer shrink-0"
+                        >
+                          Remover
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-end pt-1">
@@ -1938,7 +2079,8 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                         nuel: '105086659',
                         endereco: 'Av. 24 de Julho, nº 1500, 5º Andar, Maputo',
                         telefone: '+258 86 139 0061',
-                        email: 'gersonjcumbane@gmail.com'
+                        email: 'gersonjcumbane@gmail.com',
+                        logo: '/clickpay-logo.png'
                       },
                       entidade: {
                         nome: selectedInvoiceClient.nome,

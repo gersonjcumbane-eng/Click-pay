@@ -18,6 +18,7 @@ export interface CartaApoioOptions {
   contacto?: string;
   email?: string;
   website?: string;
+  logo?: string;
 }
 
 export async function gerarCartaApoioDocx(options: CartaApoioOptions = {}): Promise<Buffer> {
@@ -28,21 +29,40 @@ export async function gerarCartaApoioDocx(options: CartaApoioOptions = {}): Prom
   const cargo = options.cargo || 'Representante / Fundador da Startup';
   const contacto = options.contacto || '+258 86 139 0061';
   const email = options.email || 'gersonjcumbane@gmail.com';
-  const website = options.website || 'clickpay.co.mz';
+  const website = options.website ?? 'clickpay.co.mz';
 
   let logoImageRun: ImageRun | null = null;
   try {
-    const logoPath = path.join(process.cwd(), 'public', 'clickpay-logo.png');
-    if (fs.existsSync(logoPath)) {
-      const logoData = fs.readFileSync(logoPath);
-      logoImageRun = new ImageRun({
-        type: 'png',
-        data: logoData,
-        transformation: {
-          width: 120,
-          height: 60,
-        },
-      });
+    const rawLogo = String(options.logo || '').trim();
+    if (rawLogo.startsWith('data:image/')) {
+      const match = rawLogo.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/is);
+      if (match) {
+        const imgType = match[1].toLowerCase() === 'png' ? 'png' : 'jpg';
+        logoImageRun = new ImageRun({
+          type: imgType,
+          data: Buffer.from(match[2], 'base64'),
+          transformation: {
+            width: 110,
+            height: 55,
+          },
+        });
+      }
+    } else if (rawLogo.startsWith('/')) {
+      const publicRoot = path.resolve(process.cwd(), 'public');
+      const cleanRel = rawLogo.replace(/^\/+/, '');
+      const resolved = path.resolve(publicRoot, cleanRel);
+      if (resolved.startsWith(publicRoot + path.sep) && fs.existsSync(resolved)) {
+        const ext = path.extname(resolved).toLowerCase();
+        const imgType = ext === '.jpg' || ext === '.jpeg' ? 'jpg' : 'png';
+        logoImageRun = new ImageRun({
+          type: imgType,
+          data: fs.readFileSync(resolved),
+          transformation: {
+            width: 110,
+            height: 55,
+          },
+        });
+      }
     }
   } catch (err) {
     console.error('Não foi possível carregar o logótipo para o Word:', err);

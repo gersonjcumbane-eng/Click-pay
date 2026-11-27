@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
   Building2, 
@@ -32,13 +32,14 @@ import {
   QrCode
 } from 'lucide-react';
 import { CompanyData, ConfigFiscal, EscalaoFiscalMoz } from '../types';
-import { matrizFiscaisMoçambique, employees as defaultEmployees, paymentLogs as defaultLogs } from '../db_tax';
+import { matrizFiscaisMoçambique } from '../db_tax';
 import { useToast } from '../context/ToastContext';
 import EnvironmentMasking from './EnvironmentMasking';
 import SystemQrModal from './SystemQrModal';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
+import { getCompanyInitials, isRenderableLogoUrl, normalizeLogoToPngDataUrl } from '../lib/logoUtils';
 
 interface CorporateSettingsProps {
   company: CompanyData;
@@ -84,6 +85,36 @@ export default function CorporateSettings({
   const [email, setEmail] = useState(company.email || "contacto@suaempresa.co.mz");
   const [telefone, setTelefone] = useState(company.telefone || "+258 861390061");
   const [logo, setLogo] = useState(company.logo || "");
+
+  useEffect(() => {
+    setNome(company.nome || "");
+    setPais(company.pais || "Moçambique");
+    setProvincia(company.provincia || "Maputo Cidade");
+    setDistrito(company.distrito || "Maputo Cidade");
+    setRegimeIva(company.regime_iva || "IVA Normal");
+    setSectorNegocio(company.sector_negocio || "Comércio & Retalho");
+    setTamanhoEmpresa(company.tamanho_empresa || "Microempresa (1-5 Colaboradores)");
+    setRegimeFiscalPme(company.regime_fiscal_pme || "ISPC (Imposto Simplificado 3%)");
+    setNuel(company.nuel || "");
+    setNuit(company.nuit || "");
+    setEmail(company.email || "");
+    setTelefone(company.telefone || "");
+    setLogo(company.logo || "");
+  }, [
+    company.nome,
+    company.pais,
+    company.provincia,
+    company.distrito,
+    company.regime_iva,
+    company.sector_negocio,
+    company.tamanho_empresa,
+    company.regime_fiscal_pme,
+    company.nuel,
+    company.nuit,
+    company.email,
+    company.telefone,
+    company.logo
+  ]);
 
   // Tax state
   const [taxaInssTrabalhador, setTaxaInssTrabalhador] = useState(config.taxa_inss_trabalhador);
@@ -313,19 +344,6 @@ export default function CorporateSettings({
         };
       } catch {}
     }
-    if (founderMode && cid === 'cli_founders') {
-      let deletedIds: string[] = [];
-      try {
-        deletedIds = JSON.parse(localStorage.getItem('clickpay_deleted_seed_ids') || '[]');
-      } catch {}
-      const deletedSet = new Set(deletedIds);
-      const filteredEmps = defaultEmployees.filter((e: any) => !deletedSet.has(e.id));
-      const allowedNames = new Set(filteredEmps.map((e: any) => e.nome));
-      const filteredLogs = defaultLogs.filter(
-        (l: any) => !deletedSet.has(l.employeeId) && allowedNames.has(l.employeeName)
-      );
-      return { employees: filteredEmps, logs: filteredLogs };
-    }
     return { employees: [], logs: [] };
   };
 
@@ -453,7 +471,12 @@ export default function CorporateSettings({
           showError(`Imagem bloqueada pelo Antivírus ClickPay: ${avScan.reason}`);
           return;
         }
-        setLogo(result);
+        try {
+          const normalizedPng = await normalizeLogoToPngDataUrl(result, 280);
+          setLogo(normalizedPng || result);
+        } catch {
+          setLogo(result);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -538,6 +561,7 @@ export default function CorporateSettings({
             nuel,
             email,
             telefone,
+            logo: logo ? String(logo).substring(0, 145000) : '',
             updatedAt: new Date().toISOString()
           }, { merge: true });
         } catch (fbErr) {
@@ -817,36 +841,53 @@ export default function CorporateSettings({
             {/* Logo da Empresa */}
             <div className="space-y-2">
               <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600, fontSize: '13px', color: '#374151' }}>
-                Logótipo da Empresa
+                Logótipo Próprio da Empresa (Aplicado nos Recibos e Documentos)
               </label>
               <div className="upload-container" style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '25px' }}>
-                {/* A caixa de preview exibe o logótipo oficial da Fintech como padrão ou a customizada se existir */}
                 <div className="avatar-preview" style={{ width: '80px', height: '80px', border: '1px solid #cbd5e1', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white', overflow: 'hidden' }}>
-                  <img 
-                    src={logo || "/clickpay-logo.png"} 
-                    alt="Logo ClickPay" 
-                    style={{ width: '70px', height: 'auto', maxHeight: '70px', objectFit: 'contain' }}
-                    referrerPolicy="no-referrer"
-                  />
+                  {isRenderableLogoUrl(logo) ? (
+                    <img
+                      src={logo}
+                      alt={nome || 'Logótipo da Empresa'}
+                      style={{ width: '70px', height: 'auto', maxHeight: '70px', objectFit: 'contain' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-slate-400">
+                      <span className="text-sm font-black text-slate-700 tracking-tight">{getCompanyInitials(nome)}</span>
+                      <span className="text-[9px] text-slate-400">Sem logo</span>
+                    </div>
+                  )}
                 </div>
-                <div>
+                <div className="space-y-2">
                   <input
                     type="file"
                     ref={fileInputRef}
                     onChange={handleLogoChange}
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp"
                     className="hidden"
                   />
-                  <button 
-                    type="button" 
-                    onClick={handleLogoUploadClick}
-                    className="btn-upload" 
-                    style={{ background: 'white', border: '1px solid #d1d5db', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
-                  >
-                    ⬆ Alterar Logótipo
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleLogoUploadClick}
+                      className="btn-upload"
+                      style={{ background: 'white', border: '1px solid #d1d5db', padding: '8px 16px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
+                    >
+                      ⬆ Carregar / Alterar Logótipo
+                    </button>
+                    {logo && (
+                      <button
+                        type="button"
+                        onClick={() => setLogo('')}
+                        className="px-3 py-2 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-md text-xs font-semibold cursor-pointer"
+                      >
+                        Remover Logótipo
+                      </button>
+                    )}
+                  </div>
                   <div className="upload-info" style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                    PNG ou JPG com fundo transparente. Máx. 2MB.
+                    PNG ou JPG (máx. 2MB). Este logótipo aparecerá em todos os recibos, guias e PDFs desta empresa.
                   </div>
                 </div>
               </div>

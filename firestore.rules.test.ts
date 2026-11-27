@@ -69,6 +69,7 @@ async function runSecurityTests() {
   assert.equal(/allow\s+read\s*,\s*write\s*:\s*if\s+true\s*;/.test(rulesText), false, 'firestore.rules must never allow read, write: if true');
   assert.equal(/isValidId\(/.test(rulesText), true, 'firestore.rules must enforce isValidId');
   assert.equal(/isValidSupportTicket\(/.test(rulesText), true, 'firestore.rules must enforce isValidSupportTicket');
+  assert.equal(/data\.logo\s+is\s+string\s*&&\s*data\.logo\.size\(\)\s*<=\s*150000/.test(rulesText), true, 'firestore.rules must validate per-company logo string size <= 150000');
 
   console.log('ALL SECURITY & ANTIVIRUS CHECKS PASSED.');
 }

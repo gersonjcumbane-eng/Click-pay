@@ -5,6 +5,7 @@
 
 import { jsPDF } from 'jspdf';
 import { getAuthHeaders } from './authSession';
+import { getCachedLogoDataUrl } from './logoUtils';
 import {
   CLICKPAY_COMPUTER_NOTE,
   DEFAULT_BANK_ACCOUNTS,
@@ -35,6 +36,31 @@ function todayPt(): string {
   return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
 }
 
+function drawPdfCompanyLogo(doc: jsPDF, company: Partial<CompanyData>, x: number, y: number, maxW = 20, maxH = 18): number {
+  const dataUrl = getCachedLogoDataUrl(company?.logo);
+  if (!dataUrl) return 0;
+  try {
+    const fmt = /^data:image\/jpe?g/i.test(dataUrl) ? 'JPEG' : 'PNG';
+    let drawW = maxW;
+    let drawH = maxH;
+    try {
+      const props = doc.getImageProperties(dataUrl);
+      if (props?.width && props?.height) {
+        const ratio = Math.min(maxW / props.width, maxH / props.height);
+        drawW = Math.max(4, props.width * ratio);
+        drawH = Math.max(4, props.height * ratio);
+      }
+    } catch {
+      // keep box fallback
+    }
+    const offsetY = y + Math.max(0, (maxH - drawH) / 2);
+    doc.addImage(dataUrl, fmt, x, offsetY, drawW, drawH, undefined, 'FAST');
+    return drawW + 4;
+  } catch {
+    return 0;
+  }
+}
+
 function drawHeaderFrame(
   doc: jsPDF,
   company: Partial<CompanyData>,
@@ -49,25 +75,30 @@ function drawHeaderFrame(
   const margin = 14;
   const contentWidth = pageWidth - margin * 2;
 
+  const logoOffset = drawPdfCompanyLogo(doc, company, margin, 13, 21, 18);
+  const textX = margin + logoOffset;
+  const maxNameChars = logoOffset > 0 ? 34 : 44;
+  const maxDetailChars = logoOffset > 0 ? 48 : 62;
+
   // Company Identity (Left)
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
+  doc.setFontSize(logoOffset > 0 ? 11 : 12);
   doc.setTextColor(15, 23, 42);
-  doc.text((company.nome || 'CLICKPAY MOÇAMBIQUE, LDA').toUpperCase().slice(0, 44), margin, 18);
+  doc.text((company.nome || 'EMPRESA').toUpperCase().slice(0, maxNameChars), textX, 18);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.2);
+  doc.setFontSize(8.0);
   doc.setTextColor(71, 85, 105);
-  const endereco = `${company.endereco || 'Maputo, Moçambique'}${company.provincia ? ` · ${company.provincia}` : ''}`;
-  doc.text(endereco.slice(0, 62), margin, 23.5);
+  const endereco = `${company.endereco || 'Moçambique'}${company.provincia ? ` · ${company.provincia}` : ''}`;
+  doc.text(endereco.slice(0, maxDetailChars), textX, 23.5);
   doc.text(
-    `NUIT: ${company.nuit || 'N/D'}${company.nuel ? ` · NUEL: ${company.nuel}` : ''}`,
-    margin,
+    `NUIT: ${company.nuit || 'N/D'}${company.nuel ? ` · NUEL: ${company.nuel}` : ''}`.slice(0, maxDetailChars),
+    textX,
     28
   );
   doc.text(
-    `Tel: ${company.telefone || '+258 86 139 0061'} · E-mail: ${company.email || 'admin@clickpay.co.mz'}`.slice(0, 64),
-    margin,
+    `Tel: ${company.telefone || 'N/D'} · E-mail: ${company.email || 'N/D'}`.slice(0, maxDetailChars),
+    textX,
     32.5
   );
 

@@ -1034,39 +1034,8 @@ export let escaloesIRPS: EscalaoIRPS[] = [
   }
 ];
 
-// Initial employees for a raw starting experience - pre-populated with Founders team as default
-export let employees: Employee[] = [
-  {
-    id: "emp-gerson",
-    nome: "Gerson Cumbane",
-    nuit: "400222333",
-    inss_numero: "100222333",
-    cargo: "CEO / Diretor Executivo",
-    salario_base: 39000,
-    numero_dependentes: 1,
-    carteira_movel: "861390061"
-  },
-  {
-    id: "emp-miguel",
-    nome: "Miguel Zandamela",
-    nuit: "400444555",
-    inss_numero: "100444555",
-    cargo: "Chief Operating Officer",
-    salario_base: 30000,
-    numero_dependentes: 0,
-    carteira_movel: "841439898"
-  },
-  {
-    id: "emp-cleton",
-    nome: "Cleton Bata",
-    nuit: "400666777",
-    inss_numero: "100666777",
-    cargo: "Chief Marketing Officer",
-    salario_base: 30000,
-    numero_dependentes: 2,
-    carteira_movel: "844996925"
-  }
-];
+// Initial employees start zeroed so each company registers its staff and salaries personally
+export let employees: Employee[] = [];
 
 // Simulated Transaction log for payroll disbursements
 export let paymentLogs: PaymentLog[] = [];
@@ -1355,39 +1324,7 @@ export interface Contract {
   cargo_complexo?: boolean;
 }
 
-export let baseDadosContratosGerais: Contract[] = [
-  {
-    id: "ct-gerson",
-    empresa_id: "cli_founders",
-    nome_funcionario: "Gerson Cumbane",
-    cargo: "CEO / Diretor Executivo",
-    tipo_contrato: "Indeterminado",
-    data_inicio: "2026-01-01",
-    salario_base: 39000,
-    cargo_complexo: true
-  },
-  {
-    id: "ct-miguel",
-    empresa_id: "cli_founders",
-    nome_funcionario: "Miguel Zandamela",
-    cargo: "Chief Operating Officer",
-    tipo_contrato: "Indeterminado",
-    data_inicio: "2026-01-01",
-    salario_base: 30000,
-    cargo_complexo: true
-  },
-  {
-    id: "ct-cleton",
-    empresa_id: "cli_founders",
-    nome_funcionario: "Cleton Bata",
-    cargo: "Chief Marketing Officer",
-    tipo_contrato: "Prazo Certo",
-    data_inicio: "2026-01-01",
-    data_fim: "2026-12-31",
-    salario_base: 30000,
-    cargo_complexo: false
-  }
-];
+export let baseDadosContratosGerais: Contract[] = [];
 
 export function auditarContratoLei132023(contrato: Contract) {
   // Real-time current date
@@ -1510,75 +1447,6 @@ export function seedDemoData() {
   empresaAtual.next_billing_date = "2026-12-31";
   empresaAtual.fee_base = 0;
   empresaAtual.fee_por_slip = 0;
-
-  // Adiciona novamente os colaboradores fundadores com seus respetivos salários
-  employees.push(
-    {
-      id: "emp-gerson",
-      nome: "Gerson Cumbane",
-      nuit: "400222333",
-      inss_numero: "100222333",
-      cargo: "CEO / Diretor Executivo",
-      salario_base: 39000,
-      numero_dependentes: 1,
-      carteira_movel: "861390061"
-    },
-    {
-      id: "emp-miguel",
-      nome: "Miguel Zandamela",
-      nuit: "400444555",
-      inss_numero: "100444555",
-      cargo: "Chief Operating Officer",
-      salario_base: 30000,
-      numero_dependentes: 0,
-      carteira_movel: "841439898"
-    },
-    {
-      id: "emp-cleton",
-      nome: "Cleton Bata",
-      nuit: "400666777",
-      inss_numero: "100666777",
-      cargo: "Chief Marketing Officer",
-      salario_base: 30000,
-      numero_dependentes: 2,
-      carteira_movel: "844996925"
-    }
-  );
-
-  // Adiciona novamente os contratos de trabalho correspondentes
-  baseDadosContratosGerais.push(
-    {
-      id: "ct-gerson",
-      empresa_id: "cli_founders",
-      nome_funcionario: "Gerson Cumbane",
-      cargo: "CEO / Diretor Executivo",
-      tipo_contrato: "Indeterminado",
-      data_inicio: "2026-01-01",
-      salario_base: 39000,
-      cargo_complexo: true
-    },
-    {
-      id: "ct-miguel",
-      empresa_id: "cli_founders",
-      nome_funcionario: "Miguel Zandamela",
-      cargo: "Chief Operating Officer",
-      tipo_contrato: "Indeterminado",
-      data_inicio: "2026-01-01",
-      salario_base: 30000,
-      cargo_complexo: true
-    },
-    {
-      id: "ct-cleton",
-      empresa_id: "cli_founders",
-      nome_funcionario: "Cleton Bata",
-      cargo: "Chief Marketing Officer",
-      tipo_contrato: "Prazo Certo",
-      data_inicio: "2026-01-01",
-      data_fim: "2026-12-31",
-      salario_base: 30000,
-      cargo_complexo: false
-    }
-  );
 }
 
 // =========================================================================
@@ -1630,71 +1498,8 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     subscription_status: "ativo",
     subscription_plan: "Platinum",
     next_billing_date: "2026-12-31",
-    employees: [
-      {
-        id: "emp-gerson",
-        nome: "Gerson Cumbane",
-        nuit: "400222333",
-        inss_numero: "100222333",
-        cargo: "CEO / Diretor Executivo",
-        salario_base: 39000,
-        numero_dependentes: 1,
-        carteira_movel: "861390061"
-      },
-      {
-        id: "emp-miguel",
-        nome: "Miguel Zandamela",
-        nuit: "400444555",
-        inss_numero: "100444555",
-        cargo: "Chief Operating Officer",
-        salario_base: 30000,
-        numero_dependentes: 0,
-        carteira_movel: "841439898"
-      },
-      {
-        id: "emp-cleton",
-        nome: "Cleton Bata",
-        nuit: "400666777",
-        inss_numero: "100666777",
-        cargo: "Chief Marketing Officer",
-        salario_base: 30000,
-        numero_dependentes: 2,
-        carteira_movel: "844996925"
-      }
-    ],
-    contratos: [
-      {
-        id: "ct-gerson",
-        empresa_id: "cli_founders",
-        nome_funcionario: "Gerson Cumbane",
-        cargo: "CEO / Diretor Executivo",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2026-01-01",
-        salario_base: 39000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-miguel",
-        empresa_id: "cli_founders",
-        nome_funcionario: "Miguel Zandamela",
-        cargo: "Chief Operating Officer",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2026-01-01",
-        salario_base: 30000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-cleton",
-        empresa_id: "cli_founders",
-        nome_funcionario: "Cleton Bata",
-        cargo: "Chief Marketing Officer",
-        tipo_contrato: "Prazo Certo",
-        data_inicio: "2026-01-01",
-        data_fim: "2026-12-31",
-        salario_base: 30000,
-        cargo_complexo: false
-      }
-    ],
+    employees: [],
+    contratos: [],
     paymentLogs: [],
     vales: []
   },
@@ -1709,77 +1514,14 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     nuel: "10045612",
     email: "construcao@payrolltech.co.mz",
     telefone: "+258 84 111 2233",
-    logo: "/clickpay-logo.png",
+    logo: "",
     fee_base: 1500.00,
     fee_por_slip: 120.00,
     subscription_status: "ativo",
     subscription_plan: "Bronze",
     next_billing_date: "2026-08-30",
-    employees: [
-      {
-        id: "emp-armindo",
-        nome: "Eng. Armindo Sitoe",
-        nuit: "400123123",
-        inss_numero: "200111222",
-        cargo: "Engenheiro Residente de Obras",
-        salario_base: 65000,
-        numero_dependentes: 2,
-        carteira_movel: "841234567"
-      },
-      {
-        id: "emp-mabote",
-        nome: "Mestre Pedro Mabote",
-        nuit: "400321321",
-        inss_numero: "200333444",
-        cargo: "Mestre Geral de Obras",
-        salario_base: 32000,
-        numero_dependentes: 3,
-        carteira_movel: "847654321"
-      },
-      {
-        id: "emp-julio",
-        nome: "Júlio Macuácua",
-        nuit: "400456111",
-        inss_numero: "200555666",
-        cargo: "Operador de Maquinaria Pesada",
-        salario_base: 24000,
-        numero_dependentes: 1,
-        carteira_movel: "849998877"
-      }
-    ],
-    contratos: [
-      {
-        id: "ct-armindo",
-        empresa_id: "cli_bronze",
-        nome_funcionario: "Eng. Armindo Sitoe",
-        cargo: "Engenheiro Residente de Obras",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2025-01-15",
-        salario_base: 65000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-mabote",
-        empresa_id: "cli_bronze",
-        nome_funcionario: "Mestre Pedro Mabote",
-        cargo: "Mestre Geral de Obras",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2025-03-01",
-        salario_base: 32000,
-        cargo_complexo: false
-      },
-      {
-        id: "ct-julio",
-        empresa_id: "cli_bronze",
-        nome_funcionario: "Júlio Macuácua",
-        cargo: "Operador de Maquinaria Pesada",
-        tipo_contrato: "Prazo Certo",
-        data_inicio: "2026-01-10",
-        data_fim: "2026-12-31",
-        salario_base: 24000,
-        cargo_complexo: false
-      }
-    ],
+    employees: [],
+    contratos: [],
     paymentLogs: [],
     vales: []
   },
@@ -1794,77 +1536,14 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     nuel: "10077882",
     email: "educacao@payrolltech.co.mz",
     telefone: "+258 82 333 4455",
-    logo: "/clickpay-logo.png",
+    logo: "",
     fee_base: 3500.00,
     fee_por_slip: 100.00,
     subscription_status: "ativo",
     subscription_plan: "Silver",
     next_billing_date: "2026-08-30",
-    employees: [
-      {
-        id: "emp-celso",
-        nome: "Prof. Dr. Celso Mondlane",
-        nuit: "400456456",
-        inss_numero: "300111222",
-        cargo: "Docente Universitário / Investigador",
-        salario_base: 70000,
-        numero_dependentes: 2,
-        carteira_movel: "824561234"
-      },
-      {
-        id: "emp-sheila",
-        nome: "Dra. Sheila Langa",
-        nuit: "400654654",
-        inss_numero: "300333444",
-        cargo: "Diretora Académica e Pedagógica",
-        salario_base: 55000,
-        numero_dependentes: 1,
-        carteira_movel: "827894561"
-      },
-      {
-        id: "emp-tomas",
-        nome: "Tomás Chauque",
-        nuit: "400789789",
-        inss_numero: "300555666",
-        cargo: "Secretário Escolar e Admissões",
-        salario_base: 28000,
-        numero_dependentes: 0,
-        carteira_movel: "823216549"
-      }
-    ],
-    contratos: [
-      {
-        id: "ct-celso",
-        empresa_id: "cli_silver",
-        nome_funcionario: "Prof. Dr. Celso Mondlane",
-        cargo: "Docente Universitário / Investigador",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2024-02-01",
-        salario_base: 70000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-sheila",
-        empresa_id: "cli_silver",
-        nome_funcionario: "Dra. Sheila Langa",
-        cargo: "Diretora Académica e Pedagógica",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2025-01-15",
-        salario_base: 55000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-tomas",
-        empresa_id: "cli_silver",
-        nome_funcionario: "Tomás Chauque",
-        cargo: "Secretário Escolar e Admissões",
-        tipo_contrato: "Prazo Certo",
-        data_inicio: "2026-02-01",
-        data_fim: "2026-12-31",
-        salario_base: 28000,
-        cargo_complexo: false
-      }
-    ],
+    employees: [],
+    contratos: [],
     paymentLogs: [],
     vales: []
   },
@@ -1879,76 +1558,14 @@ export let baseDadosClientes: ClienteEmpresaRegisto[] = [
     nuel: "10099123",
     email: "servicos@payrolltech.co.mz",
     telefone: "+258 85 555 6677",
-    logo: "/clickpay-logo.png",
+    logo: "",
     fee_base: 6900.00,
     fee_por_slip: 95.00,
     subscription_status: "ativo",
     subscription_plan: "Gold",
     next_billing_date: "2026-08-30",
-    employees: [
-      {
-        id: "emp-inacio",
-        nome: "Dr. Inácio Nhamusse",
-        nuit: "400789123",
-        inss_numero: "400111222",
-        cargo: "Consultor Financeiro & Fiscal Principal",
-        salario_base: 95000,
-        numero_dependentes: 1,
-        carteira_movel: "851239876"
-      },
-      {
-        id: "emp-vanessa",
-        nome: "Engª Vanessa Mucavel",
-        nuit: "400321987",
-        inss_numero: "400333444",
-        cargo: "Arquiteta de Software & Cloud",
-        salario_base: 85000,
-        numero_dependentes: 0,
-        carteira_movel: "857651234"
-      },
-      {
-        id: "emp-amilcar",
-        nome: "Amílcar Tembe",
-        nuit: "400654321",
-        inss_numero: "400555666",
-        cargo: "Analista de Suporte Técnico ERP",
-        salario_base: 38000,
-        numero_dependentes: 2,
-        carteira_movel: "853216547"
-      }
-    ],
-    contratos: [
-      {
-        id: "ct-inacio",
-        empresa_id: "cli_gold",
-        nome_funcionario: "Dr. Inácio Nhamusse",
-        cargo: "Consultor Financeiro & Fiscal Principal",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2023-06-01",
-        salario_base: 95000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-vanessa",
-        empresa_id: "cli_gold",
-        nome_funcionario: "Engª Vanessa Mucavel",
-        cargo: "Arquiteta de Software & Cloud",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2024-01-15",
-        salario_base: 85000,
-        cargo_complexo: true
-      },
-      {
-        id: "ct-amilcar",
-        empresa_id: "cli_gold",
-        nome_funcionario: "Amílcar Tembe",
-        cargo: "Analista de Suporte Técnico ERP",
-        tipo_contrato: "Indeterminado",
-        data_inicio: "2025-05-01",
-        salario_base: 38000,
-        cargo_complexo: false
-      }
-    ],
+    employees: [],
+    contratos: [],
     paymentLogs: [],
     vales: []
   }

@@ -1085,7 +1085,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       banco: "Millennium BIM",
       numero_conta: "0001-2222-3333",
       nib: "000100010002222333344",
-      saldo: 10000000.00,
+      saldo: 0.00,
       pinConfigured: false
     }
   ]);
@@ -1306,6 +1306,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const sanitizedSystemUsers = systemUsersList.map(({ rawPassword: _rp, apiToken: _at, ...rest }) => rest);
       const sanitizedTokens = activeApiTokens.map(({ fullToken: _ft, ...rest }) => rest);
       const state = {
+        salariesZeroedV1: true,
         founderActiveCompanyId,
         founderEmails: CREDENCIAIS_FOUNDERS.emails,
         deletedSeedEmployeeIds: Array.from(deletedSeedEmployeeIds),
@@ -1474,9 +1475,30 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         }
       }
 
+      if (!parsed.salariesZeroedV1) {
+        baseDadosClientes.forEach((c: any) => {
+          c.employees = [];
+          c.contratos = [];
+          c.paymentLogs = [];
+          c.vales = [];
+          if (c.id !== 'cli_founders' && c.logo === '/clickpay-logo.png') {
+            c.logo = '';
+          }
+          walletsByCompany[c.id] = 0;
+          bankAccountsByCompany[c.id] = makeDefaultBankAccounts();
+          historicoByCompany[c.id] = makeDefaultHistorico();
+          auditLogsByCompany[c.id] = [];
+        });
+        ['emp-gerson', 'emp-miguel', 'emp-cleton'].forEach(id => deletedSeedEmployeeIds.add(id));
+      }
+
       selecionarClienteEmpresa(founderActiveCompanyId);
       ensureTenantContainers(founderActiveCompanyId);
       syncCompanyGlobalsIfActive(founderActiveCompanyId);
+
+      if (!parsed.salariesZeroedV1) {
+        saveRuntimeState();
+      }
     } catch (err) {
       console.warn('[RuntimeState Load Warning]:', err);
     }
@@ -1516,7 +1538,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         nuel: '',
         email: session?.email || '',
         telefone: '',
-        logo: '/clickpay-logo.png',
+        logo: targetCompanyId === 'cli_founders' ? '/clickpay-logo.png' : '',
         fee_base: 0,
         fee_por_slip: 0,
         subscription_status: 'ativo',
@@ -1923,7 +1945,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
                     nuel: '100000000',
                     email: emailNorm,
                     telefone: f.phone?.stringValue || '+258 84 000 0000',
-                    logo: '/clickpay-logo.png',
+                    logo: f.logo?.stringValue || (docId === 'cli_founders' ? '/clickpay-logo.png' : ''),
                     password: docPassword || passwordClean,
                     subscription_status: docStatus as any,
                     subscription_plan: planMapped,
@@ -1981,7 +2003,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             nuel: '',
             email: emailNorm,
             telefone: '',
-            logo: '/clickpay-logo.png',
+            logo: '',
             fee_base: getPlanFeeMzn('Starter'),
             fee_por_slip: getPlanExtraSlipFeeMzn('Starter'),
             subscription_status: 'ativo',
@@ -2491,7 +2513,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
                 nuel: '100000000',
                 email: emailNorm,
                 telefone: f.phone?.stringValue || f.telefone?.stringValue || '+258 84 000 0000',
-                logo: '/clickpay-logo.png',
+                logo: f.logo?.stringValue || (docId === 'cli_founders' ? '/clickpay-logo.png' : ''),
                 password: '',
                 subscription_status: resolvedFsStatus as any,
                 subscription_plan: normalizeSubscriptionPlan(rawPlan),
@@ -2527,7 +2549,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           nuel: '',
           email: emailNorm,
           telefone: '+258 84 000 0000',
-          logo: '/clickpay-logo.png',
+          logo: '',
           password: '',
           subscription_status: 'ativo',
           subscription_plan: 'Bronze',
@@ -2621,7 +2643,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           nuel: '',
           email: emailNorm,
           telefone: '+258 84 000 0000',
-          logo: '/clickpay-logo.png',
+          logo: '',
           password: hashedPass,
           subscription_status: 'ativo',
           subscription_plan: 'Bronze',
@@ -2801,7 +2823,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           nuel: '',
           email: emailNorm,
           telefone: userPhone,
-          logo: '/clickpay-logo.png',
+          logo: '',
           password: hashedPwd,
           subscription_status: 'ativo',
           subscription_plan: mappedPlan,
@@ -3769,7 +3791,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           nuel: String(nuel || '100123456').trim(),
           email: cleanEmail,
           telefone: cleanContacto,
-          logo: logo || '/clickpay-logo.png',
+          logo: typeof logo === 'string' ? logo : '',
           password: hashedPassword,
           subscription_status: 'pendente',
           subscription_plan: mappedPlan,
@@ -4225,7 +4247,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           nuel: reqRecord.nuel || '100123456',
           email: reqRecord.email,
           telefone: reqRecord.telefone,
-          logo: '/clickpay-logo.png',
+          logo: '',
           password: hashedPassword,
           subscription_status: 'ativo',
           subscription_plan: planSpec.internalCode,
@@ -4562,7 +4584,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         nuel: nuel || '',
         email: email || '',
         telefone: telefone || '',
-        logo: logo || '/clickpay-logo.png',
+        logo: typeof logo === 'string' ? logo : '',
         fee_base: Number(fee_base) || getPlanFeeMzn(normalizedPlan),
         fee_por_slip: Number(fee_por_slip) || getPlanExtraSlipFeeMzn(normalizedPlan),
         password: password || crypto.randomBytes(8).toString('hex'),
@@ -4584,7 +4606,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // UPDATE CLIENT SUBSCRIPTION DETAILS (Platform Founder Control)
   app.post('/api/clients/update-subscription', requireFounder, async (req: Request, res: Response) => {
     try {
-      const { id, status, plan, fee_base, fee_por_slip, next_billing_date, password } = req.body;
+      const { id, status, plan, fee_base, fee_por_slip, next_billing_date, password, logo } = req.body;
       if (!id) {
         return res.status(400).json({ error: 'ID do cliente é obrigatório.' });
       }
@@ -4592,6 +4614,25 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const cliente = baseDadosClientes.find(c => c.id === id);
       if (!cliente) {
         return res.status(404).json({ error: 'Cliente não encontrado.' });
+      }
+
+      if (typeof logo === 'string') {
+        const cleanLogo = logo.trim();
+        if (cleanLogo.startsWith('data:')) {
+          const match = cleanLogo.match(/^data:([^;]+);base64,(.+)$/s);
+          if (!match) {
+            return res.status(400).json({ error: 'Formato de logótipo inválido.' });
+          }
+          const avLogo = await scanFileForMalware({
+            base64: match[2],
+            mimeType: match[1],
+            maxBytes: 2 * 1024 * 1024
+          });
+          if (!avLogo.safe) {
+            return res.status(422).json({ error: `Logótipo bloqueado por segurança: ${avLogo.reason}` });
+          }
+        }
+        cliente.logo = cleanLogo;
       }
 
       if (status !== undefined) cliente.subscription_status = status;
@@ -5011,15 +5052,15 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       }
       deletedSeedEmployeeIds.clear();
       seedDemoData();
-      walletsByCompany['cli_founders'] = 100000.00;
+      walletsByCompany['cli_founders'] = 0.00;
       bankAccountsByCompany['cli_founders'] = makeDefaultBankAccounts();
       syncCompanyGlobalsIfActive('cli_founders');
       saveRuntimeState();
 
       res.json({
         sucesso: true,
-        message: 'Dados de demonstração carregados com sucesso!',
-        saldo_disponivel_mz: 100000.00
+        message: 'Dados zerados com sucesso!',
+        saldo_disponivel_mz: 0.00
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao carregar dados de demonstração.' });
@@ -5299,6 +5340,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // ROTA: GERAR E FAZER DOWNLOAD DO PDF DE AVISO PRÉVIO SOB A LEI 13/2023
   app.post('/api/contratos/emitir-aviso-previo', async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
       const { dadosEmpresa, dadosFuncionario, dadosContrato } = req.body;
 
       if (!dadosEmpresa || !dadosFuncionario || !dadosContrato) {
@@ -5308,8 +5350,18 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       const nomeFicheiro = `aviso_previo_${dadosFuncionario.inss_numero || 'beneficiario'}_${Date.now()}.pdf`;
       const caminhoDestinoCompleto = path.join(tmpDir, nomeFicheiro);
 
+      const companySnapshot = buildCompanyDataView(ctx.company);
+      const empresaComLogo = {
+        ...companySnapshot,
+        ...dadosEmpresa,
+        logo:
+          dadosEmpresa && typeof dadosEmpresa.logo === 'string' && dadosEmpresa.logo
+            ? dadosEmpresa.logo
+            : ctx.company.logo || ''
+      };
+
       // Chamar a função geradora de PDF
-      await criarAvisoPrevioPDF(dadosEmpresa, dadosFuncionario, dadosContrato, caminhoDestinoCompleto);
+      await criarAvisoPrevioPDF(empresaComLogo, dadosFuncionario, dadosContrato, caminhoDestinoCompleto);
 
       // Servir o arquivo PDF como download direto
       res.download(caminhoDestinoCompleto, nomeFicheiro, (erro) => {
@@ -6766,14 +6818,17 @@ Responda de forma direta, prestativa e profissional em português de Moçambique
   // 5.5 Exportação da Carta Oficial de Pedido de Apoio ao MCTD em formato Microsoft Word (.docx)
   app.get(['/api/exportar/carta-pedido-apoio-docx', '/api/documentos/carta-pedido-apoio-docx'], async (req: Request, res: Response) => {
     try {
+      const ctx = resolveTenantContext(req);
+      const isFounderComp = ctx.companyId === 'cli_founders';
       const buffer = await gerarCartaApoioDocx({
-        empresaNome: 'ClickPay / Payroll Tech MZ',
-        representanteNome: 'Gerson José Cumbane',
-        cargo: 'Representante / Fundador da Startup',
-        contacto: '+258 86 139 0061',
-        email: 'gersonjcumbane@gmail.com',
-        website: 'clickpay.co.mz',
-        dataExtenso: 'Maputo, 27 de Agosto de 2026'
+        empresaNome: isFounderComp ? 'ClickPay / Payroll Tech MZ' : ctx.company.nome,
+        representanteNome: isFounderComp ? 'Gerson José Cumbane' : ctx.company.nome,
+        cargo: isFounderComp ? 'Representante / Fundador da Startup' : 'Direção Executiva',
+        contacto: ctx.company.telefone || '+258 86 139 0061',
+        email: ctx.company.email || 'gersonjcumbane@gmail.com',
+        website: isFounderComp ? 'clickpay.co.mz' : '',
+        dataExtenso: 'Maputo, 27 de Agosto de 2026',
+        logo: ctx.company.logo || (isFounderComp ? '/clickpay-logo.png' : '')
       });
 
       const nomeFicheiro = 'Carta_Pedido_Apoio_Stand_MCTD_ClickPay.docx';
@@ -7879,7 +7934,7 @@ Host: https://clickpay.co.mz
         email,
         telefone,
         endereco: `${provincia || ''}${provincia && distrito ? ', ' : ''}${distrito || ''}`,
-        logo: logo || ctx.company.logo || "",
+        logo: typeof logo === 'string' ? logo : (ctx.company.logo || ""),
         ultima_atualizacao: new Date().toISOString()
       };
 
@@ -9382,12 +9437,11 @@ Host: https://clickpay.co.mz
     }
   }
 
-  // Pre-seed mock data on server startup then restore persisted runtime state
+  // Restore persisted runtime state cleanly without injecting demo salaries at startup
   try {
-    seedDemoData();
     ensureTenantContainers(founderActiveCompanyId);
     loadRuntimeState();
-    console.log('[SERVER] Pre-seeded demo portfolio and restored runtime tenant state successfully.');
+    console.log('[SERVER] Clean tenant state initialized and runtime state restored successfully.');
 
     // Sincronizar contas do Fundador apenas se configuradas via variável de ambiente
     if (!isServerless && firebaseConfig && firebaseConfig.apiKey && ENV_FOUNDER_PASSWORD) {

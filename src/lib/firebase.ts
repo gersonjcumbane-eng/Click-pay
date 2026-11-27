@@ -96,6 +96,7 @@ export async function syncClientToFirestore(clientData: any): Promise<{ ok: bool
       subscription_plan: clientData.subscription_plan || 'Starter',
       subscription_status: clientData.subscription_status || 'ativo',
       fee_base: Number(clientData.fee_base) || getPlanFeeMzn(clientData.subscription_plan),
+      ...(typeof clientData.logo === 'string' ? { logo: String(clientData.logo).substring(0, 145000) } : {}),
       updatedAt: new Date().toISOString()
     }, { merge: true });
     return { ok: true };
@@ -399,6 +400,7 @@ export async function syncRegisteredAccountToFirestore(params: {
   telefone?: string;
   endereco?: string;
   provincia?: string;
+  logo?: string;
   transferMethod?: string;
   transferReference?: string;
   transferAmount?: number;
@@ -460,6 +462,7 @@ export async function syncRegisteredAccountToFirestore(params: {
   }
 
   // 2. Gravar na coleção oficial erp_clients (sempre 'pendente' na criação inicial)
+  const safeLogo = typeof params.logo === 'string' ? params.logo.substring(0, 145000) : '';
   const erpRes = await syncClientToFirestore({
     id: safeId,
     nome: params.nomeEmpresa,
@@ -469,7 +472,8 @@ export async function syncRegisteredAccountToFirestore(params: {
     password: params.password,
     subscription_plan: plano,
     subscription_status: subStatus,
-    fee_base: feeBase
+    fee_base: feeBase,
+    logo: safeLogo
   });
   if (erpRes.ok) syncedCollections.push('erp_clients');
   else if (erpRes.error) errors.push(`erp_clients: ${erpRes.error}`);
@@ -490,6 +494,7 @@ export async function syncRegisteredAccountToFirestore(params: {
       status: saasStatus,
       adminName: String(params.nomeEmpresa).substring(0, 256),
       adminPassword: hashedAdminPass.substring(0, 256),
+      logo: safeLogo,
       createdAt: now,
       updatedAt: now
     }, { merge: true });
@@ -508,6 +513,7 @@ export async function syncRegisteredAccountToFirestore(params: {
       plano,
       status: subStatus,
       origem: 'Criar Conta ClickPay',
+      logo: safeLogo,
       createdAt: now,
       updatedAt: now
     }, { merge: true });

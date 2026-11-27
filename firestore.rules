@@ -55,7 +55,7 @@ service cloud.firestore {
     // ClientCompany validator (/erp_clients)
     function isValidClientCompany(data) {
       return data.keys().hasAll(['id', 'nome', 'nuit', 'email', 'subscription_plan', 'subscription_status', 'fee_base', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'nome', 'nuit', 'email', 'telefone', 'passwordHash', 'subscription_plan', 'subscription_status', 'fee_base', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'nome', 'nuit', 'email', 'telefone', 'passwordHash', 'subscription_plan', 'subscription_status', 'fee_base', 'logo', 'updatedAt'])
         && data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 256
         && data.nuit is string && data.nuit.size() <= 32
@@ -65,13 +65,14 @@ service cloud.firestore {
         && data.subscription_plan in ['Starter', 'Growth', 'Business', 'Bronze', 'Silver', 'Gold', 'Platinum']
         && data.subscription_status in ['ativo', 'suspenso', 'pendente']
         && data.fee_base is number && data.fee_base >= 0 && data.fee_base <= 1000000
+        && (!('logo' in data) || (data.logo is string && data.logo.size() <= 150000))
         && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
 
     // SaasClient validator (/saas_clients)
     function isValidSaasClient(data) {
       return data.keys().hasAll(['email', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'companyName', 'tradeName', 'nuit', 'email', 'phone', 'address', 'plan', 'monthlyFee', 'status', 'adminName', 'adminPassword', 'role', 'nextBillingDate', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'companyName', 'tradeName', 'nuit', 'email', 'phone', 'address', 'plan', 'monthlyFee', 'status', 'adminName', 'adminPassword', 'role', 'nextBillingDate', 'logo', 'createdAt', 'updatedAt'])
         && (!('id' in data) || (data.id is string && data.id.size() <= 128))
         && (!('companyName' in data) || (data.companyName is string && data.companyName.size() <= 256))
         && (!('tradeName' in data) || (data.tradeName is string && data.tradeName.size() <= 256))
@@ -86,6 +87,7 @@ service cloud.firestore {
         && (!('adminPassword' in data) || (data.adminPassword is string && data.adminPassword.size() <= 256))
         && (!('role' in data) || (data.role is string && data.role.size() <= 64))
         && (!('nextBillingDate' in data) || (data.nextBillingDate is string && data.nextBillingDate.size() <= 64))
+        && (!('logo' in data) || (data.logo is string && data.logo.size() <= 150000))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
         && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
@@ -183,7 +185,7 @@ service cloud.firestore {
     // CompanyProfile validator (/companies)
     function isValidCompanyProfile(data) {
       return data.keys().hasAll(['nome', 'nuit', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'nome', 'nuit', 'email', 'plano', 'status', 'origem', 'endereco', 'pais', 'provincia', 'distrito', 'regime_iva', 'sector_negocio', 'tamanho_empresa', 'regime_fiscal_pme', 'nuel', 'telefone', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'nome', 'nuit', 'email', 'plano', 'status', 'origem', 'endereco', 'pais', 'provincia', 'distrito', 'regime_iva', 'sector_negocio', 'tamanho_empresa', 'regime_fiscal_pme', 'nuel', 'telefone', 'logo', 'createdAt', 'updatedAt'])
         && (!('id' in data) || (data.id is string && data.id.size() <= 128))
         && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 256
         && data.nuit is string && data.nuit.size() <= 32
@@ -201,6 +203,7 @@ service cloud.firestore {
         && (!('regime_fiscal_pme' in data) || (data.regime_fiscal_pme is string && data.regime_fiscal_pme.size() <= 128))
         && (!('nuel' in data) || (data.nuel is string && data.nuel.size() <= 64))
         && (!('telefone' in data) || (data.telefone is string && data.telefone.size() <= 64))
+        && (!('logo' in data) || (data.logo is string && data.logo.size() <= 150000))
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
         && data.updatedAt is string && data.updatedAt.size() <= 64;
     }
@@ -265,7 +268,7 @@ service cloud.firestore {
         && (isSuperAdmin() || incoming().subscription_status == 'pendente');
       allow update: if isValidId(clientId) && isValidClientCompany(incoming()) && incoming().id == existing().id && (
         isSuperAdmin() ||
-        (isSignedIn() && existing().email == request.auth.token.email && incoming().subscription_status == existing().subscription_status && incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'nuit', 'telefone', 'passwordHash', 'updatedAt']))
+        (isSignedIn() && existing().email == request.auth.token.email && incoming().subscription_status == existing().subscription_status && incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'nuit', 'telefone', 'passwordHash', 'logo', 'updatedAt']))
       );
       allow delete: if isSuperAdmin();
     }
@@ -278,7 +281,7 @@ service cloud.firestore {
         && (isSuperAdmin() || !('status' in incoming()) || incoming().status in ['Pendente', 'pendente']);
       allow update: if isValidId(clientId) && isValidSaasClient(incoming()) && (
         isSuperAdmin() ||
-        (isSignedIn() && existing().email == request.auth.token.email && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'tradeName', 'nuit', 'phone', 'address', 'adminName', 'adminPassword', 'updatedAt']))
+        (isSignedIn() && existing().email == request.auth.token.email && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['companyName', 'tradeName', 'nuit', 'phone', 'address', 'adminName', 'adminPassword', 'logo', 'updatedAt']))
       );
       allow delete: if isSuperAdmin();
     }
@@ -325,7 +328,7 @@ service cloud.firestore {
         && (isSuperAdmin() || !('status' in incoming()) || incoming().status == 'pendente');
       allow update: if isValidId(companyId) && isValidCompanyProfile(incoming()) && (
         isSuperAdmin() ||
-        (isSignedIn() && existing().email == request.auth.token.email && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'nuit', 'endereco', 'pais', 'provincia', 'distrito', 'regime_iva', 'nuel', 'telefone', 'updatedAt']))
+        (isSignedIn() && existing().email == request.auth.token.email && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'nuit', 'endereco', 'pais', 'provincia', 'distrito', 'regime_iva', 'nuel', 'telefone', 'logo', 'updatedAt']))
       );
       allow delete: if isSuperAdmin();
     }

@@ -48,6 +48,57 @@ function drawClickPayEnterpriseFooter(
   doc.restore();
 }
 
+function resolveCompanyLogoInput(logo?: string): string | Buffer | null {
+  if (!logo || typeof logo !== 'string') return null;
+  const clean = logo.trim();
+  if (!clean) return null;
+
+  if (clean.startsWith('data:image/')) {
+    const match = clean.match(/^data:image\/(png|jpeg|jpg);base64,(.+)$/is);
+    if (!match) return null;
+    try {
+      const buf = Buffer.from(match[2], 'base64');
+      return buf.length > 0 ? buf : null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (clean.startsWith('/')) {
+    const publicRoot = path.resolve(process.cwd(), 'public');
+    const cleanRel = clean.replace(/^\/+/, '');
+    const resolved = path.resolve(publicRoot, cleanRel);
+    const ext = path.extname(resolved).toLowerCase();
+    if (
+      resolved.startsWith(publicRoot + path.sep) &&
+      (ext === '.png' || ext === '.jpg' || ext === '.jpeg') &&
+      fs.existsSync(resolved)
+    ) {
+      return resolved;
+    }
+  }
+
+  return null;
+}
+
+function drawCompanyPdfLogo(
+  doc: any,
+  dadosEmpresa: any,
+  x: number,
+  y: number,
+  boxSize = 40
+): number {
+  const logoInput = resolveCompanyLogoInput(dadosEmpresa?.logo);
+  if (!logoInput) return 0;
+  try {
+    doc.image(logoInput, x, y, { fit: [boxSize, boxSize], valign: 'center' });
+    return boxSize + 10;
+  } catch (err) {
+    console.error('Error drawing company logo in PDF:', err);
+    return 0;
+  }
+}
+
 /**
  * Generates a polished A4 PDF salary slip in ClickPay ERP Enterprise style for an employee.
  * Utilizes default built-in PDFKit fonts (Helvetica, Helvetica-Bold) for native container rendering.
@@ -70,45 +121,14 @@ export function criarReciboSalarioPDF(
       // =========================================================================
       // 1. CABEÇALHO EMPRESA & QUADRO METADADOS CLICKPAY ENTERPRISE
       // =========================================================================
-      let textX = startX;
-      let drawn = false;
-
-      if (dadosEmpresa.logo && dadosEmpresa.logo.startsWith('data:image/')) {
-        try {
-          const parts = dadosEmpresa.logo.split(';base64,');
-          const mime = parts[0];
-          const base64Data = parts[1];
-          if (base64Data && (mime.includes('png') || mime.includes('jpeg') || mime.includes('jpg'))) {
-            const buffer = Buffer.from(base64Data, 'base64');
-            doc.image(buffer, startX, 40, { width: 42 });
-            textX = startX + 52;
-            drawn = true;
-          }
-        } catch (err) {
-          console.error('Error drawing logo in PDF:', err);
-        }
-      }
-
-      if (!drawn) {
-        try {
-          const caminhoLogotipo = path.join(__dirname, '..', 'public', 'logo-payroll.png');
-          const caminhoAlternativo = path.join(process.cwd(), 'public', 'logo-payroll.png');
-          if (fs.existsSync(caminhoLogotipo)) {
-            doc.image(caminhoLogotipo, startX, 40, { width: 42 });
-            textX = startX + 52;
-          } else if (fs.existsSync(caminhoAlternativo)) {
-            doc.image(caminhoAlternativo, startX, 40, { width: 42 });
-            textX = startX + 52;
-          }
-        } catch (err) {
-          console.error('Error drawing logo-payroll in PDF:', err);
-        }
-      }
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, startX, 40, 42);
+      const textX = startX + logoOffset;
+      const textW = Math.max(180, 300 - logoOffset);
 
       const nomeEmpresa = (
         dadosEmpresa.nome ||
         (dadosEmpresa as any).nome_comercial ||
-        'ClickPay Moçambique, Lda'
+        'EMPRESA CLIENTE'
       ).toUpperCase();
 
       const nuitEmp = (dadosEmpresa as any).identificadores_legais?.nuit || dadosEmpresa.nuit || 'N/A';
@@ -119,11 +139,11 @@ export function criarReciboSalarioPDF(
       const emailEmp = (dadosEmpresa as any).contacto?.email || dadosEmpresa.email || 'N/A';
       const telfEmp = (dadosEmpresa as any).contacto?.telefone || dadosEmpresa.telefone || 'N/A';
 
-      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text(nomeEmpresa, textX, 40, { width: 255 });
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text(nomeEmpresa, textX, 40, { width: textW });
       doc.fontSize(7.5).font('Helvetica').fillColor('#475569');
-      doc.text(`NUIT: ${nuitEmp}  |  NUEL: ${nuelEmp}`, textX, 56, { width: 255 });
-      doc.text(`Regime: ${regimeIvaStr}  |  ${dist}, ${prov}`, textX, 68, { width: 255 });
-      doc.text(`Contacto: ${emailEmp}  |  Tel: ${telfEmp}`, textX, 80, { width: 255 });
+      doc.text(`NUIT: ${nuitEmp}  |  NUEL: ${nuelEmp}`, textX, 56, { width: textW });
+      doc.text(`Regime: ${regimeIvaStr}  |  ${dist}, ${prov}`, textX, 68, { width: textW });
+      doc.text(`Contacto: ${emailEmp}  |  Tel: ${telfEmp}`, textX, 80, { width: textW });
 
       // Quadro Direito ClickPay ERP Enterprise: RECIBO DE VENCIMENTO (ORIGINAL)
       const boxX = 355;
@@ -354,7 +374,7 @@ export function criarReciboSalarioPDF(
  * @param caminhoFicheiro - Caminho físico onde o PDF será guardado
  */
 export function criarAvisoPrevioPDF(
-  dadosEmpresa: { nome: string; nuit: string; endereco: string },
+  dadosEmpresa: { nome: string; nuit: string; endereco: string; logo?: string },
   dadosFuncionario: { nome: string; cargo: string; inss_numero: string },
   dadosContrato: { data_fim: string; dia_atual: string; mes_atual: string; ano_atual: string },
   caminhoFicheiro: string
@@ -366,12 +386,16 @@ export function criarAvisoPrevioPDF(
       doc.pipe(stream);
 
       // --- LOGOTIPO / CABEÇALHO DA EMPRESA CLIENTE ---
-      doc.fontSize(14).font('Helvetica-Bold').text(dadosEmpresa.nome.toUpperCase(), { align: 'left' });
-      doc.fontSize(10).font('Helvetica').text(`NUIT: ${dadosEmpresa.nuit} | Endereço: ${dadosEmpresa.endereco}`);
-      
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 50, 46, 38);
+      const headerX = 50 + logoOffset;
+      doc.fontSize(14).font('Helvetica-Bold').text((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), headerX, 48, { width: 495 - logoOffset, align: 'left' });
+      doc.fontSize(10).font('Helvetica').text(`NUIT: ${dadosEmpresa.nuit || 'N/D'} | Endereço: ${dadosEmpresa.endereco || 'Moçambique'}`, headerX, doc.y + 2, { width: 495 - logoOffset });
+
       // Linha divisória de cabeçalho
-      doc.moveTo(50, doc.y + 10).lineTo(545, doc.y + 10).stroke('#e2e8f0');
-      doc.moveDown(2);
+      const dividerY = Math.max(doc.y, logoOffset > 0 ? 90 : 0) + 10;
+      doc.moveTo(50, dividerY).lineTo(545, dividerY).stroke('#e2e8f0');
+      doc.x = 50;
+      doc.y = dividerY + 14;
 
       // --- DATA DE EMISSÃO ---
       doc.fontSize(11).font('Helvetica').text(`Maputo, ${dadosContrato.dia_atual} de ${dadosContrato.mes_atual} de ${dadosContrato.ano_atual}`, { align: 'right' });
@@ -463,7 +487,7 @@ export function criarAvisoPrevioPDF(
  * Gera o extrato de transações fintech em PDF
  */
 export function criarExtratoFintechPDF(
-  dadosEmpresa: { nome: string; nuit: string; endereco: string },
+  dadosEmpresa: { nome: string; nuit: string; endereco: string; logo?: string },
   logs: any[],
   saldoDisponivel: number,
   caminhoFicheiro: string
@@ -475,10 +499,14 @@ export function criarExtratoFintechPDF(
       doc.pipe(stream);
 
       // --- LOGOTIPO / CABEÇALHO ---
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text(dadosEmpresa.nome.toUpperCase(), { align: 'left' });
-      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit} | Endereço: ${dadosEmpresa.endereco}`);
-      doc.moveTo(50, doc.y + 8).lineTo(545, doc.y + 8).stroke('#e2e8f0');
-      doc.moveDown(1.5);
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 50, 46, 38);
+      const headerX = 50 + logoOffset;
+      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), headerX, 48, { width: 495 - logoOffset, align: 'left' });
+      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit || 'N/D'} | Endereço: ${dadosEmpresa.endereco || 'Moçambique'}`, headerX, doc.y + 2, { width: 495 - logoOffset });
+      const dividerY = Math.max(doc.y, logoOffset > 0 ? 88 : 0) + 8;
+      doc.moveTo(50, dividerY).lineTo(545, dividerY).stroke('#e2e8f0');
+      doc.x = 50;
+      doc.y = dividerY + 12;
 
       // --- DATA ---
       doc.fontSize(10).font('Helvetica').text(`Emissão: ${new Date().toLocaleDateString('pt-MZ')} às ${new Date().toLocaleTimeString('pt-MZ')}`, { align: 'right' });
@@ -579,7 +607,7 @@ export function criarExtratoFintechPDF(
  * Gera o relatório de Auditoria Interna de Remunerações em PDF
  */
 export function criarRelatorioAuditoriaPDF(
-  dadosEmpresa: { nome: string; nuit: string; endereco: string },
+  dadosEmpresa: { nome: string; nuit: string; endereco: string; logo?: string },
   dadosAuditoria: {
     periodoPesquisado: string;
     auditoriaGeral: {
@@ -599,10 +627,14 @@ export function criarRelatorioAuditoriaPDF(
       doc.pipe(stream);
 
       // --- LOGOTIPO / CABEÇALHO ---
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text(dadosEmpresa.nome.toUpperCase(), { align: 'left' });
-      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit} | Endereço: ${dadosEmpresa.endereco}`);
-      doc.moveTo(50, doc.y + 8).lineTo(545, doc.y + 8).stroke('#e2e8f0');
-      doc.moveDown(1.5);
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 50, 46, 38);
+      const headerX = 50 + logoOffset;
+      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), headerX, 48, { width: 495 - logoOffset, align: 'left' });
+      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit || 'N/D'} | Endereço: ${dadosEmpresa.endereco || 'Moçambique'}`, headerX, doc.y + 2, { width: 495 - logoOffset });
+      const dividerY = Math.max(doc.y, logoOffset > 0 ? 88 : 0) + 8;
+      doc.moveTo(50, dividerY).lineTo(545, dividerY).stroke('#e2e8f0');
+      doc.x = 50;
+      doc.y = dividerY + 12;
 
       // --- DATA ---
       doc.fontSize(10).font('Helvetica').text(`Emissão: ${new Date().toLocaleDateString('pt-MZ')} às ${new Date().toLocaleTimeString('pt-MZ')}`, { align: 'right' });
@@ -717,7 +749,7 @@ export function criarRelatorioAuditoriaPDF(
  * Gera o recibo individual de Adiantamento de Salário (Vale) em PDF
  */
 export function criarReciboValePDF(
-  dadosEmpresa: { nome: string; nuit: string; endereco: string },
+  dadosEmpresa: { nome: string; nuit: string; endereco: string; logo?: string },
   vale: { vale_id: string; nome: string; cargo?: string; carteira_movel: string; valor: number; data_lancamento: string; status: string },
   caminhoFicheiro: string
 ): Promise<void> {
@@ -731,10 +763,13 @@ export function criarReciboValePDF(
       const width = 515;
 
       // Cabeçalho ClickPay ERP Enterprise (Empresa esquerda + Quadro Documento direita)
-      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(dadosEmpresa.nome.toUpperCase(), startX, 40, { width: 295 });
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, startX, 40, 40);
+      const textX = startX + logoOffset;
+      const textW = Math.max(180, 295 - logoOffset);
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), textX, 40, { width: textW });
       doc.fontSize(8).font('Helvetica').fillColor('#475569');
-      doc.text(`NUIT: ${dadosEmpresa.nuit || 'N/A'}`, startX, 58, { width: 295 });
-      doc.text(`Endereço: ${dadosEmpresa.endereco || 'Maputo, Moçambique'}`, startX, 70, { width: 295 });
+      doc.text(`NUIT: ${dadosEmpresa.nuit || 'N/A'}`, textX, 58, { width: textW });
+      doc.text(`Endereço: ${dadosEmpresa.endereco || 'Maputo, Moçambique'}`, textX, 70, { width: textW });
 
       const boxX = 355;
       const boxW = 200;
@@ -836,7 +871,7 @@ export function criarReciboValePDF(
  * Gera o relatório consolidado de todos os adiantamentos e vales em PDF
  */
 export function criarRelatorioValesPDF(
-  dadosEmpresa: { nome: string; nuit: string; endereco: string },
+  dadosEmpresa: { nome: string; nuit: string; endereco: string; logo?: string },
   vales: any[],
   caminhoFicheiro: string
 ): Promise<void> {
@@ -847,10 +882,14 @@ export function criarRelatorioValesPDF(
       doc.pipe(stream);
 
       // --- CABEÇALHO ---
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text(dadosEmpresa.nome.toUpperCase(), { align: 'left' });
-      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit} | Endereço: ${dadosEmpresa.endereco}`);
-      doc.moveTo(50, doc.y + 8).lineTo(545, doc.y + 8).stroke('#e2e8f0');
-      doc.moveDown(1.5);
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 50, 46, 38);
+      const headerX = 50 + logoOffset;
+      doc.fontSize(14).font('Helvetica-Bold').fillColor('#1e3a8a').text((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), headerX, 48, { width: 495 - logoOffset, align: 'left' });
+      doc.fontSize(9).font('Helvetica').fillColor('#475569').text(`NUIT: ${dadosEmpresa.nuit || 'N/D'} | Endereço: ${dadosEmpresa.endereco || 'Moçambique'}`, headerX, doc.y + 2, { width: 495 - logoOffset });
+      const dividerY = Math.max(doc.y, logoOffset > 0 ? 88 : 0) + 8;
+      doc.moveTo(50, dividerY).lineTo(545, dividerY).stroke('#e2e8f0');
+      doc.x = 50;
+      doc.y = dividerY + 12;
 
       // --- DATA ---
       doc.fontSize(10).font('Helvetica').text(`Emissão: ${new Date().toLocaleDateString('pt-MZ')} às ${new Date().toLocaleTimeString('pt-MZ')}`, { align: 'right' });
@@ -978,39 +1017,8 @@ export function criarMapaSalariosPDF(
       doc.pipe(stream);
 
       // --- LOGOTIPO / CABEÇALHO ---
-      let textX = 40;
-      let drawn = false;
-      if (dadosEmpresa.logo && dadosEmpresa.logo.startsWith('data:image/')) {
-        try {
-          const parts = dadosEmpresa.logo.split(';base64,');
-          const mime = parts[0];
-          const base64Data = parts[1];
-          if (base64Data && (mime.includes('png') || mime.includes('jpeg') || mime.includes('jpg'))) {
-            const buffer = Buffer.from(base64Data, 'base64');
-            doc.image(buffer, 40, 35, { width: 35 });
-            textX = 100;
-            drawn = true;
-          }
-        } catch (err) {
-          console.error("Erro ao desenhar logotipo no PDF do mapa de salários:", err);
-        }
-      }
-
-      if (!drawn) {
-        try {
-          const caminhoLogotipo = path.join(__dirname, '..', 'public', 'logo-payroll.png');
-          const caminhoAlternativo = path.join(process.cwd(), 'public', 'logo-payroll.png');
-          if (fs.existsSync(caminhoLogotipo)) {
-            doc.image(caminhoLogotipo, 40, 35, { width: 35 });
-            textX = 100;
-          } else if (fs.existsSync(caminhoAlternativo)) {
-            doc.image(caminhoAlternativo, 40, 35, { width: 35 });
-            textX = 100;
-          }
-        } catch (err) {
-          console.error("Erro ao desenhar logotipo default no PDF do mapa de salários:", err);
-        }
-      }
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 40, 30, 34);
+      const textX = 40 + logoOffset;
 
       const nomeEmpresa = (dadosEmpresa.nome || dadosEmpresa.nome_comercial || 'Empresa Cliente').toUpperCase();
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a').text(nomeEmpresa, textX, 35);
@@ -1173,39 +1181,8 @@ export function criarRelatorioHistoricoPDF(
       doc.pipe(stream);
 
       // --- LOGOTIPO / CABEÇALHO ---
-      let textX = 50;
-      let drawn = false;
-      if (dadosEmpresa.logo && dadosEmpresa.logo.startsWith('data:image/')) {
-        try {
-          const parts = dadosEmpresa.logo.split(';base64,');
-          const mime = parts[0];
-          const base64Data = parts[1];
-          if (base64Data && (mime.includes('png') || mime.includes('jpeg') || mime.includes('jpg'))) {
-            const buffer = Buffer.from(base64Data, 'base64');
-            doc.image(buffer, 50, 45, { width: 40 });
-            textX = 115;
-            drawn = true;
-          }
-        } catch (err) {
-          console.error("Erro ao desenhar logotipo no PDF do histórico:", err);
-        }
-      }
-
-      if (!drawn) {
-        try {
-          const caminhoLogotipo = path.join(__dirname, '..', 'public', 'logo-payroll.png');
-          const caminhoAlternativo = path.join(process.cwd(), 'public', 'logo-payroll.png');
-          if (fs.existsSync(caminhoLogotipo)) {
-            doc.image(caminhoLogotipo, 50, 45, { width: 40 });
-            textX = 115;
-          } else if (fs.existsSync(caminhoAlternativo)) {
-            doc.image(caminhoAlternativo, 50, 45, { width: 40 });
-            textX = 115;
-          }
-        } catch (err) {
-          console.error("Erro ao desenhar logotipo default no PDF do histórico:", err);
-        }
-      }
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 50, 40, 36);
+      const textX = 50 + logoOffset;
 
       const nomeEmpresa = (dadosEmpresa.nome || dadosEmpresa.nome_comercial || 'Empresa Cliente').toUpperCase();
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a').text(nomeEmpresa, textX, 45);
@@ -1418,9 +1395,10 @@ export function criarGuiaRecolhimentoInssPDF(
     const endX = 555;
     const width = endX - startX; // 515
 
-    // Título Oficial da GPC
+    // Logótipo da empresa contribuinte + Título Oficial da GPC
+    const empLogoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, startX, yOffset - 4, 30);
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#000000');
-    doc.text('Guia de Pagamento de Contribuição - GPC', startX, yOffset);
+    doc.text('Guia de Pagamento de Contribuição - GPC', startX + empLogoOffset, empLogoOffset > 0 ? yOffset + 4 : yOffset);
 
     // --- DESENHO EM VETOR DE ALTA FIDELIDADE DO LOGÓTIPO OFICIAL DO INSS DE MOÇAMBIQUE ---
     const logoX = endX - 110;
@@ -1592,7 +1570,7 @@ export function criarGuiaRecolhimentoInssPDF(
     // --- LINHA 4: Contribuinte (Full Width) ---
     const row4Y = row3Y + r3_h;
     writeCellLabel('Contribuinte', startX, row4Y);
-    writeCellVal((dadosEmpresa.nome || 'Payroll Tech Mz Lda').toUpperCase(), startX, row4Y);
+    writeCellVal((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), startX, row4Y);
 
     // --- LINHA 5: Tipo de Contribuição (Full Width) ---
     const row5Y = row4Y + r4_h;
@@ -1794,15 +1772,17 @@ export function criarGuiaIrpsPDF(
       doc.rect(startX, s1Y, width, s1H).strokeColor('#000000').lineWidth(1).stroke();
       doc.moveTo(385, s1Y).lineTo(385, s1Y + s1H).stroke();
 
+      const irpsLogoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, startX + 4, s1Y + 4, 26);
+
       // Labels
       doc.fontSize(6.5).font('Helvetica').fillColor('#334155');
-      doc.text('1 - NOME / DESIGNAÇÃO SOCIAL DO SUJEITO PASSIVO', startX + 4, s1Y + 3);
+      doc.text('1 - NOME / DESIGNAÇÃO SOCIAL DO SUJEITO PASSIVO', startX + 4 + irpsLogoOffset, s1Y + 3);
       doc.text('2 - NUIT', 389, s1Y + 3);
 
       // Valores
       doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000');
-      doc.text((dadosEmpresa.nome || 'Payroll Tech Mz Lda').toUpperCase(), startX + 4, s1Y + 16, { width: 340 });
-      doc.text(dadosEmpresa.nuit || '402302399', 389, s1Y + 16);
+      doc.text((dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase(), startX + 4 + irpsLogoOffset, s1Y + 16, { width: Math.max(180, 340 - irpsLogoOffset) });
+      doc.text(dadosEmpresa.nuit || 'N/D', 389, s1Y + 16);
 
       // --- SECÇÃO 3: Dísticos Comerciais ---
       const s3Y = 170;
@@ -1879,7 +1859,7 @@ export function criarGuiaIrpsPDF(
       writeAddrCell('DAF', 'Primeira DAF', startX, rowY4);
       writeAddrCell('Telefone Fixo', '+258 21 000 111', 135, rowY4);
       writeAddrCell('Telemóvel', '+258 84 123 4567', 255, rowY4);
-      writeAddrCell('E-Mail', dadosEmpresa.email || 'geral@payrolltech.co.mz', 395, rowY4);
+      writeAddrCell('E-Mail', dadosEmpresa.email || 'N/D', 395, rowY4);
 
       // --- SECÇÃO 5: IMPOSTO A PAGAR ---
       const s5Y = 325;
@@ -2002,7 +1982,7 @@ export function criarGuiaIrpsPDF(
       // Box 1 Content
       doc.fontSize(6).font('Helvetica').fillColor('#334155');
       doc.text('Data: ____ / ____ / __________', box1X + 5, bottomY + 23);
-      doc.text(`Nome: ${(dadosEmpresa.nome || 'Payroll Tech Mz Lda').toUpperCase()}`, box1X + 5, bottomY + 38, { width: boxW - 10 });
+      doc.text(`Nome: ${(dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase()}`, box1X + 5, bottomY + 38, { width: boxW - 10 });
       doc.text('Ass: ___________________________', box1X + 5, bottomY + 63);
       doc.text('Qualidade: GERENTE / PROCURADOR', box1X + 5, bottomY + 78);
 
@@ -2066,34 +2046,13 @@ export function criarRelatorioAgrupadoERPPDF(
       doc.pipe(stream);
 
       // Logotipo e Cabeçalho
-      let textX = 40;
-      let drawn = false;
-      if (dadosEmpresa.logo && dadosEmpresa.logo.startsWith('data:image/')) {
-        try {
-          const parts = dadosEmpresa.logo.split(';base64,');
-          const mime = parts[0];
-          const base64Data = parts[1];
-          if (base64Data && (mime.includes('png') || mime.includes('jpeg') || mime.includes('jpg'))) {
-            doc.image(Buffer.from(base64Data, 'base64'), 40, 35, { width: 40 });
-            textX = 90;
-            drawn = true;
-          }
-        } catch (e) {}
-      }
-      if (!drawn) {
-        try {
-          const pathLogo = path.join(process.cwd(), 'public', 'clickpay-logo.png');
-          if (fs.existsSync(pathLogo)) {
-            doc.image(pathLogo, 40, 35, { width: 40 });
-            textX = 90;
-          }
-        } catch (e) {}
-      }
+      const logoOffset = drawCompanyPdfLogo(doc, dadosEmpresa, 40, 32, 34);
+      const textX = 40 + logoOffset;
 
-      const nomeEmpresa = (dadosEmpresa.nome || 'ClickPay Moçambique, Lda').toUpperCase();
+      const nomeEmpresa = (dadosEmpresa.nome || 'EMPRESA CLIENTE').toUpperCase();
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#1e3a8a').text(nomeEmpresa, textX, 35);
       doc.fontSize(8).font('Helvetica').fillColor('#475569');
-      doc.text(`NUIT: ${dadosEmpresa.nuit || '402302399'}  |  Moçambique  |  Período: ${periodo || 'Geral'}`, textX, 48);
+      doc.text(`NUIT: ${dadosEmpresa.nuit || 'N/D'}  |  Moçambique  |  Período: ${periodo || 'Geral'}`, textX, 48);
 
       doc.moveTo(40, 65).lineTo(555, 65).stroke('#cbd5e1');
 

@@ -35,6 +35,7 @@ import {
 } from '../utils/documentUtils';
 import { getAuthHeaders } from '../lib/authSession';
 import { downloadBlobAsFile, generateA4CommercialDocPdfBlob } from '../lib/clientPdf';
+import { getCompanyInitials, isRenderableLogoUrl } from '../lib/logoUtils';
 
 interface CRMVendasProps {
   companyData: CompanyData;
@@ -1356,17 +1357,33 @@ export const CRMVendas: React.FC<CRMVendasProps> = ({ companyData, onNavigateToF
               <div className="space-y-5">
                 {/* Document Timbre / Header */}
                 <div className="border-b-2 border-slate-900 pb-4 flex flex-col sm:flex-row justify-between items-start gap-4">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-bold text-slate-950 uppercase tracking-tight">
-                      {companyData.nome || 'ClickPay Moçambique, Lda'}
-                    </h2>
-                    <p className="text-[10px] text-slate-700">
-                      {companyData.endereco || 'Avenida 25 de Setembro, Maputo, Moçambique'}
-                    </p>
-                    <p className="text-[10px] text-slate-700 font-mono tabular-nums">
-                      <b>NUIT:</b> {companyData.nuit || '402302399'}
-                      {companyData.telefone ? ` · Tel: ${companyData.telefone}` : ''}
-                    </p>
+                  <div className="flex items-start gap-3">
+                    {isRenderableLogoUrl(companyData.logo) ? (
+                      <img
+                        src={companyData.logo}
+                        alt={companyData.nome}
+                        className="h-12 w-auto object-contain max-w-[140px] shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="h-11 w-11 rounded border border-slate-900 bg-slate-100 flex items-center justify-center shrink-0">
+                        <span className="text-xs font-black text-slate-900 tracking-tight">
+                          {getCompanyInitials(companyData.nome)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <h2 className="text-base font-bold text-slate-950 uppercase tracking-tight">
+                        {companyData.nome || 'EMPRESA CLIENTE'}
+                      </h2>
+                      <p className="text-[10px] text-slate-700">
+                        {companyData.endereco || 'Moçambique'}
+                      </p>
+                      <p className="text-[10px] text-slate-700 font-mono tabular-nums">
+                        <b>NUIT:</b> {companyData.nuit || 'N/D'}
+                        {companyData.telefone ? ` · Tel: ${companyData.telefone}` : ''}
+                      </p>
+                    </div>
                   </div>
 
                   {/* Metadata Box ClickPay ERP Enterprise */}

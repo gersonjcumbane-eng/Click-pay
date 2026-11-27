@@ -72,10 +72,8 @@ import SystemQrModal from './components/SystemQrModal';
 import { 
   updateConfiguracaoFiscal, 
   updateEmpresa, 
-  employees as defaultEmployees, 
   empresaAtual, 
   configuracaoFiscal, 
-  paymentLogs, 
   calcularFolhaSalario, 
   baseDadosClientes, 
   selecionarClienteEmpresa,
@@ -83,6 +81,7 @@ import {
   zerarCalculosEResetFinanceiro,
   getCurrentPeriod
 } from './db_tax';
+import { warmLogoCache } from './lib/logoUtils';
 import { useToast, useConfirm } from './context/ToastContext';
 
 interface LockedFeatureOverlayProps {
@@ -379,7 +378,41 @@ export default function App() {
     return isFounderUser() ? 'cli_founders' : 'cli_bronze';
   };
 
+  const ensureZeroedSalaryLocalStorage = () => {
+    try {
+      if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+      if (localStorage.getItem('clickpay_salaries_zeroed_v1') === '1') return;
+      const keysToClean: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('clickpay_tenant_')) {
+          keysToClean.push(key);
+        }
+      }
+      keysToClean.forEach((key) => {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+          if (parsed && typeof parsed === 'object') {
+            parsed.employees = [];
+            parsed.logs = [];
+            parsed.contracts = [];
+            if (key !== 'clickpay_tenant_cli_founders' && parsed.company?.logo === '/clickpay-logo.png') {
+              parsed.company.logo = '';
+            }
+            localStorage.setItem(key, JSON.stringify(parsed));
+          }
+        } catch {
+          // ignore malformed tenant key
+        }
+      });
+      localStorage.setItem('clickpay_salaries_zeroed_v1', '1');
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   const readTenantSnapshot = (cid: string) => {
+    ensureZeroedSalaryLocalStorage();
     try {
       const raw = localStorage.getItem(`clickpay_tenant_${cid}`);
       if (!raw) return null;
@@ -453,13 +486,13 @@ export default function App() {
         baseCompany = { ...baseCompany, ...snapshot.company };
       }
     } else if (cid === 'cli_founders' && isFounderUser()) {
-      localEmployees = defaultEmployees.filter(e => !tenantDeleted.has(e.id));
-      localLogs = [...paymentLogs];
+      localEmployees = [];
+      localLogs = [];
     } else if (cid === 'cli_bronze' || cid === 'cli_silver' || cid === 'cli_gold') {
       const matched = baseDadosClientes.find(c => c.id === cid);
       if (matched) {
-        localEmployees = (matched.employees || []).filter(e => !tenantDeleted.has(e.id));
-        localLogs = [...(matched.paymentLogs || [])];
+        localEmployees = [];
+        localLogs = [];
         baseCompany = {
           nome: matched.nome,
           nuit: matched.nuit,
@@ -565,6 +598,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    ensureZeroedSalaryLocalStorage();
     if (authenticated) {
       loadData();
       if (isFounderUser()) {
@@ -576,6 +610,10 @@ export default function App() {
       setLoading(false);
     }
   }, [authenticated]);
+
+  useEffect(() => {
+    warmLogoCache(company?.logo).catch(() => null);
+  }, [company?.logo]);
 
   // Completar autenticação se o navegador retornar de um redirect Google OAuth
   useEffect(() => {

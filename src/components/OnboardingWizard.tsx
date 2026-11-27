@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { syncRegisteredAccountToFirestore } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
+import { normalizeLogoToPngDataUrl } from '../lib/logoUtils';
 import {
   BillingCycle,
   CLICKPAY_PLANS,
@@ -382,6 +383,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
         telefone: cleanTelefone,
         endereco,
         provincia,
+        logo: logoUrl,
         transferMethod: transferMethod.trim(),
         transferReference: transferReference.trim(),
         transferAmount: numericTransferredAmount,
@@ -1026,6 +1028,7 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                           className="hidden"
                           onChange={(e) => {
                             const file = e.target.files?.[0];
+                            e.target.value = '';
                             if (!file) return;
                             if (file.size > 2 * 1024 * 1024) {
                               showToast('O logótipo excede o limite de 2 MB.');
@@ -1044,12 +1047,26 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
                                 showToast(`Ficheiro bloqueado: ${avScan.reason}`);
                                 return;
                               }
-                              setLogoUrl(result);
+                              try {
+                                const normalized = await normalizeLogoToPngDataUrl(result, 280);
+                                setLogoUrl(normalized);
+                              } catch {
+                                setLogoUrl(result);
+                              }
                             };
                             reader.readAsDataURL(file);
                           }}
                         />
                       </label>
+                      {logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setLogoUrl('')}
+                          className="px-2.5 py-1.5 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-lg text-xs cursor-pointer"
+                        >
+                          Remover
+                        </button>
+                      )}
                     </div>
                   </div>
 

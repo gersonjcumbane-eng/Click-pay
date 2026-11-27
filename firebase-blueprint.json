@@ -39,6 +39,7 @@
         "subscription_plan": { "type": "string", "enum": ["Starter", "Growth", "Business", "Bronze", "Silver", "Gold", "Platinum"] },
         "subscription_status": { "type": "string", "enum": ["ativo", "suspenso", "pendente"] },
         "fee_base": { "type": "number" },
+        "logo": { "type": "string", "maxLength": 150000 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "nome", "nuit", "email", "subscription_plan", "subscription_status", "fee_base", "updatedAt"]
@@ -62,6 +63,7 @@
         "adminPassword": { "type": "string", "description": "Salted PBKDF2-SHA256 hash", "maxLength": 256 },
         "role": { "type": "string", "maxLength": 64 },
         "nextBillingDate": { "type": "string", "maxLength": 64 },
+        "logo": { "type": "string", "maxLength": 150000 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
@@ -176,6 +178,7 @@
         "regime_fiscal_pme": { "type": "string", "maxLength": 128 },
         "nuel": { "type": "string", "maxLength": 64 },
         "telefone": { "type": "string", "maxLength": 64 },
+        "logo": { "type": "string", "maxLength": 150000 },
         "createdAt": { "type": "string", "maxLength": 64 },
         "updatedAt": { "type": "string", "maxLength": 64 }
       },
