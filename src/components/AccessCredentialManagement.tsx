@@ -156,6 +156,17 @@ export default function AccessCredentialManagement({
   const [rotatedUserModal, setRotatedUserModal] = useState<any | null>(null);
   const [rotatingUserId, setRotatingUserId] = useState<string | null>(null);
   const [rotatingTokenId, setRotatingTokenId] = useState<string | null>(null);
+  const [provisioningPackages, setProvisioningPackages] = useState<boolean>(false);
+  const [packageCredsModal, setPackageCredsModal] = useState<Array<{
+    id: string;
+    packageLabel: string;
+    priceLabel: string;
+    plan: string;
+    name: string;
+    companyName: string;
+    email: string;
+    rawPassword: string;
+  }> | null>(null);
 
   // 7. Clipboard Feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -507,6 +518,52 @@ export default function AccessCredentialManagement({
     }
   };
 
+  const handleProvisionPackageCredentials = async () => {
+    const confirmed = await confirmAction({
+      title: 'Gerar Novas Credenciais dos 3 Pacotes',
+      message: 'Gerar e activar imediatamente novas palavras-passe para os pacotes Starter, Profissional e Empresarial? As senhas anteriores destes 3 pacotes deixarão de funcionar.',
+      confirmText: 'Gerar 3 Credenciais',
+      variant: 'warning'
+    });
+    if (!confirmed) return;
+
+    setProvisioningPackages(true);
+    try {
+      const res = await fetch('/api/access/provision-package-credentials', {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.sucesso && Array.isArray(data.packages)) {
+        const pwdMap: Record<string, string> = {};
+        for (const pkg of data.packages) {
+          const emailKey = String(pkg.email || '').toLowerCase().trim();
+          if (emailKey && pkg.rawPassword) {
+            pwdMap[emailKey] = pkg.rawPassword;
+            await updateLocalVaultPassword(emailKey, pkg.rawPassword, pkg.companyName).catch(() => {});
+            await syncUpdatedCredentialsToFirestore({
+              email: emailKey,
+              newPassword: pkg.rawPassword,
+              companyName: pkg.companyName,
+              plan: pkg.plan,
+              status: 'ativo'
+            }).catch(() => {});
+          }
+        }
+        setOneTimePasswords((prev) => ({ ...prev, ...pwdMap }));
+        setPackageCredsModal(data.packages);
+        showSuccess(data.mensagem || 'Novas credenciais geradas para os 3 pacotes!');
+        loadData();
+      } else {
+        showError(data.erro || 'Não foi possível gerar as credenciais dos pacotes.');
+      }
+    } catch {
+      showError('Erro de conexão ao gerar credenciais dos pacotes.');
+    } finally {
+      setProvisioningPackages(false);
+    }
+  };
+
   const handleUpdateCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = updateTargetEmail.trim().toLowerCase();
@@ -711,6 +768,14 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
             >
               <KeyRound size={16} />
               <span>Actualizar Minha Senha</span>
+            </button>
+            <button
+              onClick={handleProvisionPackageCredentials}
+              disabled={provisioningPackages}
+              className="py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-60"
+            >
+              {provisioningPackages ? <RefreshCw size={16} className="animate-spin" /> : <KeyRound size={16} />}
+              <span>Novas Credenciais (3 Pacotes)</span>
             </button>
             <button
               onClick={() => setShowGenModal(true)}
@@ -1112,7 +1177,7 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Chaves de integração segura para o SISSMO do INSS, facturação e POS (integrações de pagamento bloqueadas).
+              Chaves de integração segura para o SISSMO do INSS, facturação, POS e carteiras móveis.
             </p>
           </div>
 
@@ -1888,6 +1953,81 @@ O Fundador (gersonjcumbane@gmail.com) é notificado em cada tentativa.
                 </button>
                 <button
                   onClick={() => setRotatedUserModal(null)}
+                  className="py-2 px-4 bg-blue-900 hover:bg-blue-950 text-white text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  Concluir
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL: Visualização Única das Credenciais dos 3 Pacotes */}
+      <AnimatePresence>
+        {packageCredsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-emerald-700 text-white rounded-xl">
+                    <KeyRound size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-950">Novas Credenciais dos 3 Pacotes ClickPay</h3>
+                    <p className="text-[11px] text-slate-500">Visíveis apenas agora — copie ou descarregue antes de fechar.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPackageCredsModal(null)}
+                  className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {packageCredsModal.map((pkg) => (
+                  <div key={pkg.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="font-black text-slate-950">{pkg.packageLabel}</span>
+                        <span className="ml-2 text-[11px] text-slate-500">· {pkg.priceLabel}</span>
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-700">{pkg.companyName}</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <div className="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
+                        <span className="font-mono font-semibold text-slate-800 truncate">{pkg.email}</span>
+                        <button
+                          onClick={() => copyToClipboard(pkg.email, `pkg_em_${pkg.id}`, 'E-mail')}
+                          className="p-1 hover:bg-slate-100 rounded text-slate-600 cursor-pointer shrink-0"
+                        >
+                          {copiedKey === `pkg_em_${pkg.id}` ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200">
+                        <code className="font-mono font-black text-blue-950 truncate">{pkg.rawPassword}</code>
+                        <button
+                          onClick={() => copyToClipboard(pkg.rawPassword, `pkg_pw_${pkg.id}`, 'Palavra-passe')}
+                          className="p-1 hover:bg-blue-100 rounded text-blue-800 cursor-pointer shrink-0"
+                        >
+                          {copiedKey === `pkg_pw_${pkg.id}` ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setPackageCredsModal(null)}
                   className="py-2 px-4 bg-blue-900 hover:bg-blue-950 text-white text-xs font-bold rounded-xl cursor-pointer"
                 >
                   Concluir

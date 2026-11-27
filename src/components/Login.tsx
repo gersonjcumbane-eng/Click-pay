@@ -68,21 +68,11 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [otpCode, setOtpCode] = useState('');
   const [tentativaId, setTentativaId] = useState('');
   const [debugOtpCode, setDebugOtpCode] = useState('');
-  const [notifiedEmail, setNotifiedEmail] = useState('gersonjcumbane@gmail.com');
+  const [notifiedEmail, setNotifiedEmail] = useState('a Administração ClickPay');
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [resendingOtp, setResendingOtp] = useState(false);
   const [otpSuccessMessage, setOtpSuccessMessage] = useState<string | null>(null);
   const [pendingFallbackSession, setPendingFallbackSession] = useState<FallbackSession | null>(null);
-
-  // Estado de Configuração Inicial do Fundador (quando nenhuma senha está definida)
-  const [founderBootstrapRequired, setFounderBootstrapRequired] = useState(false);
-  const [bootstrapModalOpen, setBootstrapModalOpen] = useState(false);
-  const [bootstrapEmail, setBootstrapEmail] = useState('gersonjcumbane@gmail.com');
-  const [bootstrapPassword, setBootstrapPassword] = useState('');
-  const [bootstrapConfirmPassword, setBootstrapConfirmPassword] = useState('');
-  const [showBootstrapPwd, setShowBootstrapPwd] = useState(false);
-  const [bootstrapLoading, setBootstrapLoading] = useState(false);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   // Estado de Pagamento Pendente + Modal de Ativação por Código
   const [pendingPaymentNotice, setPendingPaymentNotice] = useState<{
@@ -139,7 +129,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     if (fbAuth.pendingApproval || fbAuth.client?.status === 'pendente') {
       setPendingPaymentNotice({
         message:
-          'A sua conta aguarda confirmação do pagamento por transferência pelo Fundador (gersonjcumbane@gmail.com).',
+          'A sua conta aguarda confirmação do pagamento por transferência pela Administração ClickPay.',
         plano: fbAuth.client?.plan || 'Starter',
         email: cleanEmail
       });
@@ -181,7 +171,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         setOtpStep(true);
         setTentativaId(`otp_cloud_${Date.now()}`);
         setDebugOtpCode(otp);
-        setNotifiedEmail('gersonjcumbane@gmail.com');
+        setNotifiedEmail('a Administração ClickPay');
         return true;
       }
       return false;
@@ -207,14 +197,6 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         const errBody = isJson ? await response.json().catch(() => null) : null;
         const ok = await triggerFallbackAuth();
         if (!ok) {
-          if (isFounderEmail(cleanEmail)) {
-            const stRes = await fetch('/api/auth/bootstrap-status').catch(() => null);
-            const stData = stRes && stRes.ok && isJsonResponse(stRes) ? await stRes.json().catch(() => null) : null;
-            if (stData && stData.founderConfigured === false) {
-              setFounderBootstrapRequired(true);
-              setBootstrapEmail(cleanEmail);
-            }
-          }
           if (response.status >= 500) {
             setError(
               errBody?.erro ||
@@ -238,7 +220,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
           setOtpStep(true);
           setTentativaId(data.tentativaId || '');
           setDebugOtpCode(data.debugOtpCode || '');
-          setNotifiedEmail(data.notificadoEmail || 'gersonjcumbane@gmail.com');
+          setNotifiedEmail(data.notificadoEmail || 'a Administração ClickPay');
           return;
         }
 
@@ -253,12 +235,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         }
       } else {
         const errData = await response.json().catch(() => ({}));
-        if (response.status === 403 && errData.code === 'FOUNDER_BOOTSTRAP_REQUIRED') {
-          setFounderBootstrapRequired(true);
-          setBootstrapEmail(cleanEmail || 'gersonjcumbane@gmail.com');
-          setBootstrapError(null);
-          setBootstrapModalOpen(true);
-        } else if (response.status === 403 && errData.code === 'PAYMENT_APPROVAL_PENDING') {
+        if (response.status === 403 && errData.code === 'PAYMENT_APPROVAL_PENDING') {
           setPendingPaymentNotice({
             message: errData.erro,
             requestId: errData.requestId,
@@ -450,7 +427,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       if (client.status === 'pendente') {
         setPendingPaymentNotice({
           message:
-            'A sua conta aguarda confirmação do pagamento por transferência pelo Fundador (gersonjcumbane@gmail.com).',
+            'A sua conta aguarda confirmação do pagamento por transferência pela Administração ClickPay.',
           plano: client.plan,
           email: client.email
         });
@@ -528,93 +505,10 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
       }
     });
 
-    fetch('/api/auth/bootstrap-status')
-      .then(async (res) => {
-        if (!active || !res.ok || !isJsonResponse(res)) return;
-        const data = await res.json().catch(() => null);
-        if (active && data && data.founderConfigured === false) {
-          setFounderBootstrapRequired(true);
-          if (data.founderEmail) setBootstrapEmail(data.founderEmail);
-        }
-      })
-      .catch(() => {});
-
     return () => {
       active = false;
     };
   }, []);
-
-  const handleClaimFounderBootstrap = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBootstrapError(null);
-    const cleanPwd = bootstrapPassword.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-    const cleanConfirm = bootstrapConfirmPassword.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-    if (cleanPwd.length < 8) {
-      setBootstrapError('A palavra-passe inicial deve ter pelo menos 8 caracteres.');
-      return;
-    }
-    if (cleanPwd !== cleanConfirm) {
-      setBootstrapError('As palavras-passe introduzidas não coincidem.');
-      return;
-    }
-
-    setBootstrapLoading(true);
-    try {
-      const res = await fetch('/api/auth/bootstrap-claim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: bootstrapEmail.trim().toLowerCase(),
-          newPassword: cleanPwd
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setBootstrapError(data.erro || 'Não foi possível activar as credenciais iniciais do Fundador.');
-        return;
-      }
-
-      await updateLocalVaultPassword(
-        bootstrapEmail,
-        cleanPwd,
-        'ClickPay Moçambique Lda',
-        'cli_founders'
-      ).catch(() => {});
-      await syncUpdatedCredentialsToFirestore({
-        email: bootstrapEmail,
-        newPassword: cleanPwd,
-        status: 'ativo',
-        companyName: 'ClickPay Moçambique Lda',
-        plan: 'Platinum'
-      }).catch(() => {});
-
-      setFounderBootstrapRequired(false);
-      setBootstrapModalOpen(false);
-      setBootstrapPassword('');
-      setBootstrapConfirmPassword('');
-      setError(null);
-
-      if (data.otpRequired) {
-        setEmail(bootstrapEmail);
-        setPendingFallbackSession(null);
-        setOtpStep(true);
-        setTentativaId(data.tentativaId || '');
-        setDebugOtpCode(data.debugOtpCode || '');
-        setNotifiedEmail(data.notificadoEmail || bootstrapEmail);
-        setOtpSuccessMessage('Credenciais do Fundador definidas! Confirme o código OTP para entrar.');
-        return;
-      }
-
-      if (data.sucesso) {
-        persistUserSession(data.token, data.usuario, bootstrapEmail);
-        onLoginSuccess();
-      }
-    } catch {
-      setBootstrapError('Erro de ligação ao configurar a palavra-passe inicial.');
-    } finally {
-      setBootstrapLoading(false);
-    }
-  };
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -836,29 +730,6 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
             </motion.div>
           )}
 
-          {founderBootstrapRequired && !otpStep && (
-            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2 text-xs">
-              <div className="flex items-center gap-2 font-bold text-amber-950">
-                <KeyRound size={15} className="text-amber-700 shrink-0" />
-                <span>Primeiro Acesso do Fundador: Defina a Sua Senha</span>
-              </div>
-              <p className="text-[11px] text-amber-900 leading-relaxed">
-                Por segurança, nenhuma senha padrão está activa. Configure a palavra-passe inicial de{' '}
-                <strong className="font-mono">{bootstrapEmail}</strong> ou entre directamente com a sua Conta Google.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setBootstrapError(null);
-                  setBootstrapModalOpen(true);
-                }}
-                className="w-full py-2 px-3 bg-slate-900 hover:bg-black text-white font-bold rounded-lg text-[11px] transition-colors cursor-pointer"
-              >
-                Configurar Senha Inicial do Fundador
-              </button>
-            </div>
-          )}
-
           {/* =========================================================================
               PASSO 2: FORMULÁRIO DE VERIFICAÇÃO OTP (2FA)
              ========================================================================= */}
@@ -870,7 +741,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                   <span>Verificação de Segurança OTP (2FA)</span>
                 </div>
                 <p className="text-blue-900 leading-relaxed text-[11px]">
-                  Por motivos de segurança e auditoria, uma notificação com o código de 6 dígitos foi enviada para o Fundador em <strong>{notifiedEmail}</strong> e telemóveis oficiais.
+                  Por motivos de segurança e auditoria, uma notificação com o código de 6 dígitos foi enviada para <strong>{notifiedEmail}</strong>.
                 </p>
               </div>
 
@@ -1321,118 +1192,6 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
                     </>
                   ) : (
                     <span>Confirmar com Conta Google &amp; Actualizar Senha</span>
-                  )}
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
-
-      {bootstrapModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl p-6 space-y-4"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-slate-900 text-white">
-                  <ShieldCheck size={18} />
-                </span>
-                <div>
-                  <h3 className="text-sm font-black text-slate-950">
-                    Activar Credenciais do Fundador
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Defina uma palavra-passe forte e exclusiva para {bootstrapEmail}.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBootstrapModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
-                aria-label="Fechar"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {bootstrapError && (
-              <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <AlertCircle size={15} className="shrink-0" />
-                <span>{bootstrapError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleClaimFounderBootstrap} className="space-y-3.5">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">E-mail do Fundador</label>
-                <input
-                  type="email"
-                  value={bootstrapEmail}
-                  readOnly
-                  className="w-full px-3.5 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono font-semibold text-slate-700"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Nova Palavra-passe (mín. 8 caracteres)</label>
-                <div className="relative">
-                  <input
-                    type={showBootstrapPwd ? 'text' : 'password'}
-                    required
-                    minLength={8}
-                    value={bootstrapPassword}
-                    onChange={(e) => setBootstrapPassword(e.target.value)}
-                    placeholder="Defina uma senha forte"
-                    className="w-full px-3.5 py-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowBootstrapPwd((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
-                  >
-                    {showBootstrapPwd ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700">Confirmar Palavra-passe</label>
-                <input
-                  type={showBootstrapPwd ? 'text' : 'password'}
-                  required
-                  minLength={8}
-                  value={bootstrapConfirmPassword}
-                  onChange={(e) => setBootstrapConfirmPassword(e.target.value)}
-                  placeholder="Repita a palavra-passe"
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-900/10 focus:border-blue-900"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setBootstrapModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={bootstrapLoading}
-                  className="px-4 py-2 rounded-xl bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white text-xs font-bold flex items-center gap-2 cursor-pointer"
-                >
-                  {bootstrapLoading ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>A activar...</span>
-                    </>
-                  ) : (
-                    <span>Guardar &amp; Activar Acesso</span>
                   )}
                 </button>
               </div>

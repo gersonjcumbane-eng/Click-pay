@@ -540,8 +540,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     }
   };
 
-  // CREDENCIAIS MESTRE DO FUNDADOR (EXCLUSIVAS NO SERVIDOR — SEM SENHAS HARDCODED)
+  // CREDENCIAIS MESTRE DO FUNDADOR & PACOTES (EXCLUSIVAS NO SERVIDOR — SEM SENHAS HARDCODED)
   const ENV_FOUNDER_PASSWORD = (process.env.FOUNDER_ADMIN_PASSWORD || '').trim();
+  const ENV_PACKAGE_PASSWORDS: Record<string, string> = {
+    'construcao@payrolltech.co.mz': (process.env.STARTER_PACKAGE_PASSWORD || '').trim(),
+    'educacao@payrolltech.co.mz': (process.env.PROFISSIONAL_PACKAGE_PASSWORD || '').trim(),
+    'servicos@payrolltech.co.mz': (process.env.EMPRESARIAL_PACKAGE_PASSWORD || '').trim()
+  };
   const CREDENCIAIS_FOUNDERS = {
     email: "gersonjcumbane@gmail.com",
     emails: [
@@ -685,8 +690,8 @@ export async function createApp(options?: { skipStatic?: boolean }) {
     return {
       code: 'PAYMENT_APPROVAL_PENDING',
       erro: isRejected
-        ? `O seu comprovativo de transferência foi recusado (${proof?.motivoRejeicao || 'verifique os dados enviados'}). Reenvie o comprovativo na criação de conta ou contacte gersonjcumbane@gmail.com.`
-        : 'A sua conta aguarda confirmação do pagamento por transferência pelo Fundador (gersonjcumbane@gmail.com). Assim que confirmado, receberá o código de ativação e as credenciais do seu pacote.',
+        ? `O seu comprovativo de transferência foi recusado (${proof?.motivoRejeicao || 'verifique os dados enviados'}). Reenvie o comprovativo na criação de conta ou contacte suporte@clickpay.co.mz.`
+        : 'A sua conta aguarda confirmação do pagamento por transferência pela Administração ClickPay. Assim que confirmado, receberá o código de ativação e as credenciais do seu pacote.',
       requestId: proof?.id || null,
       plano: proof?.planoEscolhido || comp?.subscription_plan || fallbackPlan || 'Starter',
       valorEsperado: proof?.valorEsperado || comp?.fee_base || 0,
@@ -909,12 +914,14 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       otpRequired: true,
       tentativaId,
       email,
-      mensagem: "Código de segurança OTP de 6 dígitos enviado para o Fundador.",
-      notificadoEmail: otpSecurityConfig.founderEmail,
-      notificadoTelefones: otpSecurityConfig.founderPhones,
+      mensagem: "Código de segurança OTP de 6 dígitos enviado para a Administração ClickPay.",
+      notificadoEmail: "Administração ClickPay",
       debugOtpCode: otpCode
     });
   }
+
+  const shouldRequireOtpOnLogin = () =>
+    otpSecurityConfig.requireOtpOnLogin && (!isServerless || Boolean((process.env.SESSION_SECRET || '').trim()));
 
   const systemUsersList: any[] = [
     {
@@ -970,7 +977,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Construtora Limpopo Lda",
       email: "construcao@payrolltech.co.mz",
       passwordMasked: "••••••••••••",
-      passwordConfigured: Boolean(rotatedPasswordHashes["construcao@payrolltech.co.mz"]),
+      passwordConfigured: Boolean(rotatedPasswordHashes["construcao@payrolltech.co.mz"] || ENV_PACKAGE_PASSWORDS["construcao@payrolltech.co.mz"]),
       role: "CLIENTE_EMPRESA",
       roleLabel: "Cliente Empresa (Starter)",
       plan: "Bronze",
@@ -978,7 +985,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 84 111 2233",
       status: "ativo",
       createdAt: "2026-04-10",
-      lastLogin: "Aguardando definição de senha",
+      lastLogin: rotatedPasswordHashes["construcao@payrolltech.co.mz"] || ENV_PACKAGE_PASSWORDS["construcao@payrolltech.co.mz"] ? "Ativo (Pronto a entrar)" : "Aguardando definição de senha",
       apiTokenPrefix: "cp_live_bronze_••••••••"
     },
     {
@@ -986,7 +993,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Instituto Rovuma Lda",
       email: "educacao@payrolltech.co.mz",
       passwordMasked: "••••••••••••",
-      passwordConfigured: Boolean(rotatedPasswordHashes["educacao@payrolltech.co.mz"]),
+      passwordConfigured: Boolean(rotatedPasswordHashes["educacao@payrolltech.co.mz"] || ENV_PACKAGE_PASSWORDS["educacao@payrolltech.co.mz"]),
       role: "CLIENTE_EMPRESA",
       roleLabel: "Cliente Empresa (Profissional)",
       plan: "Silver",
@@ -994,7 +1001,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       phone: "+258 82 333 4455",
       status: "ativo",
       createdAt: "2026-05-18",
-      lastLogin: "Aguardando definição de senha",
+      lastLogin: rotatedPasswordHashes["educacao@payrolltech.co.mz"] || ENV_PACKAGE_PASSWORDS["educacao@payrolltech.co.mz"] ? "Ativo (Pronto a entrar)" : "Aguardando definição de senha",
       apiTokenPrefix: "cp_live_silver_••••••••"
     },
     {
@@ -1002,7 +1009,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       name: "Kuvanga Consultoria Lda",
       email: "servicos@payrolltech.co.mz",
       passwordMasked: "••••••••••••",
-      passwordConfigured: Boolean(rotatedPasswordHashes["servicos@payrolltech.co.mz"]),
+      passwordConfigured: Boolean(rotatedPasswordHashes["servicos@payrolltech.co.mz"] || ENV_PACKAGE_PASSWORDS["servicos@payrolltech.co.mz"]),
       role: "CLIENTE_EMPRESA",
       roleLabel: "Cliente Empresa (Empresarial)",
       plan: "Gold",
@@ -1395,6 +1402,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             safeUser.passwordConfigured = Boolean(
               safeUser.passwordHash ||
                 rotatedPasswordHashes[cleanEmail] ||
+                ENV_PACKAGE_PASSWORDS[cleanEmail] ||
                 (isFounderEmail(cleanEmail) && isFounderPasswordConfigured())
             );
             mergedMap.set(cleanEmail, safeUser);
@@ -1558,97 +1566,17 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   // GESTÃO DE CREDENCIAIS & LOGIN INTEGRADO COM FIREBASE AUTH
   // =========================================================================
 
-  // Estado de configuração inicial do Fundador (sem senhas hardcoded)
+  // Estado público geral de módulos do sistema (sem expor dados ou e-mail do Fundador)
   app.get('/api/auth/bootstrap-status', (_req: Request, res: Response) => {
     try {
       return res.json({
-        founderConfigured: isFounderPasswordConfigured(),
-        founderEmail: CREDENCIAIS_FOUNDERS.email,
+        ok: true,
         pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
         modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo'
       });
     } catch (err) {
       console.error('[Bootstrap Status Error]:', err);
-      return res.status(500).json({ erro: 'Erro ao consultar estado inicial do sistema.' });
-    }
-  });
-
-  // Configuração única da palavra-passe inicial do Fundador quando ainda não existe credencial definida
-  app.post('/api/auth/bootstrap-claim', async (req: Request, res: Response) => {
-    try {
-      if (isFounderPasswordConfigured()) {
-        return res.status(409).json({
-          erro: 'As credenciais do Fundador já se encontram configuradas. Utilize o início de sessão normal ou actualize a senha via Conta Google.'
-        });
-      }
-
-      const emailNorm = String(req.body?.email || CREDENCIAIS_FOUNDERS.email).toLowerCase().trim();
-      const cleanPass = String(req.body?.newPassword || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-
-      if (!isFounderEmail(emailNorm)) {
-        return res.status(403).json({
-          erro: 'Apenas o e-mail oficial do Fundador pode activar a credencial mestre inicial.'
-        });
-      }
-      if (cleanPass.length < 8) {
-        return res.status(400).json({
-          erro: 'A palavra-passe inicial do Fundador deve ter no mínimo 8 caracteres.'
-        });
-      }
-
-      const hashed = await persistRotatedCredential(emailNorm, cleanPass);
-      systemUsersList.forEach((u) => {
-        if (isFounderEmail(u.email)) {
-          u.passwordConfigured = true;
-          u.passwordHash = hashed;
-          u.lastLogin = 'Configurado agora';
-        }
-      });
-      saveRuntimeState();
-
-      if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
-        await syncUserToFirebase(emailNorm, cleanPass).catch(() => {});
-      }
-
-      notifyFounder(
-        'Credencial Inicial do Fundador Configurada',
-        `Palavra-passe mestre definida para ${emailNorm} com encriptação PBKDF2-SHA256.`,
-        { userEmail: emailNorm, status: 'sucesso' }
-      );
-
-      founderActiveCompanyId = 'cli_founders';
-      selecionarClienteEmpresa('cli_founders');
-      syncCompanyGlobalsIfActive('cli_founders');
-      const founderComp = baseDadosClientes.find(c => c.id === 'cli_founders');
-
-      const sessionPayload = {
-        sucesso: true,
-        pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
-        modo_sistema: PAYMENTS_MODULE_LOCKED ? 'apenas_facturacao' : 'completo',
-        mensagem: 'Credenciais do Fundador configuradas e activadas com sucesso!',
-        token: signSessionToken({ email: emailNorm, role: 'SUPER_ADMIN_PAYROLL', empresa_id: 'cli_founders' }),
-        usuario: {
-          nome: 'Gerson Cumbane (Fundador ClickPay)',
-          email: emailNorm,
-          funcao: 'SUPER_ADMIN_PAYROLL',
-          empresa_id: 'cli_founders',
-          area_visualizacao: 'Painel Executivo Global',
-          nome_empresa: founderComp?.nome || empresaAtual.nome || 'ClickPay Moçambique Lda',
-          subscription_status: 'ativo',
-          subscription_plan: 'Platinum'
-        }
-      };
-
-      if (otpSecurityConfig.requireOtpOnLogin && (!isServerless || Boolean((process.env.SESSION_SECRET || '').trim()))) {
-        return issueOtpChallenge(emailNorm, sessionPayload, res);
-      }
-
-      return res.json(sessionPayload);
-    } catch (err: any) {
-      console.error('[Bootstrap Claim Error]:', err);
-      return res.status(500).json({
-        erro: 'Não foi possível configurar as credenciais iniciais do Fundador. Utilize "ENTRAR COM GMAIL / CONTA GOOGLE".'
-      });
+      return res.status(500).json({ erro: 'Erro ao consultar estado do sistema.' });
     }
   });
 
@@ -1713,13 +1641,6 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
       // 1. Acesso Mestre: Verifica se é o Fundador (Super Admin / Gerson Cumbane)
       if (isFounderEmail(emailNorm)) {
-        if (!isFounderPasswordConfigured() && !isFirebaseAuthed) {
-          return res.status(403).json({
-            code: 'FOUNDER_BOOTSTRAP_REQUIRED',
-            erro: 'A palavra-passe inicial do Fundador ainda não foi definida. Utilize "Configurar Senha do Fundador" ou entre diretamente com a sua Conta Google (Gmail).'
-          });
-        }
-
         const matchesEnvFounder =
           !rotatedHash &&
           ENV_FOUNDER_PASSWORD.length > 0 &&
@@ -1756,7 +1677,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             }
           };
 
-          if (otpSecurityConfig.requireOtpOnLogin) {
+          if (shouldRequireOtpOnLogin()) {
             return issueOtpChallenge(emailNorm, sessionPayload, res);
           }
 
@@ -1765,7 +1686,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         }
       }
 
-      // 2. Verificar na lista global de utilizadores do sistema (RH, Contabilidade, utilizadores gerados automaticamente, etc.)
+      // 2. Verificar na lista global de utilizadores do sistema (RH, Contabilidade, pacotes Starter/Profissional/Empresarial, etc.)
       const systemUser = systemUsersList.find(u => String(u?.email || '').toLowerCase().trim() === emailNorm);
       if (systemUser) {
         if (isAccountPendingPayment(emailNorm)) {
@@ -1777,7 +1698,13 @@ export async function createApp(options?: { skipStatic?: boolean }) {
 
         const storedSysHash = typeof systemUser.passwordHash === 'string' ? systemUser.passwordHash : '';
         const matchesSysHash = await safeVerifyPassword(passwordRaw, storedSysHash);
-        const isCorrectSystemPassword = matchesRotatedHash || matchesSysHash || isFirebaseAuthed;
+        const envPkgPwd = ENV_PACKAGE_PASSWORDS[emailNorm] || '';
+        const matchesEnvPkg =
+          !rotatedHash &&
+          envPkgPwd.length >= 8 &&
+          (constantTimeStringMatch(passwordClean, envPkgPwd) ||
+            constantTimeStringMatch(passwordRaw, envPkgPwd));
+        const isCorrectSystemPassword = matchesRotatedHash || matchesSysHash || matchesEnvPkg || isFirebaseAuthed;
 
         if (isCorrectSystemPassword) {
           if (!isFirebaseAuthed && !isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
@@ -1827,7 +1754,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             }
           };
 
-          if (otpSecurityConfig.requireOtpOnLogin) {
+          if (shouldRequireOtpOnLogin()) {
             return issueOtpChallenge(emailNorm, sessionPayload, res);
           }
 
@@ -1872,7 +1799,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             }
           };
 
-          if (otpSecurityConfig.requireOtpOnLogin) {
+          if (shouldRequireOtpOnLogin()) {
             return issueOtpChallenge(emailNorm, sessionPayload, res);
           }
 
@@ -1920,7 +1847,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
             }
           };
 
-          if (otpSecurityConfig.requireOtpOnLogin) {
+          if (shouldRequireOtpOnLogin()) {
             return issueOtpChallenge(emailNorm, sessionPayload, res);
           }
 
@@ -2081,7 +2008,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
           }
         };
 
-        if (otpSecurityConfig.requireOtpOnLogin) {
+        if (shouldRequireOtpOnLogin()) {
           return issueOtpChallenge(emailNorm, sessionPayload, res);
         }
 
@@ -2777,6 +2704,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
         const configured = Boolean(
           rest.passwordConfigured ||
             rotatedPasswordHashes[em] ||
+            ENV_PACKAGE_PASSWORDS[em] ||
             (isFounderEmail(em) && isFounderPasswordConfigured())
         );
         return {
@@ -3090,6 +3018,79 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       rawPassword: newPassword,
       mensagem: `Nova palavra-passe gerada e activada para ${emailNorm}!`
     });
+  });
+
+  // Gerar / Renovar Credenciais para os 3 Pacotes (Starter/Bronze, Profissional/Silver, Empresarial/Gold)
+  app.post('/api/access/provision-package-credentials', requireSuperAdmin, async (_req: Request, res: Response) => {
+    try {
+      const packageSpecs = [
+        { userId: 'usr_cli_bronze_04', email: 'construcao@payrolltech.co.mz', packageLabel: 'Starter (Bronze)', priceLabel: '1.500 MT/mês' },
+        { userId: 'usr_cli_silver_05', email: 'educacao@payrolltech.co.mz', packageLabel: 'Profissional (Silver)', priceLabel: '3.500 MT/mês' },
+        { userId: 'usr_cli_gold_06', email: 'servicos@payrolltech.co.mz', packageLabel: 'Empresarial (Gold)', priceLabel: '6.900 MT/mês' }
+      ];
+
+      const provisioned: any[] = [];
+
+      for (const spec of packageSpecs) {
+        const target = systemUsersList.find(
+          (u) => u.id === spec.userId || String(u.email || '').toLowerCase().trim() === spec.email
+        );
+        if (!target) continue;
+
+        const emailNorm = String(target.email || spec.email).toLowerCase().trim();
+        const newPassword = generateSecurePassword(14);
+        const hashed = await persistRotatedCredential(emailNorm, newPassword);
+
+        target.passwordConfigured = true;
+        target.passwordHash = hashed;
+        target.passwordMasked = '••••••••••••';
+        target.status = 'ativo';
+        target.lastLogin = 'Credencial renovada (pronta a usar)';
+
+        clientesRegistadosPelosFounders.forEach((u) => {
+          if (String(u.email || '').toLowerCase().trim() === emailNorm) {
+            u.password = hashed;
+          }
+        });
+        baseDadosClientes.forEach((c) => {
+          if (String(c.email || '').toLowerCase().trim() === emailNorm) {
+            c.password = hashed;
+            c.subscription_status = 'ativo';
+          }
+        });
+
+        if (!isEmailPasswordProviderDisabled && firebaseConfig && firebaseConfig.apiKey) {
+          await syncUserToFirebase(emailNorm, newPassword).catch(() => {});
+        }
+
+        provisioned.push({
+          id: target.id,
+          packageLabel: spec.packageLabel,
+          priceLabel: spec.priceLabel,
+          plan: target.plan,
+          name: target.name,
+          companyName: target.companyName,
+          email: emailNorm,
+          rawPassword: newPassword
+        });
+      }
+
+      saveRuntimeState();
+      notifyFounder(
+        'Credenciais dos 3 Pacotes Renovadas',
+        `Foram geradas novas credenciais PBKDF2-SHA256 para Starter, Profissional e Empresarial.`,
+        { userEmail: CREDENCIAIS_FOUNDERS.email, status: 'sucesso' }
+      );
+
+      return res.json({
+        sucesso: true,
+        packages: provisioned,
+        mensagem: 'Novas credenciais geradas e activadas para os 3 pacotes do sistema!'
+      });
+    } catch (err: any) {
+      console.error('[Provision Package Credentials Error]:', err);
+      return res.status(500).json({ erro: 'Não foi possível gerar novas credenciais para os pacotes.' });
+    }
   });
 
   // Gestão de Tokens de API: Listar (mascarado)
