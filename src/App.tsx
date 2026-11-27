@@ -68,6 +68,7 @@ import SupportTicketModal, {
   buildSupportWhatsAppUrl,
   CLICKPAY_SUPPORT
 } from './components/SupportTicketModal';
+import SystemQrModal from './components/SystemQrModal';
 import { 
   updateConfiguracaoFiscal, 
   updateEmpresa, 
@@ -199,6 +200,7 @@ export default function App() {
   const [financialSubTab, setFinancialSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>('conformidade');
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [supportModalOpen, setSupportModalOpen] = useState<boolean>(false);
+  const [qrModalOpen, setQrModalOpen] = useState<boolean>(false);
   const isLoginDeepLink = () => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
@@ -1147,6 +1149,7 @@ export default function App() {
           onResetDb={handleResetDb}
           onResetCosts={handleResetCosts}
           onOpenSupport={() => setSupportModalOpen(true)}
+          onOpenQr={() => setQrModalOpen(true)}
         />
 
         {/* Dynamic Panel Content Container */}
@@ -1195,6 +1198,7 @@ export default function App() {
                         setActiveTab(tab as any);
                         if (subTab) setFinancialSubTab(subTab as any);
                       }}
+                      onOpenQr={() => setQrModalOpen(true)}
                     />
                   )}
                   {activeTab === 'crm' && (
@@ -1396,6 +1400,11 @@ export default function App() {
         defaultEmpresa={company?.nome}
         defaultEmail={company?.email}
         defaultTelefone={company?.telefone}
+      />
+
+      <SystemQrModal
+        isOpen={qrModalOpen}
+        onClose={() => setQrModalOpen(false)}
       />
 
       {/* Simple Professional Footer */}

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import QRCode from 'qrcode';
 import {
   Download,
@@ -17,7 +17,7 @@ interface SystemQrModalProps {
   onClose: () => void;
 }
 
-function getLiveDomainUrl(): string {
+export function getLiveDomainUrl(): string {
   if (typeof window === 'undefined') {
     return 'https://clickpay.co.mz/';
   }
@@ -29,9 +29,148 @@ function getLiveDomainUrl(): string {
   return `${origin}${normalizedPath}`;
 }
 
-interface GeneratedQrAsset {
-  dataUrl: string;
-  svg: string;
+interface QrMatrixData {
+  size: number;
+  path: string;
+  data: Uint8Array | number[];
+}
+
+export function buildLiveQrMatrix(targetUrl: string): QrMatrixData | null {
+  try {
+    const createFn =
+      (QRCode as unknown as { create?: typeof QRCode.create; default?: { create?: typeof QRCode.create } })
+        ?.create ||
+      (QRCode as unknown as { default?: { create?: typeof QRCode.create } })?.default?.create;
+
+    if (!createFn) {
+      return null;
+    }
+
+    const qr = createFn(targetUrl, { errorCorrectionLevel: 'M' });
+    const size = qr.modules.size;
+    const data = qr.modules.data;
+    const parts: string[] = [];
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (data[y * size + x]) {
+          parts.push(`M${x},${y}h1v1h-1z`);
+        }
+      }
+    }
+
+    return {
+      size,
+      path: parts.join(''),
+      data
+    };
+  } catch (err) {
+    console.error('Erro ao construir matriz QR:', err);
+    return null;
+  }
+}
+
+export function buildQrSvgMarkup(matrix: QrMatrixData, quietZone = 2): string {
+  const total = matrix.size + quietZone * 2;
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" shape-rendering="crispEdges" role="img" aria-label="Código QR ClickPay">`,
+    `<rect width="${total}" height="${total}" fill="#FFFFFF"/>`,
+    `<g transform="translate(${quietZone},${quietZone})">`,
+    `<path d="${matrix.path}" fill="#0F172A"/>`,
+    `</g>`,
+    `</svg>`
+  ].join('');
+}
+
+export function downloadLiveQrPng(targetUrl?: string): void {
+  const url = targetUrl || getLiveDomainUrl();
+  const matrix = buildLiveQrMatrix(url);
+  if (!matrix || typeof document === 'undefined') return;
+
+  const quietZone = 2;
+  const totalModules = matrix.size + quietZone * 2;
+  const canvasSize = 1024;
+  const scale = Math.floor(canvasSize / totalModules);
+  const actualSize = totalModules * scale;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = actualSize;
+  canvas.height = actualSize;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, actualSize, actualSize);
+  ctx.fillStyle = '#0F172A';
+
+  for (let y = 0; y < matrix.size; y++) {
+    for (let x = 0; x < matrix.size; x++) {
+      if (matrix.data[y * matrix.size + x]) {
+        ctx.fillRect((x + quietZone) * scale, (y + quietZone) * scale, scale, scale);
+      }
+    }
+  }
+
+  const dataUrl = canvas.toDataURL('image/png');
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = 'clickpay-qr.png';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+export function downloadLiveQrSvg(targetUrl?: string): void {
+  const url = targetUrl || getLiveDomainUrl();
+  const matrix = buildLiveQrMatrix(url);
+  if (!matrix || typeof document === 'undefined') return;
+
+  const svgMarkup = buildQrSvgMarkup(matrix);
+  const blob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = 'clickpay-qr.svg';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
+}
+
+export function SystemQrCodeSvg({
+  className = 'w-56 h-56'
+}: {
+  className?: string;
+}) {
+  const liveDomainUrl = useMemo(() => getLiveDomainUrl(), []);
+  const matrix = useMemo(() => buildLiveQrMatrix(liveDomainUrl), [liveDomainUrl]);
+
+  if (!matrix) {
+    return (
+      <div className="text-xs text-slate-500 py-8 text-center">
+        Não foi possível gerar o código QR.
+      </div>
+    );
+  }
+
+  const quietZone = 2;
+  const total = matrix.size + quietZone * 2;
+
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox={`0 0 ${total} ${total}`}
+      shapeRendering="crispEdges"
+      role="img"
+      aria-label="Código QR ClickPay"
+      className={className}
+    >
+      <rect width={total} height={total} fill="#FFFFFF" />
+      <g transform={`translate(${quietZone},${quietZone})`}>
+        <path d={matrix.path} fill="#0F172A" />
+      </g>
+    </svg>
+  );
 }
 
 export default function SystemQrModal({
@@ -39,73 +178,11 @@ export default function SystemQrModal({
   onClose
 }: SystemQrModalProps) {
   const liveDomainUrl = useMemo(() => getLiveDomainUrl(), [isOpen]);
-  const [qrAsset, setQrAsset] = useState<GeneratedQrAsset | null>(null);
-
-  useEffect(() => {
-    if (!isOpen || !liveDomainUrl) {
-      setQrAsset(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    const generateQr = async () => {
-      try {
-        const [png, svg] = await Promise.all([
-          QRCode.toDataURL(liveDomainUrl, {
-            width: 1024,
-            margin: 2,
-            errorCorrectionLevel: 'M',
-            color: { dark: '#0F172A', light: '#FFFFFF' }
-          }),
-          QRCode.toString(liveDomainUrl, {
-            type: 'svg',
-            margin: 2,
-            errorCorrectionLevel: 'M',
-            color: { dark: '#0F172A', light: '#FFFFFF' }
-          })
-        ]);
-
-        if (!cancelled) {
-          setQrAsset({ dataUrl: png, svg });
-        }
-      } catch (err) {
-        console.error('Erro ao gerar código QR:', err);
-      }
-    };
-
-    generateQr();
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, liveDomainUrl]);
+  const hasQr = useMemo(() => Boolean(buildLiveQrMatrix(liveDomainUrl)), [liveDomainUrl]);
 
   if (!isOpen) {
     return null;
   }
-
-  const handleDownloadPng = () => {
-    if (!qrAsset?.dataUrl) return;
-    const link = document.createElement('a');
-    link.href = qrAsset.dataUrl;
-    link.download = 'clickpay-qr.png';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDownloadSvg = () => {
-    if (!qrAsset?.svg) return;
-    const blob = new Blob([qrAsset.svg], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'clickpay-qr.svg';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <>
@@ -139,22 +216,16 @@ export default function SystemQrModal({
           {/* Body — Apenas QR e Opções de Baixar */}
           <div className="p-6 space-y-5">
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 flex items-center justify-center min-h-[268px]">
-              {qrAsset ? (
-                <img
-                  src={qrAsset.dataUrl}
-                  alt="Código QR ClickPay"
-                  className="w-56 h-56 object-contain rounded-lg bg-white p-2.5 border border-slate-200"
-                />
-              ) : (
-                <div className="text-xs text-slate-400">A gerar código QR...</div>
-              )}
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                <SystemQrCodeSvg className="w-56 h-56 block" />
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={!qrAsset}
-                onClick={handleDownloadPng}
+                disabled={!hasQr}
+                onClick={() => downloadLiveQrPng(liveDomainUrl)}
                 className="px-3 py-2.5 bg-blue-900 hover:bg-blue-950 disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <Download size={14} />
@@ -162,8 +233,8 @@ export default function SystemQrModal({
               </button>
               <button
                 type="button"
-                disabled={!qrAsset}
-                onClick={handleDownloadSvg}
+                disabled={!hasQr}
+                onClick={() => downloadLiveQrSvg(liveDomainUrl)}
                 className="px-3 py-2.5 bg-white hover:bg-slate-50 disabled:opacity-40 text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
                 <Download size={14} />
@@ -171,7 +242,7 @@ export default function SystemQrModal({
               </button>
               <button
                 type="button"
-                disabled={!qrAsset}
+                disabled={!hasQr}
                 onClick={() => window.print()}
                 className="px-3 py-2.5 bg-slate-900 hover:bg-slate-950 disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
               >
@@ -211,13 +282,9 @@ export default function SystemQrModal({
               Aponte a câmara do telemóvel para aceder
             </h2>
 
-            {qrAsset && (
-              <img
-                src={qrAsset.dataUrl}
-                alt="Código QR ClickPay"
-                className="w-72 h-72 mx-auto object-contain border border-slate-200 rounded-xl p-3 bg-white"
-              />
-            )}
+            <div className="inline-block border border-slate-200 rounded-xl p-3 bg-white">
+              <SystemQrCodeSvg className="w-72 h-72 block" />
+            </div>
           </div>
 
           <div className="border-t border-slate-200 pt-4 flex items-center justify-between text-[11px] text-slate-500">

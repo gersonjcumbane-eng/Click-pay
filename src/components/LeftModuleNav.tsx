@@ -19,7 +19,8 @@ import {
   KeyRound,
   MessageCircle,
   Building2,
-  ShieldCheck
+  ShieldCheck,
+  QrCode
 } from 'lucide-react';
 import { CompanyData } from '../types';
 import { getFormattedCurrentDateLong } from '../db_tax';
@@ -40,6 +41,7 @@ export interface LeftModuleNavProps {
   onResetDb?: () => void;
   onResetCosts?: () => void;
   onOpenSupport?: () => void;
+  onOpenQr?: () => void;
 }
 
 export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
@@ -55,7 +57,8 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
   onLogout,
   onResetDb,
   onResetCosts,
-  onOpenSupport
+  onOpenSupport,
+  onOpenQr
 }) => {
   const isFounder = isFounderUser(userRole);
   const subPlan = company?.subscription_plan || 'Bronze';
@@ -613,6 +616,19 @@ export const LeftModuleNav: React.FC<LeftModuleNavProps> = ({
 
       {/* Session Footer */}
       <div className="pt-3 border-t border-slate-200 space-y-2" id="logout-isolated-red-window">
+        {onOpenQr && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenQr();
+              onCloseMobile();
+            }}
+            className="w-full py-2 px-3 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 font-semibold text-xs rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <QrCode size={14} className="text-blue-900" />
+            <span>Código QR</span>
+          </button>
+        )}
         {onOpenSupport && (
           <button
             type="button"

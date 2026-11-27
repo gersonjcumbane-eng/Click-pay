@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Building2,
   Check,
+  Download,
   Eye,
   Mail,
   MapPin,
@@ -22,7 +23,7 @@ import SupportTicketModal, {
   buildSupportWhatsAppUrl,
   CLICKPAY_SUPPORT
 } from './SupportTicketModal';
-import SystemQrModal from './SystemQrModal';
+import SystemQrModal, { SystemQrCodeSvg, downloadLiveQrPng } from './SystemQrModal';
 import { BillingCycle, CLICKPAY_PLANS, formatMzn } from '../lib/pricing';
 
 interface LandingPageProps {
@@ -386,7 +387,7 @@ export default function LandingPage({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Telemóvel & WhatsApp */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
               <div className="flex items-center gap-2.5 text-slate-950">
@@ -461,6 +462,52 @@ export default function LandingPage({
               <div className="space-y-1 text-sm text-slate-700 leading-relaxed">
                 <p className="font-medium text-slate-900">Bairro São Dâmaso, Machava Q4</p>
                 <p className="text-xs text-slate-500">Matola · Moçambique</p>
+              </div>
+            </div>
+
+            {/* Código QR Visível Directamente */}
+            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2 text-slate-950">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center border border-blue-100 shrink-0">
+                    <QrCode size={16} />
+                  </div>
+                  <span className="text-xs font-semibold">Código QR</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQrModalOpen(true)}
+                  className="text-[11px] font-semibold text-blue-900 hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  Ampliar
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setQrModalOpen(true)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 shrink-0 cursor-pointer hover:border-blue-900 transition-colors"
+                  aria-label="Ampliar Código QR ClickPay"
+                >
+                  <SystemQrCodeSvg className="w-20 h-20 block" />
+                </button>
+                <div className="space-y-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => downloadLiveQrPng()}
+                    className="w-full px-3 py-1.5 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-[11px] font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <Download size={12} />
+                    <span>Baixar PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQrModalOpen(true)}
+                    className="w-full px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-[11px] font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    SVG / Imprimir
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.cjs": {
+    "api/index.js": {
       "maxDuration": 30,
       "includeFiles": "{firebase-applet-config.json,public/**,api/_server.cjs,node_modules/pdfkit/js/data/**}"
     }

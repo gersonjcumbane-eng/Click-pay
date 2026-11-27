@@ -23,6 +23,7 @@ import {
   Wallet,
   X,
   Printer,
+  QrCode,
   Trash2,
   Lock
 } from 'lucide-react';
@@ -77,6 +78,7 @@ interface DashboardProps {
   onDeleteLog?: (id: string) => Promise<void>;
   userRole?: string | null;
   onNavigateTab?: (tab: string, subTab?: string) => void;
+  onOpenQr?: () => void;
 }
 
 function formatMzn(value: number): string {
@@ -95,7 +97,8 @@ export default function Dashboard({
   selectedPeriod,
   onDeleteLog,
   userRole,
-  onNavigateTab
+  onNavigateTab,
+  onOpenQr
 }: DashboardProps) {
   const { showError } = useToast();
   const periodosDisponiveis = getAvailablePeriods();
@@ -573,6 +576,18 @@ export default function Dashboard({
             <RefreshCw size={13} />
             <span>Atualizar</span>
           </button>
+
+          {onOpenQr && (
+            <button
+              type="button"
+              onClick={onOpenQr}
+              className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Abrir Código QR do sistema"
+            >
+              <QrCode size={13} className="text-blue-900" />
+              <span>Código QR</span>
+            </button>
+          )}
         </div>
       </div>
 
