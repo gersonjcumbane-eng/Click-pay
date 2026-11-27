@@ -520,13 +520,13 @@ export default function OnboardingWizard({ onCancel, onEnterLogin, onSuccess }: 
       localStorage.setItem('paytek_sub_plan', mappedPlan);
       localStorage.setItem('paytek_sub_expire', u.next_billing_date || '');
       localStorage.setItem('paytek_company_name', u.nome_empresa || nomeEmpresa);
-      localStorage.setItem('paytek_payments_locked', 'true');
+      localStorage.setItem('paytek_payments_locked', 'false');
 
       onSuccess({
         ...u,
         subscription_status: 'ativo',
         subscription_plan: mappedPlan,
-        pagamentos_bloqueados: true
+        pagamentos_bloqueados: false
       });
     } catch {
       setActivationError('Erro ao validar o código de ativação. Tente novamente.');

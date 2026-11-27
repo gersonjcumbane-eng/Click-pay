@@ -125,7 +125,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
     const defaultExp = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     localStorage.setItem('paytek_sub_expire', usuario?.next_billing_date || defaultExp);
     localStorage.setItem('paytek_company_name', usuario?.nome_empresa || '');
-    localStorage.setItem('paytek_payments_locked', 'true');
+    localStorage.setItem('paytek_payments_locked', 'false');
   };
 
   const isJsonResponse = (res: Response | null) =>

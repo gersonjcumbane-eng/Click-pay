@@ -207,7 +207,7 @@ Cláusula 3: Em caso de atraso superior a 15 dias no pagamento da mensalidade, a
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
               Inspirado no modelo <span className="font-bold text-white">BRAIN da Bujeti (YC)</span> e 100% calibrado para a legislação tributária de Moçambique: 
-              Recolha e OCR de facturas com IVA (16%), gestão documental de facturação, vigilância de contratos e políticas de despesas (pagamentos online bloqueados).
+              Recolha e OCR de facturas com IVA (16%), gestão documental de facturação, vigilância de contratos, políticas de despesas e pagamentos integrados.
             </p>
           </div>
 

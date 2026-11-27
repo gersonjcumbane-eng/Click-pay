@@ -622,7 +622,7 @@ export default function EmployeeDirectory({
 
       setCalcResult({
         sucesso: true,
-        mensagem: `Recibo calculado para ${emp.nome} (pagamentos bloqueados · apenas emissão documental).`,
+        mensagem: `Recibo calculado para ${emp.nome}.`,
         detalhesSalario: calc,
         linkFicheiro: `/download/recibo_${emp.id}_${selectedPeriod.replace(/\s+/g, '_')}.pdf`
       });
@@ -633,7 +633,7 @@ export default function EmployeeDirectory({
       calc.periodo = selectedPeriod;
       setCalcResult({
         sucesso: true,
-        mensagem: `Recibo calculado localmente para ${emp.nome} (pagamentos bloqueados).`,
+        mensagem: `Recibo calculado localmente para ${emp.nome}.`,
         detalhesSalario: calc,
         linkFicheiro: `/download/recibo_${emp.id}_${selectedPeriod.replace(/\s+/g, '_')}.pdf`
       });
@@ -1863,7 +1863,7 @@ export default function EmployeeDirectory({
                             </div>
                           </div>
 
-                          {/* Col 3: Cálculo Líquido & Emissão Documental (Pagamentos Bloqueados) */}
+                          {/* Col 3: Cálculo Líquido & Emissão Documental */}
                           <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-4">
                             <div>
                               <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">

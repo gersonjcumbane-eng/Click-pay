@@ -105,9 +105,9 @@ export async function createApp(options?: { skipStatic?: boolean }) {
   const PORT = Number(process.env.PORT) || 3000;
   const isServerless = Boolean(process.env.VERCEL || options?.skipStatic);
 
-  const PAYMENTS_MODULE_LOCKED = true;
+  const PAYMENTS_MODULE_LOCKED = false;
   const PAYMENTS_LOCKED_MESSAGE =
-    'Pagamentos bloqueados no sistema. Apenas o módulo de Facturação e gestão documental está ativo para todas as contas.';
+    'Módulo de pagamentos disponível no sistema.';
   function sendPaymentsBlocked(res: Response, customMsg?: string) {
     return res.status(403).json({
       sucesso: false,
@@ -5285,7 +5285,7 @@ export async function createApp(options?: { skipStatic?: boolean }) {
       return res.json({
         sucesso: true,
         pagamentos_bloqueados: PAYMENTS_MODULE_LOCKED,
-        mensagem: `Recibo calculado e PDF gerado para ${dadosFuncionario.nome} (pagamentos bloqueados · apenas emissão documental).`,
+        mensagem: `Recibo calculado e PDF gerado para ${dadosFuncionario.nome}.`,
         detalhesSalario: salarioCalculado,
         linkFicheiro: `/download/${nomeFicheiro}`
       });

@@ -105,9 +105,9 @@ export default function LandingPage({
             </h1>
 
             <p className="text-[15px] sm:text-base text-slate-600 leading-relaxed max-w-2xl">
-              Emita faturas A4 em Meticais, calcule salários com IRPS e INSS e gerencie a sua
-              contabilidade numa plataforma concebida para empresas em Moçambique. As operações de
-              pagamento encontram-se bloqueadas; o sistema opera em modo exclusivo de facturação.
+              Emita faturas A4 em Meticais, calcule salários com IRPS e INSS, execute pagamentos via
+              carteira móvel e gerencie a sua contabilidade numa plataforma concebida para empresas
+              em Moçambique.
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -150,7 +150,7 @@ export default function LandingPage({
               Escolha o plano adequado à sua empresa
             </h2>
             <p className="text-sm text-slate-600">
-              Preços competitivos em Meticais para o mercado moçambicano. Activação dedicada à Facturação e Gestão (módulos de pagamento bloqueados para novos cadastros e contas ativas).
+              Preços competitivos em Meticais para o mercado moçambicano. Activação completa de Facturação, Gestão Salarial e Módulos de Pagamento após validação.
             </p>
           </div>
 

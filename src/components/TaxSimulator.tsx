@@ -193,7 +193,7 @@ export default function TaxSimulator() {
                   {res.salarioLiquido.toLocaleString('pt-MZ')} MT
                 </span>
                 <span className="text-[10px] text-slate-400 font-medium block">
-                  Cálculo líquido pronto para recibo A4 (pagamentos móveis bloqueados)
+                  Cálculo líquido pronto para recibo A4 e liquidação salarial
                 </span>
               </div>
             </div>

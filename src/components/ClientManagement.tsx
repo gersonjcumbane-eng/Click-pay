@@ -1068,7 +1068,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
             Painel do Gestor de Contas de Salários
           </h2>
           <p className="text-xs text-slate-500 leading-relaxed max-w-2xl">
-            Gerencie múltiplos clientes de processamento de salários de forma centralizada. Alterne o contexto do ERP em tempo real para gerir colaboradores, gerar o SISSMO e emitir facturação individualmente (pagamentos directos bloqueados).
+            Gerencie múltiplos clientes de processamento de salários de forma centralizada. Alterne o contexto do ERP em tempo real para gerir colaboradores, gerar o SISSMO, emitir facturação e liquidar pagamentos individualmente.
           </p>
         </div>
 
@@ -2089,7 +2089,7 @@ export default function ClientManagement({ onCompanySwitched, userRole }: Client
                         <p className="font-bold text-slate-900 uppercase tracking-wider text-[8.5px]">Condições Gerais &amp; Enquadramento</p>
                         <p><b>Regime Fiscal:</b> {isExempt ? 'Isento de IVA' : 'IVA Normal (16%) — Moçambique'}</p>
                         <p><b>Vencimento:</b> Factura para conferência e registo contabilístico até à data limite.</p>
-                        <p><b>Modo Activo:</b> Apenas Facturação (pagamentos online via M-Pesa / e-Mola bloqueados no portal).</p>
+                        <p><b>Modo Activo:</b> Facturação &amp; Pagamentos Integrados (M-Pesa / e-Mola / Transferência Bancária).</p>
                       </div>
 
                       <div className="border border-slate-900 p-3 bg-white">
