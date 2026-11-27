@@ -13,6 +13,7 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  QrCode,
   ShieldCheck,
   Target
 } from 'lucide-react';
@@ -21,6 +22,7 @@ import SupportTicketModal, {
   buildSupportWhatsAppUrl,
   CLICKPAY_SUPPORT
 } from './SupportTicketModal';
+import SystemQrModal from './SystemQrModal';
 import { BillingCycle, CLICKPAY_PLANS, formatMzn } from '../lib/pricing';
 
 interface LandingPageProps {
@@ -35,6 +37,7 @@ export default function LandingPage({
   onEnterPlanDemo
 }: LandingPageProps) {
   const [supportModalOpen, setSupportModalOpen] = useState(false);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('mensal');
 
   return (
@@ -123,6 +126,15 @@ export default function LandingPage({
                 className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-lg text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 Aceder ao Painel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQrModalOpen(true)}
+                className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-[13px] font-medium transition-colors inline-flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <QrCode size={15} className="text-blue-900" />
+                <span>Código QR</span>
               </button>
             </div>
           </div>
@@ -459,6 +471,11 @@ export default function LandingPage({
         isOpen={supportModalOpen}
         onClose={() => setSupportModalOpen(false)}
         canalOrigem="Landing Page ClickPay"
+      />
+
+      <SystemQrModal
+        isOpen={qrModalOpen}
+        onClose={() => setQrModalOpen(false)}
       />
 
       {/* Quiet Footer */}

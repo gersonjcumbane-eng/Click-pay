@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, MessageCircle, Eye, EyeOff, X } from 'lucide-react';
+import { ShieldCheck, Lock, Mail, ChevronRight, AlertCircle, KeyRound, ArrowLeft, RefreshCw, CheckCircle2, MessageCircle, Eye, EyeOff, X, QrCode } from 'lucide-react';
 import {
   auth,
   authenticateClientInFirebase,
@@ -21,6 +21,7 @@ import SupportTicketModal, {
   buildSupportWhatsAppUrl,
   CLICKPAY_SUPPORT
 } from './SupportTicketModal';
+import SystemQrModal from './SystemQrModal';
 import { isFounderEmail } from '../lib/authSession';
 
 interface LoginProps {
@@ -50,6 +51,7 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [supportModalOpen, setSupportModalOpen] = useState(false);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
 
@@ -1199,6 +1201,14 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
               >
                 Abrir Ticket
               </button>
+              <button
+                type="button"
+                onClick={() => setQrModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100/80 text-blue-900 text-[11px] font-semibold cursor-pointer transition-colors"
+              >
+                <QrCode size={13} />
+                <span>Código QR</span>
+              </button>
             </div>
           </div>
         </motion.div>
@@ -1210,6 +1220,11 @@ export default function Login({ selectedPlan, onSelectPlan, onLoginSuccess, onEn
         canalOrigem="Página de Login ClickPay"
         defaultEmail={email}
         defaultAssunto="Recuperação de Acesso / Suporte Técnico"
+      />
+
+      <SystemQrModal
+        isOpen={qrModalOpen}
+        onClose={() => setQrModalOpen(false)}
       />
 
       {resetModalOpen && (

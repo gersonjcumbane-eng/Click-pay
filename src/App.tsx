@@ -199,20 +199,55 @@ export default function App() {
   const [financialSubTab, setFinancialSubTab] = useState<'caixa' | 'compras' | 'vendas' | 'iva' | 'relatorios' | 'conformidade' | 'plano_contas'>('conformidade');
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const [supportModalOpen, setSupportModalOpen] = useState<boolean>(false);
-  const [showLogin, setShowLogin] = useState<boolean>(false);
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+  const isLoginDeepLink = () => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get('login') === 'true' ||
+      params.get('tela') === 'login' ||
+      window.location.hash === '#login'
+    );
+  };
+
+  const isRegisterDeepLink = () => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get('cadastro') === 'true' ||
+      params.get('tela') === 'register' ||
+      window.location.hash === '#cadastro'
+    );
+  };
+
+  const [showLogin, setShowLogin] = useState<boolean>(() => isLoginDeepLink());
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(
+    () => !isLoginDeepLink() && isRegisterDeepLink()
+  );
   const [selectedPlan, setSelectedPlan] = useState<'Bronze' | 'Silver' | 'Gold' | null>(null);
   // Ao pesquisar ou abrir o site pela primeira vez, sempre exibe a Landing Page primeiro (a menos que já esteja explicitamente logado)
   const [authenticated, setAuthenticated] = useState<boolean>(() => {
-    // Se a URL tiver ?login=true ou #login abre o login, caso contrário quem acessa o site sempre vê a Landing Page primeiro
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('login') === 'true' || window.location.hash === '#login') {
-        return false;
-      }
+    // Se a URL tiver ?login=true, #login ou ?cadastro=true abre directamente a respectiva tela
+    if (isLoginDeepLink() || isRegisterDeepLink()) {
+      return false;
     }
     return localStorage.getItem('paytek_auth') === 'true';
   });
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      if (window.location.hash === '#login') {
+        setAuthenticated(false);
+        setShowOnboarding(false);
+        setShowLogin(true);
+      } else if (window.location.hash === '#cadastro') {
+        setAuthenticated(false);
+        setShowLogin(false);
+        setShowOnboarding(true);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
   const [userRole, setUserRole] = useState<string | null>(() => {
     return localStorage.getItem('paytek_role');
   });
@@ -903,6 +938,15 @@ export default function App() {
               onClick={() => {
                 setShowLogin(false);
                 setSelectedPlan(null);
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('login');
+                  url.searchParams.delete('tela');
+                  if (url.hash === '#login') {
+                    url.hash = '';
+                  }
+                  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+                }
               }}
               className="px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 hover:text-slate-900 rounded-[8px] font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
             >

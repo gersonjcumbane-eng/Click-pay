@@ -28,12 +28,14 @@ import {
   Trash2,
   AlertTriangle,
   Lock,
-  KeyRound
+  KeyRound,
+  QrCode
 } from 'lucide-react';
 import { CompanyData, ConfigFiscal, EscalaoFiscalMoz } from '../types';
 import { matrizFiscaisMoçambique, employees as defaultEmployees, paymentLogs as defaultLogs } from '../db_tax';
 import { useToast } from '../context/ToastContext';
 import EnvironmentMasking from './EnvironmentMasking';
+import SystemQrModal from './SystemQrModal';
 import { db, doc, setDoc, collection, onSnapshot } from '../lib/firebase';
 import { scanFileForMalware } from '../lib/security';
 import { getAuthHeaders, isFounderUser } from '../lib/authSession';
@@ -66,6 +68,7 @@ export default function CorporateSettings({
   const userRole = propUserRole || localUserRole;
   const isSuperAdmin = isFounderUser(userRole);
   const isClient = !isSuperAdmin;
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
   // Company state
   const [nome, setNome] = useState(company.nome || "Sua Empresa Lda");
@@ -594,12 +597,27 @@ export default function CorporateSettings({
 
   return (
     <div id="settings_panel" className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-slate-900">Configurações Gerais & Perfil Fiscal</h2>
-        <p className="text-xs text-slate-500">
-          Modifique o cadastro institucional da sua empresa, configure o regime tributário e ajuste parâmetros de retenção para Moçambique.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Configurações Gerais &amp; Perfil Fiscal</h2>
+          <p className="text-xs text-slate-500">
+            Modifique o cadastro institucional da sua empresa, configure o regime tributário e ajuste parâmetros de retenção para Moçambique.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setQrModalOpen(true)}
+          className="inline-flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap self-start sm:self-auto"
+        >
+          <QrCode size={15} className="text-blue-900" />
+          <span>Código QR de Acesso</span>
+        </button>
       </div>
+
+      <SystemQrModal
+        isOpen={qrModalOpen}
+        onClose={() => setQrModalOpen(false)}
+      />
 
       {/* SELECIONAR EMPRESA / SWITCH COMPANY (Exclusivo Super Admin) */}
       {isSuperAdmin && availableCompanies && availableCompanies.length > 1 && onSwitchCompany && (
